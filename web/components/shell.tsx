@@ -8,7 +8,11 @@ import { useMeta, useServerEvents } from "./providers";
 import { Icon, cx } from "./ui";
 
 const NAV = [
+  { href: "/command/", label: "Command", icon: "sparkle", match: (p: string) => p.startsWith("/command") },
+  { href: "/board/", label: "Board", icon: "kanban", match: (p: string) => p.startsWith("/board") || p.startsWith("/tasks") },
+  { href: "/agents/", label: "Agents", icon: "users", match: (p: string) => p.startsWith("/agents") },
   { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts") },
+  { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
   { href: "/pipelines/", label: "Pipelines", icon: "flow", match: (p: string) => p.startsWith("/pipelines") },
   { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },

@@ -45,3 +45,5 @@ type ValidationError struct{ Msg string }
 func (e *ValidationError) Error() string { return e.Msg }
 
 func invalid(msg string) error { return &ValidationError{Msg: msg} }
+
+func asPg(err error, target **pgconn.PgError) bool { return errors.As(err, target) }

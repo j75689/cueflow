@@ -51,12 +51,23 @@ export interface Platform {
   requires_media: boolean;
 }
 
+export interface AgentCapability {
+  id: string;
+  name: string;
+  description: string;
+  tools: string[];
+}
+
 export interface Meta {
   version: string;
   statuses: PostStatus[];
   transitions: Record<string, PostStatus[]>;
   platforms: Platform[];
   connector_types: ConnectorSpec[];
+  agent_capabilities?: AgentCapability[];
+  agent_roles?: AgentRole[];
+  task_statuses?: TaskStatus[];
+  task_priorities?: TaskPriority[];
 }
 
 export interface SourceRef {
@@ -75,6 +86,7 @@ export interface SourceContext {
 
 export interface Post {
   id: string;
+  task_id?: string | null;
   group_id: string | null;
   pipeline_id: string | null;
   run_id: string | null;
@@ -213,3 +225,162 @@ export interface Stats {
   pipelines: { total: number; active: number };
   last_run: PipelineRun | null;
 }
+
+/* ------------------------------ Agents & tasks ----------------------------- */
+
+export type AgentRole = "manager" | "researcher" | "writer" | "editor" | "custom";
+
+export interface Agent {
+  id: string;
+  name: string;
+  slug: string;
+  avatar: string;
+  role: AgentRole;
+  description: string;
+  instructions: string;
+  capabilities: string[];
+  llm_connector_id: string | null;
+  search_connector_id: string | null;
+  source_connector_ids: string[];
+  language: string;
+  platforms: string[];
+  max_turns: number;
+  is_active: boolean;
+  stats?: { open_tasks: number; running: number } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AgentInput = Omit<Agent, "id" | "stats" | "created_at" | "updated_at">;
+
+export interface AgentMemory {
+  id: string;
+  agent_id: string;
+  content: string;
+  created_at: string;
+}
+
+export type TaskStatus =
+  | "BACKLOG"
+  | "TODO"
+  | "IN_PROGRESS"
+  | "BLOCKED"
+  | "WAITING_HUMAN"
+  | "REVIEW"
+  | "DONE"
+  | "CANCELED";
+
+export type TaskPriority = "low" | "normal" | "high" | "urgent";
+
+export interface AgentRef {
+  id: string;
+  name: string;
+  slug: string;
+  avatar: string;
+}
+
+export interface Task {
+  id: string;
+  number: number;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  labels: string[] | null;
+  assignee_agent_id: string | null;
+  assignee: AgentRef | null;
+  created_by: "human" | "agent";
+  creator_agent_id: string | null;
+  parent_id: string | null;
+  subtask_counts: { total: number; done: number } | null;
+  result: string;
+  due_at: string | null;
+  position: number;
+  running: boolean;
+  attempts: number;
+  schedule_id: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface TaskPostRef {
+  id: string;
+  title: string;
+  status: PostStatus;
+  platforms: string[];
+}
+
+export interface TaskDetail extends Task {
+  subtasks: Task[] | null;
+  parent: Task | null;
+  posts: TaskPostRef[] | null;
+}
+
+export interface TaskCreate {
+  title: string;
+  description?: string;
+  assignee_agent_id?: string | null;
+  priority?: TaskPriority;
+  labels?: string[];
+  due_at?: string | null;
+  status?: TaskStatus;
+  parent_id?: string | null;
+}
+
+export type TaskPatch = Partial<
+  Pick<Task, "title" | "description" | "status" | "priority" | "labels" | "assignee_agent_id" | "due_at" | "position">
+>;
+
+export type TaskMessageKind = "message" | "tool_call" | "tool_result" | "status" | "question" | "result";
+
+export interface TaskMessage {
+  id: string;
+  task_id: string;
+  seq: number;
+  author_type: "human" | "agent" | "system" | "tool";
+  agent_id: string | null;
+  agent: { name: string; avatar: string; slug: string } | null;
+  kind: TaskMessageKind;
+  content: string;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AgentRun {
+  id: string;
+  task_id: string;
+  agent_id: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
+  turns: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  cron_expr: string;
+  timezone: string;
+  is_active: boolean;
+  assignee_agent_id: string | null;
+  task_title: string;
+  task_description: string;
+  priority: TaskPriority;
+  created_by: "human" | "agent";
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ScheduleInput = Pick<
+  Schedule,
+  "name" | "cron_expr" | "timezone" | "is_active" | "assignee_agent_id" | "task_title" | "task_description" | "priority"
+>;

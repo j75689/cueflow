@@ -322,3 +322,7 @@ func cleanTags(tags []string, max int) []string {
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
+
+// Normalize applies the same cleanup and length enforcement used for pipeline drafts
+// (thread splitting, hashtag caps, markdown stripping) to drafts produced elsewhere.
+func Normalize(drafts []Draft, platforms []string) []Draft { return normalizeDrafts(drafts, platforms) }

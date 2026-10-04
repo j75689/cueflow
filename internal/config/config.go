@@ -28,20 +28,26 @@ type Config struct {
 	PublishTimeout   time.Duration
 	LogLevel         string
 	DisableScheduler bool
+	// AgentConcurrency is how many agent tasks may run at once.
+	AgentConcurrency int
+	// AgentAllowPrivateURLs lets agents' read_url reach private/LAN addresses (off by default).
+	AgentAllowPrivateURLs bool
 }
 
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:             env("CUEFLOW_ADDR", "127.0.0.1:3000"),
-		DatabaseURL:      env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
-		AdminToken:       os.Getenv("CUEFLOW_ADMIN_TOKEN"),
-		PublicURL:        env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
-		DigestCron:       os.Getenv("CUEFLOW_DIGEST_CRON"),
-		LogLevel:         env("CUEFLOW_LOG_LEVEL", "info"),
-		DispatchEvery:    envDuration("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second),
-		DispatchLease:    envDuration("CUEFLOW_DISPATCH_LEASE", 5*time.Minute),
-		PublishTimeout:   envDuration("CUEFLOW_PUBLISH_TIMEOUT", 2*time.Minute),
-		DisableScheduler: envBool("CUEFLOW_DISABLE_SCHEDULER"),
+		Addr:                  env("CUEFLOW_ADDR", "127.0.0.1:3000"),
+		DatabaseURL:           env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
+		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
+		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
+		DigestCron:            os.Getenv("CUEFLOW_DIGEST_CRON"),
+		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),
+		DispatchEvery:         envDuration("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second),
+		DispatchLease:         envDuration("CUEFLOW_DISPATCH_LEASE", 5*time.Minute),
+		PublishTimeout:        envDuration("CUEFLOW_PUBLISH_TIMEOUT", 2*time.Minute),
+		DisableScheduler:      envBool("CUEFLOW_DISABLE_SCHEDULER"),
+		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
+		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
 	key, err := ParseSecretKey(os.Getenv("CUEFLOW_SECRET_KEY"))
 	if err != nil {
@@ -88,4 +94,11 @@ func envDuration(k string, def time.Duration) time.Duration {
 func envBool(k string) bool {
 	b, _ := strconv.ParseBool(os.Getenv(k))
 	return b
+}
+
+func envInt(k string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(k)); err == nil && v > 0 {
+		return v
+	}
+	return def
 }

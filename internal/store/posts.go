@@ -14,7 +14,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 )
 
-const postColumns = `id, group_id, pipeline_id, run_id, publisher_connector_id, title, content, thread_parts,
+const postColumns = `id, group_id, pipeline_id, run_id, task_id, publisher_connector_id, title, content, thread_parts,
 	hashtags, image_prompt, platforms, media_urls, status, review_note, source_context, error_message,
 	external_post_ids, attempts, version, scheduled_at, published_at, created_at, updated_at`
 
@@ -22,7 +22,7 @@ func scanPost(row pgx.Row) (*domain.Post, error) {
 	var p domain.Post
 	var status string
 	var ext []byte
-	if err := row.Scan(&p.ID, &p.GroupID, &p.PipelineID, &p.RunID, &p.PublisherConnectorID, &p.Title, &p.Content,
+	if err := row.Scan(&p.ID, &p.GroupID, &p.PipelineID, &p.RunID, &p.TaskID, &p.PublisherConnectorID, &p.Title, &p.Content,
 		&p.ThreadParts, &p.Hashtags, &p.ImagePrompt, &p.Platforms, &p.MediaURLs, &status, &p.ReviewNote,
 		&p.SourceContext, &p.ErrorMessage, &ext, &p.Attempts, &p.Version, &p.ScheduledAt, &p.PublishedAt,
 		&p.CreatedAt, &p.UpdatedAt); err != nil {
@@ -128,6 +128,7 @@ type NewPost struct {
 	GroupID              *uuid.UUID
 	PipelineID           *uuid.UUID
 	RunID                *uuid.UUID
+	TaskID               *uuid.UUID
 	PublisherConnectorID *uuid.UUID
 	Title                string
 	Content              string
@@ -159,10 +160,10 @@ func (s *Store) CreatePost(ctx context.Context, in NewPost, actor domain.Actor, 
 	var out *domain.Post
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		p, err := scanPost(tx.QueryRow(ctx, `INSERT INTO posts (group_id, pipeline_id, run_id, publisher_connector_id,
-			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING `+postColumns,
+			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at, task_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+postColumns,
 			in.GroupID, in.PipelineID, in.RunID, in.PublisherConnectorID, truncate(in.Title, 255), in.Content,
-			nonNil(in.ThreadParts), cleanTags(in.Hashtags), in.ImagePrompt, in.Platforms, nonNil(in.MediaURLs), srcCtx, in.ScheduledAt))
+			nonNil(in.ThreadParts), cleanTags(in.Hashtags), in.ImagePrompt, in.Platforms, nonNil(in.MediaURLs), srcCtx, in.ScheduledAt, in.TaskID))
 		if err != nil {
 			return err
 		}
@@ -199,6 +200,11 @@ type PostPatch struct {
 
 // UpdatePost applies an edit with optimistic locking and records the diff in the audit log.
 func (s *Store) UpdatePost(ctx context.Context, id uuid.UUID, version int, patch PostPatch) (*domain.Post, error) {
+	return s.UpdatePostAs(ctx, id, version, patch, domain.ActorReviewer, "")
+}
+
+// UpdatePostAs is UpdatePost with an explicit actor (agents revising drafts are audited as such).
+func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, patch PostPatch, actor domain.Actor, note string) (*domain.Post, error) {
 	var out *domain.Post
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		cur, err := getPostForUpdate(ctx, tx, id)
@@ -263,7 +269,7 @@ func (s *Store) UpdatePost(ctx context.Context, id uuid.UUID, version int, patch
 		if err != nil {
 			return err
 		}
-		return insertAudit(ctx, tx, id, domain.ActionEdited, domain.ActorReviewer, cur.Status, cur.Status, "", diff)
+		return insertAudit(ctx, tx, id, domain.ActionEdited, actor, cur.Status, cur.Status, note, diff)
 	})
 	return out, err
 }

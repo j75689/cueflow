@@ -16,6 +16,35 @@ over the Model Context Protocol (MCP).
                          Postiz ◀── MCP ── Dispatch worker ◀── APPROVED → QUEUED ─▶ PUBLISHED / FAILED
 ```
 
+## Agent team (Command · Board · Agents)
+
+CueFlow ships with a small team of agents you can talk to in plain language - like a chat bot that
+actually does the work, but on a board you can watch:
+
+- **Command**: tell the team what you want, e.g. 「每天早上 8 點整理 AI 新聞並寫成 Threads 草稿」. The
+  manager agent (🧭 總管) works out the plan, delegates subtasks to teammates, sets up recurring
+  schedules, and reports back.
+- **Board**: every request is a task card - Backlog → To do → In progress → Waiting → Review → Done.
+  Drag a card to *To do* with an agent assigned and it starts working. Each task has a thread: the
+  agent's progress, tool calls, questions and result. Reply to continue, or start with `@writer` to hand
+  it to another agent.
+- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. Defaults:
+  🧭 總管 (plans and delegates), 🔎 研究員 (research with sources), ✍️ 文案 (platform drafts), 🧐 編輯
+  (reviews and revises drafts). Add your own.
+- **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
+
+| Capability | Tools |
+|---|---|
+| research | `web_search`, `read_url` (public addresses only), `search_materials`, `fetch_sources` |
+| drafting | `create_post_draft`, `list_posts`, `revise_draft` |
+| delegation | `create_subtask`, `list_agents`, `wait_for_subtasks` |
+| planning | `list_tasks`, `get_task`, `create_task`, `schedule_task`, `list_schedules`, `pause_schedule` |
+| memory | `remember`, `search_memory` |
+| (always) | `add_comment`, `ask_human`, `complete_task` |
+
+Agents never publish. Drafts they write land in **Review** like any other post, and only a human approval
+sends them to Postiz.
+
 ## Highlights
 
 - **Human-in-the-loop by construction.** Posts follow a strict state machine
@@ -97,6 +126,8 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_PUBLISH_TIMEOUT` | `2m` | Timeout of one publish call |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
+| `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
+| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
 
 ## Development
 
@@ -124,7 +155,8 @@ cmd/mock-postiz-mcp    Postiz MCP stand-in for development
 internal/domain        post state machine, platform rules
 internal/connector     plugin registry, interfaces, config specs
 internal/connectors/*  built-in plugins (postiz, rss, imap, searxng, tavily, openai, anthropic, smtp)
-internal/agent         LLM tool loop and prompts
+internal/agent         pipeline draft generator (LLM tool loop)
+internal/crew          agent team runner: task claiming, tools, delegation, default roles
 internal/pipeline      ingest -> generate -> store -> notify
 internal/dispatch      publish worker (the only caller of publishers)
 internal/scheduler     cron heartbeat

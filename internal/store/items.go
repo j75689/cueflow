@@ -112,3 +112,29 @@ func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int)
 	}
 	return out, rows.Err()
 }
+
+// SearchItems finds collected source items by keyword (title/content), newest first. Empty
+// connectorIDs searches every source.
+func (s *Store) SearchItems(ctx context.Context, connectorIDs []uuid.UUID, query string, since time.Time, limit int) ([]*SourceItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM source_items
+		WHERE (cardinality($1::uuid[]) = 0 OR connector_id = ANY($1))
+		  AND COALESCE(published_at, fetched_at) >= $2
+		  AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR content ILIKE '%' || $3 || '%')
+		ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT $4`, connectorIDs, since, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*SourceItem
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}

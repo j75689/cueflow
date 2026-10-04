@@ -163,6 +163,110 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 
 ---
 
+## Agents (roles)
+
+An agent is a configured role (persona + capabilities + connectors) that works tasks on the board.
+`Post` objects also carry `"task_id": "uuid|null"` (the task whose agent drafted it).
+
+`Agent`:
+```json
+{
+  "id":"uuid","name":"總管","slug":"chief","avatar":"🧭","role":"manager",
+  "description":"Short summary shown to other agents for delegation",
+  "instructions":"Persona / standing orders (system prompt)",
+  "capabilities":["planning","delegation","research","memory"],
+  "llm_connector_id":"uuid|null",          // null = first active LLM connector
+  "search_connector_id":"uuid|null",       // null = first active search connector
+  "source_connector_ids":["uuid"],         // sources this agent may read/fetch
+  "language":"zh-TW","platforms":["threads","instagram"],
+  "max_turns":12,"is_active":true,
+  "stats":{"open_tasks":2,"running":1},
+  "created_at":"...","updated_at":"..."
+}
+```
+`role` ∈ `manager | researcher | writer | editor | custom` (cosmetic grouping). `slug` is unique, `[a-z0-9-]`, used for `@mentions`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/agents` | | → `[Agent]` |
+| POST | `/agents` | Agent fields (no id/stats/timestamps); `slug` derived from name if omitted | |
+| GET/PATCH/DELETE | `/agents/{id}` | | PATCH = partial; DELETE unassigns its tasks |
+| GET | `/agents/{id}/memories` | | → `[{"id","agent_id","content","created_at"}]` newest first |
+| POST | `/agents/{id}/memories` | `{content}` | add a note the agent will always see |
+| DELETE | `/agents/{id}/memories/{memoryId}` | | |
+
+`/meta` additionally returns:
+```json
+"agent_capabilities":[{"id":"research","name":"Research","description":"...","tools":["web_search","read_url","search_materials","fetch_sources"]}, ...],
+"agent_roles":["manager","researcher","writer","editor","custom"],
+"task_statuses":["BACKLOG","TODO","IN_PROGRESS","BLOCKED","WAITING_HUMAN","REVIEW","DONE","CANCELED"],
+"task_priorities":["low","normal","high","urgent"]
+```
+Capabilities: `research`, `drafting`, `delegation`, `planning`, `memory`. Every agent always has
+`add_comment`, `ask_human`, `complete_task`. No capability can publish: drafts go to the review queue.
+
+---
+
+## Tasks (kanban board)
+
+Statuses: `BACKLOG` (idea) → `TODO` (ready; an assigned agent picks it up automatically) → `IN_PROGRESS`
+(agent running; system-set only) → `BLOCKED` (waiting for its subtasks) / `WAITING_HUMAN` (agent asked a
+question or a run failed) → `REVIEW` (agent finished; human checks) → `DONE`; `CANCELED` is hidden by default.
+Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAITING_HUMAN) | Review | Done.
+
+`Task`:
+```json
+{
+  "id":"uuid","number":12,"title":"...","description":"...","status":"TODO","priority":"normal",
+  "labels":["threads"],
+  "assignee_agent_id":"uuid|null","assignee":{"id":"uuid","name":"文案","slug":"writer","avatar":"✍️"}|null,
+  "created_by":"human|agent","creator_agent_id":"uuid|null",
+  "parent_id":"uuid|null","subtask_counts":{"total":3,"done":1},
+  "result":"final summary from the agent","due_at":"...|null","position":1024.0,
+  "running":false,"attempts":1,"schedule_id":"uuid|null","version":3,
+  "created_at":"...","updated_at":"...","started_at":"...|null","completed_at":"...|null"
+}
+```
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/tasks?status=&assignee=<agentId|none>&parent_id=&q=&all=1` | | → `{"items":[Task]}` ordered by status then `position`; `DONE`/`CANCELED` older than 14 days omitted unless `all=1` |
+| POST | `/tasks` | `{title, description?, assignee_agent_id?, priority?, labels?, due_at?, status?, parent_id?}` | default status: `TODO` if assigned else `BACKLOG`. This is also the "command" entry point (assign to the manager agent) |
+| GET | `/tasks/{id}` | | → `Task` + `"subtasks":[Task]`, `"parent":Task|null`, `"posts":[{"id","title","status","platforms"}]` |
+| PATCH | `/tasks/{id}` | any of `{title, description, status, priority, labels, assignee_agent_id, due_at, position}` | `status: IN_PROGRESS` is rejected. Moving to `TODO` with an agent queues a run; moving a running task elsewhere stops the run |
+| DELETE | `/tasks/{id}` | | stops a run; deletes subtasks |
+| GET | `/tasks/{id}/messages` | | → `[TaskMessage]` oldest first |
+| POST | `/tasks/{id}/messages` | `{content}` | human comment. A leading `@slug` reassigns to that agent. If the task has an agent and is not `BACKLOG`/`CANCELED`, it moves to `TODO` and the agent responds |
+| POST | `/tasks/{id}/run` | | start now (→ `TODO`) |
+| POST | `/tasks/{id}/cancel` | | stop the running agent (→ `WAITING_HUMAN`) |
+| GET | `/tasks/{id}/runs` | | → `[AgentRun]` newest first |
+
+`TaskMessage`: `{"id","task_id","seq","author_type":"human|agent|system|tool","agent_id":"uuid|null",
+"agent":{"name","avatar","slug"}|null,"kind":"message|tool_call|tool_result|status|question|result","content":"...",
+"data":{...},"created_at"}`. `tool_call.data = {"tool":"web_search","arguments":{...}}`;
+`tool_result.data = {"tool":"web_search","is_error":false}` (content is a truncated result).
+
+`AgentRun`: `{"id","task_id","agent_id","status":"RUNNING|SUCCEEDED|FAILED|CANCELED","turns","tool_calls",
+"input_tokens","output_tokens","error","started_at","finished_at"}`
+
+---
+
+## Schedules (recurring tasks)
+
+A schedule creates a new task for an agent on a cron expression (agents with `planning` can create them).
+
+`Schedule`: `{"id","name","cron_expr","timezone","is_active","assignee_agent_id","task_title","task_description",
+"priority","created_by":"human|agent","last_run_at","next_run_at","created_at","updated_at"}`
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/schedules` | | → `[Schedule]` |
+| POST | `/schedules` | Schedule fields | runs at most every 5 minutes |
+| GET/PATCH/DELETE | `/schedules/{id}` | | |
+| POST | `/schedules/{id}/run` | | spawn a task now → `{"task_id":"uuid"}` |
+
+---
+
 ## Live updates
 
 ### `GET /api/v1/events` (Server-Sent Events)
@@ -171,4 +275,9 @@ Event names and `data` payloads:
 - `post.deleted` → `{"id":"uuid"}`
 - `run.updated` → `{"id":"uuid","pipeline_id":"uuid","status":"SUCCEEDED"}`
 - `connector.updated` → `{"id":"uuid"}`
+- `task.updated` → `{"id":"uuid","status":"IN_PROGRESS"}`
+- `task.deleted` → `{"id":"uuid"}`
+- `task.message` → `{"task_id":"uuid","id":"uuid"}`
+- `agent.updated` → `{"id":"uuid"}`
+- `schedule.updated` → `{"id":"uuid"}`
 A `: ping` comment is sent every 20s.

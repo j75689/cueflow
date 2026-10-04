@@ -97,7 +97,17 @@ export function useServerEvent(events: string | string[], fn: Listener) {
   }, [key, subscribe]);
 }
 
-const SSE_EVENTS = ["post.updated", "post.deleted", "run.updated", "connector.updated"];
+const SSE_EVENTS = [
+  "post.updated",
+  "post.deleted",
+  "run.updated",
+  "connector.updated",
+  "task.updated",
+  "task.deleted",
+  "task.message",
+  "agent.updated",
+  "schedule.updated",
+];
 
 /* -------------------------------- Providers -------------------------------- */
 

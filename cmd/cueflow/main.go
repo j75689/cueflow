@@ -25,6 +25,7 @@ import (
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
+	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/dispatch"
 	"github.com/j75689/cueflow/internal/events"
@@ -117,17 +118,35 @@ func serve() error {
 	runner := pipeline.NewRunner(ctx, st, h, broker, logger, cfg.PublicURL)
 	worker := dispatch.NewWorker(st, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
 	sched := scheduler.New(st, runner, h, logger, cfg.DigestCron, cfg.PublicURL)
+
+	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
+	team.Concurrency = cfg.AgentConcurrency
+	team.ValidateSchedule = scheduler.ValidateSchedule
+	team.OnSchedulesChanged = func(ctx context.Context) { _ = sched.Reload(ctx) }
+	sched.OnTaskSpawned = func(ctx context.Context, t *store.Task) {
+		broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+		team.Wake()
+	}
+	if err := st.FailStaleAgentRuns(ctx); err != nil {
+		logger.Warn("clean stale agent runs", "err", err)
+	}
+	if n, err := crew.SeedDefaults(ctx, st); err != nil {
+		logger.Warn("seed default agents", "err", err)
+	} else if n > 0 {
+		logger.Info("created the default agent team", "agents", n)
+	}
 	if !cfg.DisableScheduler {
 		if err := sched.Start(ctx); err != nil {
 			return err
 		}
 	}
 	go worker.Run(ctx)
+	go team.Run(ctx)
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: (&api.Server{
-			Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker,
+			Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
 			Logger: logger, AdminToken: cfg.AdminToken,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -150,6 +169,7 @@ func serve() error {
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	runner.Wait()
+	team.Wait()
 	return nil
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
+	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/dispatch"
 	"github.com/j75689/cueflow/internal/domain"
@@ -81,6 +82,8 @@ type env struct {
 	store  *store.Store
 	runner *pipeline.Runner
 	worker *dispatch.Worker
+	crew   *crew.Crew
+	sched  *scheduler.Scheduler
 	api    *httptest.Server
 	mock   *postizmock.Server
 }
@@ -111,16 +114,18 @@ func setup(t *testing.T) *env {
 	runner := pipeline.NewRunner(ctx, st, h, broker, logger, "http://localhost:3000")
 	worker := dispatch.NewWorker(st, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
 	sched := scheduler.New(st, runner, h, logger, "", "http://localhost:3000")
+	team := crew.New(st, h, broker, logger, false)
+	team.ValidateSchedule = scheduler.ValidateSchedule
 
 	mock := postizmock.New("postiz-key")
 	mockSrv := httptest.NewServer(mock.Handler())
 	t.Cleanup(mockSrv.Close)
 
 	apiSrv := httptest.NewServer((&api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
-		Dispatcher: worker, Logger: logger}).Handler())
+		Dispatcher: worker, Crew: team, Logger: logger}).Handler())
 	t.Cleanup(apiSrv.Close)
 
-	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, api: apiSrv, mock: mock}
+	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, mock: mock}
 	t.Setenv("POSTIZ_URL", mockSrv.URL)
 	return e
 }
@@ -140,6 +145,9 @@ func (e *env) do(method, path string, body any, out any) int {
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 500 {
+		e.t.Logf("%s %s -> %d: %s", method, path, resp.StatusCode, data)
+	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			e.t.Fatalf("%s %s: decode %q: %v", method, path, data, err)

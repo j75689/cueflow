@@ -38,6 +38,27 @@ func Validate(expr, tz string) error {
 	return err
 }
 
+// ValidateSchedule is Validate plus a minimum interval of 5 minutes between activations, which
+// keeps an agent-created schedule from spawning a flood of tasks (and LLM spend).
+func ValidateSchedule(expr, tz string) error {
+	if err := Validate(expr, tz); err != nil {
+		return err
+	}
+	s, _ := parser.Parse(spec(expr, tz))
+	t := time.Now()
+	for i := 0; i < 5; i++ {
+		n := s.Next(t)
+		if n.IsZero() {
+			return nil
+		}
+		if i > 0 && n.Sub(t) < 5*time.Minute {
+			return errors.New("runs more often than every 5 minutes")
+		}
+		t = n
+	}
+	return nil
+}
+
 // Next returns the next activation after t.
 func Next(expr, tz string, t time.Time) (time.Time, error) {
 	s, err := parser.Parse(spec(expr, tz))
@@ -55,14 +76,19 @@ type Scheduler struct {
 	digest    string
 	publicURL string
 
-	mu      sync.Mutex
-	cron    *cron.Cron
-	entries map[uuid.UUID]cron.EntryID
+	// OnTaskSpawned is called after a schedule creates a task (main wires it to the crew).
+	OnTaskSpawned func(ctx context.Context, t *store.Task)
+
+	mu        sync.Mutex
+	cron      *cron.Cron
+	entries   map[uuid.UUID]cron.EntryID
+	schedules map[uuid.UUID]cron.EntryID
 }
 
 func New(st *store.Store, r *pipeline.Runner, h *hub.Hub, logger *slog.Logger, digestCron, publicURL string) *Scheduler {
 	return &Scheduler{store: st, runner: r, hub: h, logger: logger.With("component", "scheduler"),
-		digest: digestCron, publicURL: publicURL, entries: map[uuid.UUID]cron.EntryID{}}
+		digest: digestCron, publicURL: publicURL, entries: map[uuid.UUID]cron.EntryID{},
+		schedules: map[uuid.UUID]cron.EntryID{}}
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
@@ -116,8 +142,69 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 		}
 		s.entries[id] = e
 	}
-	s.logger.Info("schedule loaded", "pipelines", len(s.entries))
+	for id, e := range s.schedules {
+		s.cron.Remove(e)
+		delete(s.schedules, id)
+	}
+	schedules, err := s.store.ListSchedules(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sc := range schedules {
+		if !sc.IsActive {
+			continue
+		}
+		id := sc.ID
+		e, err := s.cron.AddFunc(spec(sc.CronExpr, sc.Timezone), func() { s.spawn(context.Background(), id) })
+		if err != nil {
+			s.logger.Error("bad schedule", "schedule", sc.Name, "expr", sc.CronExpr, "err", err)
+			continue
+		}
+		s.schedules[id] = e
+	}
+	s.logger.Info("schedule loaded", "pipelines", len(s.entries), "task_schedules", len(s.schedules))
 	return nil
+}
+
+func (s *Scheduler) spawn(ctx context.Context, scheduleID uuid.UUID) {
+	t, err := s.store.SpawnScheduledTask(ctx, scheduleID)
+	if err != nil {
+		s.logger.Warn("scheduled task not created", "schedule", scheduleID, "err", err)
+		return
+	}
+	if s.OnTaskSpawned != nil {
+		s.OnTaskSpawned(ctx, t)
+	}
+}
+
+// SpawnNow creates a schedule's task immediately ("Run now").
+func (s *Scheduler) SpawnNow(ctx context.Context, scheduleID uuid.UUID) (*store.Task, error) {
+	t, err := s.store.SpawnScheduledTask(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	if s.OnTaskSpawned != nil {
+		s.OnTaskSpawned(ctx, t)
+	}
+	return t, nil
+}
+
+// ScheduleNextRun reports when a task schedule fires next.
+func (s *Scheduler) ScheduleNextRun(id uuid.UUID) *time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cron == nil {
+		return nil
+	}
+	e, ok := s.schedules[id]
+	if !ok {
+		return nil
+	}
+	next := s.cron.Entry(e).Next
+	if next.IsZero() {
+		return nil
+	}
+	return &next
 }
 
 // NextRun reports when an active pipeline fires next.

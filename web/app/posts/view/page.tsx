@@ -183,6 +183,7 @@ function PostView() {
                 Run #{shortId(p.run_id)}
               </Link>
             )}
+            {p.task_id && <TaskLink id={p.task_id} />}
             <span>v{p.version}</span>
           </span>
         }
@@ -365,5 +366,16 @@ export default function Page() {
     <Suspense fallback={<Loading />}>
       <PostView />
     </Suspense>
+  );
+}
+
+// TaskLink shows which board task's agent drafted this post.
+function TaskLink({ id }: { id: string }) {
+  const task = useAsync(() => api.getTask(id), [id]);
+  return (
+    <Link className="text-indigo-600 hover:underline dark:text-indigo-400" href={`/tasks/view/?id=${id}`}>
+      Drafted for task {task.data ? `#${task.data.number}` : "…"}
+      {task.data?.assignee ? ` by ${task.data.assignee.avatar} ${task.data.assignee.name}` : ""}
+    </Link>
   );
 }

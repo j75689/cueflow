@@ -119,6 +119,7 @@ type Post struct {
 	GroupID              *uuid.UUID        `json:"group_id"`
 	PipelineID           *uuid.UUID        `json:"pipeline_id"`
 	RunID                *uuid.UUID        `json:"run_id"`
+	TaskID               *uuid.UUID        `json:"task_id"`
 	PublisherConnectorID *uuid.UUID        `json:"publisher_connector_id"`
 	Title                string            `json:"title"`
 	Content              string            `json:"content"`

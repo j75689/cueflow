@@ -1,4 +1,8 @@
 import type {
+  Agent,
+  AgentInput,
+  AgentMemory,
+  AgentRun,
   AuditLog,
   Connector,
   ConnectorTestResult,
@@ -10,7 +14,14 @@ import type {
   Post,
   PostList,
   SourceItem,
+  Schedule,
+  ScheduleInput,
   Stats,
+  Task,
+  TaskCreate,
+  TaskDetail,
+  TaskMessage,
+  TaskPatch,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -166,6 +177,36 @@ export const api = {
   listRuns: (q: { pipeline_id?: string; limit?: number } = {}) =>
     request<PipelineRun[]>("GET", "/runs", undefined, q),
   getRun: (id: string) => request<PipelineRun>("GET", `/runs/${id}`),
+
+  listAgents: () => request<Agent[]>("GET", "/agents"),
+  getAgent: (id: string) => request<Agent>("GET", `/agents/${id}`),
+  createAgent: (body: Partial<AgentInput>) => request<Agent>("POST", "/agents", body),
+  updateAgent: (id: string, body: Partial<AgentInput>) => request<Agent>("PATCH", `/agents/${id}`, body),
+  deleteAgent: (id: string) => request<void>("DELETE", `/agents/${id}`),
+  agentMemories: (id: string) => request<AgentMemory[]>("GET", `/agents/${id}/memories`),
+  addAgentMemory: (id: string, content: string) =>
+    request<AgentMemory>("POST", `/agents/${id}/memories`, { content }),
+  deleteAgentMemory: (id: string, memoryId: string) =>
+    request<void>("DELETE", `/agents/${id}/memories/${memoryId}`),
+
+  listTasks: (q: { status?: string[]; assignee?: string; parent_id?: string; q?: string; all?: boolean } = {}) =>
+    request<{ items: Task[] }>("GET", "/tasks", undefined, { ...q, all: q.all ? "1" : undefined }),
+  getTask: (id: string) => request<TaskDetail>("GET", `/tasks/${id}`),
+  createTask: (body: TaskCreate) => request<Task>("POST", "/tasks", body),
+  updateTask: (id: string, body: TaskPatch) => request<Task>("PATCH", `/tasks/${id}`, body),
+  deleteTask: (id: string) => request<void>("DELETE", `/tasks/${id}`),
+  taskMessages: (id: string) => request<TaskMessage[]>("GET", `/tasks/${id}/messages`),
+  postTaskMessage: (id: string, content: string) =>
+    request<TaskMessage>("POST", `/tasks/${id}/messages`, { content }),
+  runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
+  cancelTask: (id: string) => request<Task>("POST", `/tasks/${id}/cancel`),
+  taskRuns: (id: string) => request<AgentRun[]>("GET", `/tasks/${id}/runs`),
+
+  listSchedules: () => request<Schedule[]>("GET", "/schedules"),
+  createSchedule: (body: ScheduleInput) => request<Schedule>("POST", "/schedules", body),
+  updateSchedule: (id: string, body: Partial<ScheduleInput>) => request<Schedule>("PATCH", `/schedules/${id}`, body),
+  deleteSchedule: (id: string) => request<void>("DELETE", `/schedules/${id}`),
+  runSchedule: (id: string) => request<{ task_id: string }>("POST", `/schedules/${id}/run`),
 };
 
 export function errorMessage(e: unknown): string {

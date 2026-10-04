@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
@@ -39,6 +40,7 @@ type Server struct {
 	Runner     *pipeline.Runner
 	Scheduler  *scheduler.Scheduler
 	Dispatcher Dispatcher
+	Crew       *crew.Crew
 	Logger     *slog.Logger
 	AdminToken string
 }
@@ -83,6 +85,33 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/pipelines/{id}/run", s.runPipeline)
 		r.Get("/runs", s.listRuns)
 		r.Get("/runs/{id}", s.getRun)
+
+		r.Get("/agents", s.listAgents)
+		r.Post("/agents", s.createAgent)
+		r.Get("/agents/{id}", s.getAgent)
+		r.Patch("/agents/{id}", s.updateAgent)
+		r.Delete("/agents/{id}", s.deleteAgent)
+		r.Get("/agents/{id}/memories", s.listMemories)
+		r.Post("/agents/{id}/memories", s.addMemory)
+		r.Delete("/agents/{id}/memories/{memoryId}", s.deleteMemory)
+
+		r.Get("/tasks", s.listTasks)
+		r.Post("/tasks", s.createTask)
+		r.Get("/tasks/{id}", s.getTask)
+		r.Patch("/tasks/{id}", s.updateTask)
+		r.Delete("/tasks/{id}", s.deleteTask)
+		r.Get("/tasks/{id}/messages", s.taskMessages)
+		r.Post("/tasks/{id}/messages", s.postTaskMessage)
+		r.Post("/tasks/{id}/run", s.runTask)
+		r.Post("/tasks/{id}/cancel", s.cancelTask)
+		r.Get("/tasks/{id}/runs", s.taskRuns)
+
+		r.Get("/schedules", s.listSchedules)
+		r.Post("/schedules", s.createSchedule)
+		r.Get("/schedules/{id}", s.getSchedule)
+		r.Patch("/schedules/{id}", s.updateSchedule)
+		r.Delete("/schedules/{id}", s.deleteSchedule)
+		r.Post("/schedules/{id}/run", s.runSchedule)
 
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
@@ -147,11 +176,15 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":         Version,
-		"statuses":        domain.AllStatuses,
-		"transitions":     transitions,
-		"platforms":       domain.Platforms(),
-		"connector_types": specs,
+		"version":            Version,
+		"statuses":           domain.AllStatuses,
+		"transitions":        transitions,
+		"platforms":          domain.Platforms(),
+		"connector_types":    specs,
+		"agent_capabilities": crew.Capabilities(),
+		"agent_roles":        store.AgentRoles,
+		"task_statuses":      store.TaskStatuses,
+		"task_priorities":    store.TaskPriorities,
 	})
 }
 
