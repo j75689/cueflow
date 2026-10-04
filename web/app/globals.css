@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-zinc-50);
+  color: var(--color-zinc-900);
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: var(--color-zinc-950);
+    color: var(--color-zinc-100);
+  }
+}

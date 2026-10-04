@@ -1,0 +1,120 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { type ReactNode, useEffect, useState } from "react";
+import { setToken } from "@/lib/api";
+import { useMeta, useServerEvents } from "./providers";
+import { Icon, cx } from "./ui";
+
+const NAV = [
+  { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts") },
+  { href: "/pipelines/", label: "Pipelines", icon: "flow", match: (p: string) => p.startsWith("/pipelines") },
+  { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
+  { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },
+];
+
+export function Shell({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? "/";
+  const [open, setOpen] = useState(false);
+  const { connected } = useServerEvents();
+  const { meta } = useMeta();
+
+  useEffect(() => setOpen(false), [pathname]);
+
+  const nav = (
+    <nav className="flex flex-col gap-0.5 p-2">
+      {NAV.map((n) => {
+        const active = n.match(pathname);
+        return (
+          <Link
+            key={n.href}
+            href={n.href}
+            className={cx(
+              "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+              active
+                ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
+                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100",
+            )}
+          >
+            <Icon name={n.icon} className="h-4 w-4" />
+            {n.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+
+  const footer = (
+    <div className="mt-auto space-y-2 border-t border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+      <div className="flex items-center gap-2">
+        <span className={cx("h-2 w-2 rounded-full", connected ? "bg-emerald-500" : "bg-zinc-400")} />
+        {connected ? "Live updates" : "Reconnecting…"}
+      </div>
+      <div className="flex items-center justify-between">
+        <span>v{meta?.version ?? "…"}</span>
+        <button
+          className="inline-flex items-center gap-1 hover:text-zinc-800 dark:hover:text-zinc-200"
+          onClick={() => {
+            setToken("");
+            window.location.reload();
+          }}
+          title="Forget the stored admin token"
+        >
+          <Icon name="key" className="h-3.5 w-3.5" /> Sign out
+        </button>
+      </div>
+    </div>
+  );
+
+  const brand = (
+    <Link href="/" className="flex items-center gap-2 px-4 py-4">
+      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 text-white">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">
+          <path d="M6 8h7M6 12h12M6 16h5" />
+        </svg>
+      </span>
+      <span className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">CueFlow</span>
+    </Link>
+  );
+
+  return (
+    <div className="flex min-h-screen">
+      {/* desktop sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-zinc-200 bg-white md:flex dark:border-zinc-800 dark:bg-zinc-900">
+        {brand}
+        {nav}
+        {footer}
+      </aside>
+
+      {/* mobile drawer */}
+      {open && (
+        <div className="fixed inset-0 z-40 md:hidden" onClick={() => setOpen(false)}>
+          <div className="absolute inset-0 bg-zinc-950/40" />
+          <aside
+            className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {brand}
+            {nav}
+            {footer}
+          </aside>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-zinc-200 bg-white/90 px-4 py-2.5 backdrop-blur md:hidden dark:border-zinc-800 dark:bg-zinc-900/90">
+          <button
+            onClick={() => setOpen(true)}
+            className="rounded p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            aria-label="Open navigation"
+          >
+            <Icon name="menu" className="h-5 w-5" />
+          </button>
+          <span className="text-sm font-semibold">CueFlow</span>
+        </header>
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 sm:px-6 lg:px-8">{children}</main>
+      </div>
+    </div>
+  );
+}

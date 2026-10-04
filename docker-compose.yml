@@ -1,0 +1,157 @@
+# CueFlow + Postiz on one host. Every port is bound to 127.0.0.1 (no public exposure);
+# reach it from other machines through an SSH tunnel or a VPN such as Tailscale.
+#
+#   cp .env.example .env    # then fill in CUEFLOW_SECRET_KEY, POSTIZ_JWT_SECRET, ...
+#   docker compose up -d                 # CueFlow + Postiz
+#   docker compose --profile mock up -d  # also start a mock Postiz MCP server for trying CueFlow out
+#
+# CueFlow:  http://localhost:3000
+# Postiz:   http://localhost:4007   (create an account, connect channels, Settings -> Developers -> API key)
+
+name: cueflow
+
+x-postgres-health: &pg-health
+  interval: 5s
+  timeout: 5s
+  retries: 20
+
+services:
+  # ---------------------------------------------------------------- CueFlow
+  cueflow:
+    build: .
+    image: cueflow:local
+    restart: unless-stopped
+    depends_on:
+      cueflow-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://cueflow:${CUEFLOW_DB_PASSWORD:-cueflow}@cueflow-db:5432/cueflow?sslmode=disable
+      CUEFLOW_SECRET_KEY: ${CUEFLOW_SECRET_KEY:?set CUEFLOW_SECRET_KEY in .env (openssl rand -base64 32)}
+      CUEFLOW_ADMIN_TOKEN: ${CUEFLOW_ADMIN_TOKEN:-}
+      CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
+      CUEFLOW_DIGEST_CRON: ${CUEFLOW_DIGEST_CRON:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  cueflow-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cueflow
+      POSTGRES_PASSWORD: ${CUEFLOW_DB_PASSWORD:-cueflow}
+      POSTGRES_DB: cueflow
+    volumes:
+      - cueflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cueflow -d cueflow"]
+      <<: *pg-health
+
+  # Optional stand-in for Postiz: MCP endpoint http://mock-postiz:4007/api/mcp, API key "dev-key".
+  mock-postiz:
+    image: cueflow:local
+    profiles: ["mock"]
+    entrypoint: ["/usr/local/bin/mock-postiz-mcp"]
+    environment:
+      MOCK_POSTIZ_API_KEY: dev-key
+    ports:
+      - "127.0.0.1:4008:4007"
+
+  # ---------------------------------------------------------------- Postiz (social publishing engine)
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:latest
+    restart: unless-stopped
+    depends_on:
+      postiz-db:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      MAIN_URL: ${POSTIZ_URL:-http://localhost:4007}
+      FRONTEND_URL: ${POSTIZ_URL:-http://localhost:4007}
+      NEXT_PUBLIC_BACKEND_URL: ${POSTIZ_URL:-http://localhost:4007}/api
+      BACKEND_INTERNAL_URL: http://localhost:3000
+      JWT_SECRET: ${POSTIZ_JWT_SECRET:?set POSTIZ_JWT_SECRET in .env}
+      DATABASE_URL: postgresql://postiz:${POSTIZ_DB_PASSWORD:-postiz}@postiz-db:5432/postiz
+      REDIS_URL: redis://postiz-redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      IS_GENERAL: "true"
+      DISABLE_REGISTRATION: ${POSTIZ_DISABLE_REGISTRATION:-false}
+      STORAGE_PROVIDER: local
+      UPLOAD_DIRECTORY: /uploads
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: /uploads
+      # Platform apps (create them in the Meta / X / LinkedIn developer consoles)
+      THREADS_APP_ID: ${THREADS_APP_ID:-}
+      THREADS_APP_SECRET: ${THREADS_APP_SECRET:-}
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      X_API_KEY: ${X_API_KEY:-}
+      X_API_SECRET: ${X_API_SECRET:-}
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+    volumes:
+      - postiz-config:/config
+      - postiz-uploads:/uploads
+    ports:
+      - "127.0.0.1:4007:5000"
+
+  postiz-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: ${POSTIZ_DB_PASSWORD:-postiz}
+      POSTGRES_DB: postiz
+    volumes:
+      - postiz-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postiz -d postiz"]
+      <<: *pg-health
+
+  postiz-redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    volumes:
+      - postiz-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Postiz schedules publishing through Temporal. SQL visibility keeps it light (no Elasticsearch).
+  temporal:
+    image: temporalio/auto-setup:1.28.1
+    restart: unless-stopped
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporal}
+      POSTGRES_SEEDS: temporal-db
+
+  temporal-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporal}
+    volumes:
+      - temporal-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      <<: *pg-health
+
+volumes:
+  cueflow-db:
+  postiz-db:
+  postiz-redis:
+  postiz-config:
+  postiz-uploads:
+  temporal-db:

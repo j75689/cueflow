@@ -1,0 +1,26 @@
+# Go
+/bin/
+*.test
+coverage.out
+
+# Embedded dashboard build output (produced by `make web`)
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
+# Web
+/web/node_modules/
+/web/.next/
+/web/out/
+/web/next-env.d.ts
+/web/*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
