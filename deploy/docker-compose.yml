@@ -33,8 +33,26 @@ services:
       CUEFLOW_ADMIN_TOKEN: ${CUEFLOW_ADMIN_TOKEN:-}
       CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
       CUEFLOW_DIGEST_CRON: ${CUEFLOW_DIGEST_CRON:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TZ: ${TZ:-UTC}
+      # Server-wide LLM credentials, used by connectors whose own credential fields are blank.
+      # Claude API: API key, OAuth/Bearer token, or a profile from a mounted `ant` config (below).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_PROFILE: ${ANTHROPIC_PROFILE:-}
+      # Claude on Bedrock: default AWS credential chain.
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
+      # Claude on Vertex AI: Application Default Credentials (mount the key file below).
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    # Optional credential files (the container runs as user "nonroot", HOME=/home/nonroot):
+    # volumes:
+    #   - ~/.config/anthropic:/home/nonroot/.config/anthropic:ro   # `ant auth login` profiles
+    #   - ~/.aws:/home/nonroot/.aws:ro                              # AWS shared config/credentials
+    #   - ./gcp-sa.json:/secrets/gcp-sa.json:ro                     # then GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json
     ports:
       - "127.0.0.1:3000:3000"
 

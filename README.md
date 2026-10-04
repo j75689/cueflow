@@ -68,8 +68,22 @@ sends them to Postiz.
 | Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio) |
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
-| LLM | `openai` (OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude) |
+| LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) |
 | Notifier | `smtp` (review reminders and digests) |
+
+### LLM authentication
+
+| Connector | Ways to authenticate |
+|---|---|
+| Anthropic Claude | API key · OAuth access token (adds the required OAuth beta header) · Bearer token for gateways · named `ant auth login` profile · or blank to use the server environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, the default profile) |
+| Claude on Amazon Bedrock | Bedrock API key · AWS access key + secret (+ session token) · AWS profile · or blank to use the default AWS credential chain (env vars, `~/.aws`, IAM role) |
+| Claude on Google Vertex AI | Service account key JSON · or blank to use Application Default Credentials |
+| OpenAI-compatible | API key (Bearer; `api-key` header for Azure) · extra headers for gateways · none for local servers. Presets: OpenAI, **OpenRouter** (base URL and attribution headers preset; use an `sk-or-...` key and models like `anthropic/claude-opus-4.8`), **Azure OpenAI** (v1 endpoint, or the legacy deployments endpoint with an API version), DeepSeek, Ollama, vLLM, LocalAI |
+
+Credentials entered in the UI are encrypted per connector and take precedence over server-wide environment
+variables. To use environment variables or credential files with Docker, set them in `deploy/.env` and see
+the commented `volumes:` example in `deploy/docker-compose.yml` (for `~/.config/anthropic`, `~/.aws`, or a GCP
+service account key).
 
 ## Quick start (Docker)
 

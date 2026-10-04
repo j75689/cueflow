@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -85,7 +86,20 @@ func migrate() error {
 	return db.Migrate(ctx, pool)
 }
 
+// dropEmptyCredentialEnv unsets credential variables that are present but empty. docker compose
+// passes `VAR: ${VAR:-}` through as an empty string, and some SDKs treat a set-but-empty variable
+// as a choice (an empty ANTHROPIC_API_KEY would shadow an `ant auth login` profile).
+func dropEmptyCredentialEnv() {
+	for _, kv := range os.Environ() {
+		k, v, _ := strings.Cut(kv, "=")
+		if v == "" && (strings.HasPrefix(k, "ANTHROPIC_") || strings.HasPrefix(k, "AWS_") || strings.HasPrefix(k, "GOOGLE_")) {
+			_ = os.Unsetenv(k)
+		}
+	}
+}
+
 func serve() error {
+	dropEmptyCredentialEnv()
 	cfg, err := config.Load()
 	if err != nil {
 		return err

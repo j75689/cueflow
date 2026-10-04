@@ -1,5 +1,5 @@
 // Package openai is the LLM connector for OpenAI and every OpenAI-compatible Chat Completions
-// endpoint: DeepSeek, Ollama, vLLM, LocalAI, LM Studio, OpenRouter...
+// endpoint: OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, LM Studio...
 package openai
 
 import (
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/j75689/cueflow/internal/connector"
@@ -18,6 +19,8 @@ import (
 // Presets fill in base URL and model for well-known providers.
 var presets = map[string]struct{ baseURL, model string }{
 	"openai":            {"https://api.openai.com/v1", "gpt-5.2"},
+	"openrouter":        {"https://openrouter.ai/api/v1", "openrouter/auto"},
+	"azure":             {"", ""},
 	"deepseek":          {"https://api.deepseek.com/v1", "deepseek-chat"},
 	"ollama":            {"http://ollama:11434/v1", "qwen3:8b"},
 	"vllm":              {"http://vllm:8000/v1", ""},
@@ -30,13 +33,19 @@ func init() {
 		Type:        "openai",
 		Kind:        connector.KindLLM,
 		Name:        "OpenAI / OpenAI-compatible",
-		Description: "OpenAI, DeepSeek, or any local OpenAI-compatible server (Ollama, vLLM, LocalAI). The model must support tool calling.",
+		Description: "OpenAI, OpenRouter, Azure OpenAI, DeepSeek, or any local OpenAI-compatible server (Ollama, vLLM, LocalAI). The model must support tool calling.",
 		Fields: []connector.Field{
 			{Key: "provider", Label: "Provider", Type: connector.FieldSelect,
-				Options: []string{"openai", "deepseek", "ollama", "vllm", "localai", "openai_compatible"}, Default: "openai"},
-			{Key: "base_url", Label: "Base URL", Type: connector.FieldString, Help: "Leave blank to use the provider default"},
-			{Key: "model", Label: "Model", Type: connector.FieldString, Help: "Leave blank to use the provider default"},
+				Options: []string{"openai", "openrouter", "azure", "deepseek", "ollama", "vllm", "localai", "openai_compatible"}, Default: "openai"},
+			{Key: "base_url", Label: "Base URL", Type: connector.FieldString,
+				Help: "Leave blank to use the provider default. Azure: https://<resource>.openai.azure.com/openai/v1 (or .../openai with an API version)"},
+			{Key: "model", Label: "Model", Type: connector.FieldString,
+				Help: "Leave blank to use the provider default. OpenRouter: e.g. anthropic/claude-opus-4.8. Azure: the deployment name"},
 			{Key: "api_key", Label: "API key", Type: connector.FieldPassword, Secret: true, Help: "Not needed for most local servers"},
+			{Key: "api_version", Label: "Azure API version", Type: connector.FieldString,
+				Help: "Azure only, for the legacy deployments endpoint (e.g. 2024-10-21). Leave blank for the v1 endpoint"},
+			{Key: "headers", Label: "Extra headers", Type: connector.FieldKV,
+				Help: "Sent with every request, e.g. a gateway key. OpenRouter defaults HTTP-Referer and X-Title to CueFlow"},
 			{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 8000},
 			{Key: "temperature", Label: "Temperature", Type: connector.FieldString, Help: "Optional, e.g. 0.7. Blank uses the server default."},
 		},
@@ -44,14 +53,19 @@ func init() {
 }
 
 type Client struct {
-	baseURL, model, apiKey, temperature string
-	maxTokens                           int
-	http                                *http.Client
+	provider, baseURL, model, apiKey, temperature, apiVersion string
+	headers                                                   map[string]string
+	maxTokens                                                 int
+	http                                                      *http.Client
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	p := presets[cfg.String("provider")]
+	provider := cfg.String("provider")
 	c := &Client{
+		provider:    provider,
+		apiVersion:  cfg.String("api_version"),
+		headers:     map[string]string{},
 		baseURL:     strings.TrimRight(firstNonEmpty(cfg.String("base_url"), p.baseURL), "/"),
 		model:       firstNonEmpty(cfg.String("model"), p.model),
 		apiKey:      cfg.String("api_key"),
@@ -59,8 +73,21 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		maxTokens:   cfg.Int("max_tokens", 8000),
 		http:        env.HTTPClient,
 	}
+	if provider == "openrouter" {
+		// App attribution recommended by OpenRouter; overridable via Extra headers.
+		c.headers["HTTP-Referer"] = "https://github.com/j75689/cueflow"
+		c.headers["X-Title"] = "CueFlow"
+	}
+	for k, v := range cfg.KV("headers") {
+		if k = strings.TrimSpace(k); k != "" {
+			c.headers[k] = v
+		}
+	}
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("openai: base URL is required for provider %q", cfg.String("provider"))
+	}
+	if provider == "azure" && c.apiKey == "" && c.headers["Authorization"] == "" {
+		return nil, fmt.Errorf("openai: Azure OpenAI needs an API key")
 	}
 	if c.model == "" {
 		return nil, fmt.Errorf("openai: model is required for provider %q", cfg.String("provider"))
@@ -122,7 +149,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if maxTokens <= 0 {
 		maxTokens = c.maxTokens
 	}
-	if strings.Contains(c.baseURL, "api.openai.com") {
+	if strings.Contains(c.baseURL, "api.openai.com") || c.provider == "azure" {
 		body["max_completion_tokens"] = maxTokens
 	} else {
 		body["max_tokens"] = maxTokens
@@ -146,13 +173,20 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		return nil, err
 	}
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(raw))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
-		hreq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		if c.provider == "azure" {
+			hreq.Header.Set("api-key", c.apiKey)
+		} else {
+			hreq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
+	}
+	for k, v := range c.headers {
+		hreq.Header.Set(k, v)
 	}
 	hresp, err := c.http.Do(hreq)
 	if err != nil {
@@ -205,6 +239,16 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
 		Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}, nil
+}
+
+// endpoint returns the Chat Completions URL. Azure's legacy API addresses a deployment by path
+// with an api-version query; every other provider (and Azure's v1 API) uses {base}/chat/completions.
+func (c *Client) endpoint() string {
+	if c.provider == "azure" && c.apiVersion != "" {
+		return fmt.Sprintf("%s/deployments/%s/chat/completions?api-version=%s",
+			c.baseURL, url.PathEscape(c.model), url.QueryEscape(c.apiVersion))
+	}
+	return c.baseURL + "/chat/completions"
 }
 
 func firstNonEmpty(v ...string) string {

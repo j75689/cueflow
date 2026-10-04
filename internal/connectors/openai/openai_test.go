@@ -81,3 +81,89 @@ func TestRequiresModelForCustomProvider(t *testing.T) {
 		t.Fatal("expected error when model is missing")
 	}
 }
+
+type seen struct {
+	path, query string
+	header      http.Header
+	body        map[string]any
+}
+
+func recorder(t *testing.T) (*httptest.Server, *seen) {
+	t.Helper()
+	got := &seen{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.path, got.query, got.header = r.URL.Path, r.URL.RawQuery, r.Header.Clone()
+		_ = json.NewDecoder(r.Body).Decode(&got.body)
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"pong"}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, got
+}
+
+func ping(t *testing.T, cfg connector.Config) {
+	t.Helper()
+	inst, err := connector.Build("openai", cfg, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "ping"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenRouter(t *testing.T) {
+	srv, got := recorder(t)
+	ping(t, connector.Config{"provider": "openrouter", "base_url": srv.URL + "/api/v1", "api_key": "sk-or-v1-test"})
+	if got.path != "/api/v1/chat/completions" || got.header.Get("Authorization") != "Bearer sk-or-v1-test" {
+		t.Fatalf("request: %s %v", got.path, got.header)
+	}
+	if got.header.Get("X-Title") != "CueFlow" || got.header.Get("HTTP-Referer") == "" {
+		t.Fatalf("attribution headers missing: %v", got.header)
+	}
+	if got.body["model"] != "openrouter/auto" {
+		t.Fatalf("default model: %v", got.body["model"])
+	}
+	// Defaults: real OpenRouter base URL.
+	inst, _ := connector.Build("openai", connector.Config{"provider": "openrouter", "api_key": "k"}, connector.Env{})
+	if inst == nil {
+		t.Fatal("openrouter preset should build without a base URL")
+	}
+}
+
+func TestCustomHeadersOverride(t *testing.T) {
+	srv, got := recorder(t)
+	ping(t, connector.Config{"provider": "openrouter", "base_url": srv.URL, "api_key": "k",
+		"headers": map[string]any{"X-Title": "My Studio", "X-Gateway-Key": "gw"}})
+	if got.header.Get("X-Title") != "My Studio" || got.header.Get("X-Gateway-Key") != "gw" {
+		t.Fatalf("headers: %v", got.header)
+	}
+}
+
+func TestAzureV1(t *testing.T) {
+	srv, got := recorder(t)
+	ping(t, connector.Config{"provider": "azure", "base_url": srv.URL + "/openai/v1", "api_key": "az-key", "model": "my-gpt"})
+	if got.path != "/openai/v1/chat/completions" || got.header.Get("Api-Key") != "az-key" || got.header.Get("Authorization") != "" {
+		t.Fatalf("request: %s %v", got.path, got.header)
+	}
+	if got.body["max_completion_tokens"] == nil || got.body["model"] != "my-gpt" {
+		t.Fatalf("body: %v", got.body)
+	}
+}
+
+func TestAzureLegacyDeployments(t *testing.T) {
+	srv, got := recorder(t)
+	ping(t, connector.Config{"provider": "azure", "base_url": srv.URL + "/openai", "api_key": "az-key",
+		"model": "prod-gpt", "api_version": "2024-10-21"})
+	if got.path != "/openai/deployments/prod-gpt/chat/completions" || got.query != "api-version=2024-10-21" {
+		t.Fatalf("url: %s?%s", got.path, got.query)
+	}
+}
+
+func TestAzureRequiresKeyAndDeployment(t *testing.T) {
+	if _, err := connector.Build("openai", connector.Config{"provider": "azure", "base_url": "https://x/openai/v1", "model": "m"}, connector.Env{}); err == nil {
+		t.Fatal("azure without a key should fail")
+	}
+	if _, err := connector.Build("openai", connector.Config{"provider": "azure", "base_url": "https://x/openai/v1", "api_key": "k"}, connector.Env{}); err == nil {
+		t.Fatal("azure without a deployment name should fail")
+	}
+}

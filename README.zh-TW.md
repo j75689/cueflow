@@ -48,8 +48,19 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 | 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio） |
 | 資料來源 | `rss`（RSS/Atom，以 GUID 去重）· `imap`（信箱資料夾，唯讀） |
 | 搜尋 | `searxng`（自託管）· `tavily` |
-| LLM | `openai`（OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude） |
+| LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude） |
 | 通知 | `smtp`（審核提醒與摘要信） |
+
+### LLM 認證方式
+
+| Connector | 可用的認證方式 |
+|---|---|
+| Anthropic Claude | API key · OAuth access token（自動加上必要的 OAuth beta header）· 給閘道用的一般 Bearer token · 指定 `ant auth login` 設定檔 · 或全部留空，使用伺服器環境（`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_PROFILE`、預設設定檔） |
+| Amazon Bedrock 上的 Claude | Bedrock API key · AWS access key + secret（+ session token）· AWS profile · 或留空，使用預設的 AWS 憑證鏈（環境變數、`~/.aws`、IAM role） |
+| Google Vertex AI 上的 Claude | 服務帳號金鑰 JSON · 或留空，使用 Application Default Credentials |
+| OpenAI 相容 | API key（Bearer；Azure 用 `api-key` header）· 給閘道用的自訂 header · 本機服務不需要。預設值：OpenAI、**OpenRouter**（已預填網址與來源標示 header；使用 `sk-or-...` key，模型名稱如 `anthropic/claude-opus-4.8`）、**Azure OpenAI**（v1 endpoint，或填 API version 走舊版 deployments endpoint）、DeepSeek、Ollama、vLLM、LocalAI |
+
+在 UI 填的憑證會依 connector 分別加密保存，優先於伺服器層級的環境變數。用 Docker 時若要改用環境變數或憑證檔，請在 `deploy/.env` 設定，並參考 `deploy/docker-compose.yml` 裡註解掉的 `volumes:` 範例（掛載 `~/.config/anthropic`、`~/.aws` 或 GCP 服務帳號金鑰）。
 
 ## 快速開始（Docker）
 

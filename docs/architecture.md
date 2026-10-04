@@ -43,7 +43,7 @@ flowchart TB
     subgraph Plugins["Connectors (internal/connectors/*)"]
         Src["source: RSS · IMAP"]
         Search["search: SearXNG · Tavily"]
-        LLM["llm: OpenAI-compatible · Anthropic"]
+        LLM["llm: OpenAI-compatible (OpenRouter · Azure) · Claude API · Bedrock · Vertex"]
         Notif["notifier: SMTP"]
         Pub["publisher: Postiz (MCP)"]
     end
@@ -147,7 +147,9 @@ classDiagram
     Searcher <|.. SearXNG
     Searcher <|.. Tavily
     LLM <|.. OpenAICompatible
-    LLM <|.. Anthropic
+    LLM <|.. AnthropicClaude
+    LLM <|.. ClaudeBedrock
+    LLM <|.. ClaudeVertex
     Notifier <|.. SMTP
 ```
 
