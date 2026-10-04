@@ -167,6 +167,8 @@ web/                   Next.js + Tailwind dashboard (static export)
 
 ## Documentation
 
+- [Architecture (整體架構設計)](docs/architecture.md)
+- [Agentic flow (Agent 團隊設計)](docs/agentic-flow.md)
 - [REST API](docs/api.md)
 - [Writing a connector plugin](docs/connectors.md)
 - [Prompt templates](docs/prompt-templates.md)
