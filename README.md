@@ -120,6 +120,16 @@ Then:
 4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
    show the reason and a **Retry** button.
 
+### Images
+
+| `CUEFLOW_IMAGE_TARGET` | Contents |
+|---|---|
+| `slim` (default) | CueFlow only (distroless). Built-in agents and LLM connectors |
+| `agents` | + Node.js and the ACP adapters for Claude Code and Codex, for external agents |
+| `agents-full` | + Google's Antigravity ACP server (~1 GB more; proprietary, Gemini API key auth) |
+
+Set it in `deploy/.env`, then `docker compose up -d --build`.
+
 ### Try it without Postiz
 
 ```bash

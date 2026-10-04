@@ -49,6 +49,10 @@ func Start(launch connector.RuntimeLaunch, cwd string, client acp.Client) (*Proc
 	tail := &tailBuffer{max: 8 << 10}
 	cmd.Stderr = tail
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, fmt.Errorf("acp: %q not found on this host: external agents need Node.js/the agent CLI "+
+				"(in Docker use the cueflow:agents image, or cueflow:agents-full for Antigravity)", launch.Command)
+		}
 		return nil, fmt.Errorf("acp: start %s: %w", launch.Command, err)
 	}
 	p := &Process{cmd: cmd, stderr: tail, exited: make(chan struct{})}

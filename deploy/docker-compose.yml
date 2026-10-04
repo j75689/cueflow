@@ -19,10 +19,12 @@ x-postgres-health: &pg-health
 services:
   # ---------------------------------------------------------------- CueFlow
   cueflow:
+    # Image: slim (default) | agents (Claude Code/Codex ACP adapters) | agents-full (+ Antigravity).
     build:
       context: ..
       dockerfile: Dockerfile
-    image: cueflow:local
+      target: ${CUEFLOW_IMAGE_TARGET:-slim}
+    image: cueflow:${CUEFLOW_IMAGE_TARGET:-slim}
     restart: unless-stopped
     depends_on:
       cueflow-db:
@@ -73,7 +75,7 @@ services:
 
   # Optional stand-in for Postiz: MCP endpoint http://mock-postiz:4007/api/mcp, API key "dev-key".
   mock-postiz:
-    image: cueflow:local
+    image: cueflow:${CUEFLOW_IMAGE_TARGET:-slim}
     profiles: ["mock"]
     entrypoint: ["/usr/local/bin/mock-postiz-mcp"]
     # The image's HEALTHCHECK probes CueFlow's API, which the mock does not serve.

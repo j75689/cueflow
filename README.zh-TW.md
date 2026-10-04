@@ -89,6 +89,16 @@ docker compose up -d
    - **Pipelines**：建立固定格式的內容管線（cron 例如 `0 8 * * *`、時區、主題、平台、instructions，見 [docs/zh-TW/prompt-templates.md](docs/zh-TW/prompt-templates.md)），按 **Run now**。
 4. **Review**：修改草稿，核准或退回。核准的貼文幾秒內就會交給 Postiz；失敗時會顯示原因並提供 **Retry** 按鈕。
 
+### 映像版本
+
+| `CUEFLOW_IMAGE_TARGET` | 內容 |
+|---|---|
+| `slim`（預設） | 只有 CueFlow（distroless），內建 agent 與 LLM connector |
+| `agents` | 加上 Node.js 與 Claude Code、Codex 的 ACP 橋接器，可使用外部 agent |
+| `agents-full` | 再加上 Google 的 Antigravity ACP server（多約 1 GB；專有授權，用 Gemini API key 認證） |
+
+在 `deploy/.env` 設定後執行 `docker compose up -d --build`。
+
 ### 不接 Postiz 先試用
 
 ```bash

@@ -48,4 +48,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: docker build -t cueflow:ci .
+      - run: docker build -t cueflow:slim .
+      - run: docker build --target agents -t cueflow:agents .
