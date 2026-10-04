@@ -5,6 +5,8 @@
 //	cueflow genkey     print a new random CUEFLOW_SECRET_KEY
 //	cueflow healthcheck exit 0 if the local server answers /api/v1/health (for container healthchecks)
 //	cueflow mcp-bridge URL  serve the MCP server at URL on stdio (for agents that only launch stdio MCP servers)
+//	cueflow rotate-key [--dry-run]  re-encrypt connector secrets with CUEFLOW_SECRET_KEY
+//	                    (reading with it or CUEFLOW_SECRET_KEY_PREVIOUS)
 package main
 
 import (
@@ -56,6 +58,8 @@ func main() {
 		fmt.Println(base64.StdEncoding.EncodeToString(b))
 	case "healthcheck":
 		err = healthcheck()
+	case "rotate-key":
+		err = rotateKey(len(os.Args) > 2 && os.Args[2] == "--dry-run")
 	case "mcp-bridge":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: cueflow mcp-bridge URL")
@@ -65,7 +69,7 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Println("cueflow", api.Version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|mcp-bridge|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|mcp-bridge|version]\n")
 		os.Exit(2)
 	}
 	if err != nil {
@@ -127,9 +131,12 @@ func serve() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
-	box, err := secret.New(cfg.SecretKey)
+	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
 	if err != nil {
 		return err
+	}
+	if box.HasPrevious() {
+		logger.Info("secret key rotation in progress: previous keys accepted for reading; run `cueflow rotate-key`, then remove CUEFLOW_SECRET_KEY_PREVIOUS")
 	}
 	st := store.New(pool, box)
 	if err := st.FailStaleRuns(ctx); err != nil {
@@ -246,4 +253,45 @@ func localBaseURL(addr string) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// rotateKey re-encrypts every connector's secrets with the primary key. Procedure:
+//  1. set CUEFLOW_SECRET_KEY to a new key and CUEFLOW_SECRET_KEY_PREVIOUS to the old one, restart
+//  2. run `cueflow rotate-key` (optionally `--dry-run` first)
+//  3. remove CUEFLOW_SECRET_KEY_PREVIOUS and restart
+func rotateKey(dryRun bool) error {
+	dropEmptyCredentialEnv()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
+	if err != nil {
+		return err
+	}
+	rep, err := store.New(pool, box).ReencryptConnectorSecrets(ctx, dryRun)
+	verb := "re-encrypted"
+	if dryRun {
+		verb = "would re-encrypt"
+	}
+	if rep != nil {
+		fmt.Printf("connectors with secrets: %d, already on the current key: %d, %s: %d\n",
+			rep.Total, rep.AlreadyPrimary, verb, rep.Reencrypted)
+	}
+	if err != nil {
+		return err
+	}
+	if !dryRun && box.HasPrevious() {
+		fmt.Println("done: remove CUEFLOW_SECRET_KEY_PREVIOUS and restart CueFlow")
+	}
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,8 +18,11 @@ type Config struct {
 	Addr        string
 	DatabaseURL string
 	// SecretKey is the 32-byte AES-256-GCM key used to encrypt connector secrets.
-	SecretKey  []byte
-	AdminToken string
+	SecretKey []byte
+	// PreviousSecretKeys still decrypt during a key rotation (CUEFLOW_SECRET_KEY_PREVIOUS,
+	// comma-separated); new data is always encrypted with SecretKey.
+	PreviousSecretKeys [][]byte
+	AdminToken         string
 	// PublicURL is used to build links in notification emails.
 	PublicURL string
 	// DigestCron, when set, sends a "pending review" summary via every active notifier.
@@ -54,6 +58,16 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c.SecretKey = key
+	for _, raw := range strings.Split(os.Getenv("CUEFLOW_SECRET_KEY_PREVIOUS"), ",") {
+		if raw = strings.TrimSpace(raw); raw == "" {
+			continue
+		}
+		k, err := ParseSecretKey(raw)
+		if err != nil {
+			return nil, fmt.Errorf("CUEFLOW_SECRET_KEY_PREVIOUS: %w", err)
+		}
+		c.PreviousSecretKeys = append(c.PreviousSecretKeys, k)
+	}
 	return c, nil
 }
 

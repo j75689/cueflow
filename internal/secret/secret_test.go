@@ -73,3 +73,31 @@ func TestEmpty(t *testing.T) {
 		t.Fatal("short key should fail")
 	}
 }
+
+func TestPreviousKeysOpenButNeverSeal(t *testing.T) {
+	oldKey, newKey := make([]byte, 32), make([]byte, 32)
+	_, _ = rand.Read(oldKey)
+	_, _ = rand.Read(newKey)
+	old, _ := New(oldKey)
+	ct, _ := old.Seal([]byte("secret"), []byte("row"))
+
+	rotating, err := New(newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, idx, err := rotating.OpenWithKeyIndex(ct, []byte("row"))
+	if err != nil || string(out) != "secret" || idx != 1 {
+		t.Fatalf("previous key should open old ciphertext: %q %d %v", out, idx, err)
+	}
+	fresh, _ := rotating.Seal([]byte("secret"), []byte("row"))
+	onlyNew, _ := New(newKey)
+	if _, idx, err := onlyNew.OpenWithKeyIndex(fresh, []byte("row")); err != nil || idx != 0 {
+		t.Fatalf("new data must be sealed with the primary key: %d %v", idx, err)
+	}
+	if _, err := old.Open(fresh, []byte("row")); err == nil {
+		t.Fatal("old key must not open data sealed with the new primary key")
+	}
+	if _, err := New(newKey, make([]byte, 5)); err == nil {
+		t.Fatal("bad previous key should be rejected")
+	}
+}

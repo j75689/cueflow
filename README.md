@@ -140,7 +140,8 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
-| `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets |
+| `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
+| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
@@ -152,6 +153,19 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
+
+### Rotating the secret key
+
+Connector credentials are encrypted with `CUEFLOW_SECRET_KEY`; losing that key means re-entering every
+credential, so keep a copy in a password manager. To change it without downtime or re-entering anything:
+
+1. Generate a new key (`cueflow genkey`). Set it as `CUEFLOW_SECRET_KEY`, move the old one to
+   `CUEFLOW_SECRET_KEY_PREVIOUS`, and restart. New data uses the new key; old data stays readable.
+2. Re-encrypt everything: `docker compose exec cueflow cueflow rotate-key` (try `--dry-run` first). It changes
+   nothing if any connector can't be decrypted.
+3. Remove `CUEFLOW_SECRET_KEY_PREVIOUS` and restart.
+
+Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow and Postiz databases.
 
 ## Development
 

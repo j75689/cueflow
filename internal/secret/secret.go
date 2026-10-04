@@ -10,14 +10,16 @@ import (
 	"fmt"
 )
 
-// Box seals and opens values with a single AES-256-GCM key. The ciphertext layout is
-// nonce || sealed, and the associated data binds a ciphertext to the row it belongs to,
-// so a secret blob copied onto another connector row fails to decrypt.
+// Box seals values with a primary AES-256-GCM key and opens them with the primary key or any
+// previous key (for zero-downtime key rotation). The ciphertext layout is nonce || sealed, and the
+// associated data binds a ciphertext to the row it belongs to, so a secret blob copied onto another
+// connector row fails to decrypt.
 type Box struct {
-	aead cipher.AEAD
+	aead     cipher.AEAD   // primary: used to seal
+	previous []cipher.AEAD // also tried when opening
 }
 
-func New(key []byte) (*Box, error) {
+func newAEAD(key []byte) (cipher.AEAD, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("secret: key must be 32 bytes, got %d", len(key))
 	}
@@ -25,12 +27,28 @@ func New(key []byte) (*Box, error) {
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
+	return cipher.NewGCM(block)
+}
+
+// New builds a Box from the primary key and optional previous keys.
+func New(key []byte, previous ...[]byte) (*Box, error) {
+	aead, err := newAEAD(key)
 	if err != nil {
 		return nil, err
 	}
-	return &Box{aead: aead}, nil
+	b := &Box{aead: aead}
+	for _, k := range previous {
+		p, err := newAEAD(k)
+		if err != nil {
+			return nil, fmt.Errorf("previous %w", err)
+		}
+		b.previous = append(b.previous, p)
+	}
+	return b, nil
 }
+
+// HasPrevious reports whether previous keys are configured.
+func (b *Box) HasPrevious() bool { return len(b.previous) > 0 }
 
 func (b *Box) Seal(plaintext, aad []byte) ([]byte, error) {
 	nonce := make([]byte, b.aead.NonceSize())
@@ -41,15 +59,22 @@ func (b *Box) Seal(plaintext, aad []byte) ([]byte, error) {
 }
 
 func (b *Box) Open(ciphertext, aad []byte) ([]byte, error) {
+	out, _, err := b.OpenWithKeyIndex(ciphertext, aad)
+	return out, err
+}
+
+// OpenWithKeyIndex decrypts and reports which key worked: 0 = primary, 1.. = previous keys.
+func (b *Box) OpenWithKeyIndex(ciphertext, aad []byte) ([]byte, int, error) {
 	ns := b.aead.NonceSize()
 	if len(ciphertext) < ns {
-		return nil, errors.New("secret: ciphertext too short")
+		return nil, -1, errors.New("secret: ciphertext too short")
 	}
-	out, err := b.aead.Open(nil, ciphertext[:ns], ciphertext[ns:], aad)
-	if err != nil {
-		return nil, errors.New("secret: decryption failed (wrong CUEFLOW_SECRET_KEY?)")
+	for i, a := range append([]cipher.AEAD{b.aead}, b.previous...) {
+		if out, err := a.Open(nil, ciphertext[:ns], ciphertext[ns:], aad); err == nil {
+			return out, i, nil
+		}
 	}
-	return out, nil
+	return nil, -1, errors.New("secret: decryption failed (wrong CUEFLOW_SECRET_KEY?)")
 }
 
 // SealMap encrypts a map of secret fields. A nil or empty map yields nil.

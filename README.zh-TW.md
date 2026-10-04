@@ -107,7 +107,8 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
-| `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex） |
+| `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex），請備份 |
+| `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號分隔 |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
@@ -119,6 +120,16 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
+
+### 更換加密金鑰
+
+connector 的憑證都用 `CUEFLOW_SECRET_KEY` 加密；金鑰弄丟就得重新輸入所有憑證，請另外存一份到密碼管理器。要更換金鑰，又不想停機或重填憑證：
+
+1. 產生新金鑰（`cueflow genkey`），設為 `CUEFLOW_SECRET_KEY`，把舊金鑰移到 `CUEFLOW_SECRET_KEY_PREVIOUS`，重啟。之後新資料用新金鑰加密，舊資料也還讀得到。
+2. 全部重新加密：`docker compose exec cueflow cueflow rotate-key`（可以先加 `--dry-run` 試跑）。只要有任何一個 connector 解不開，就不會修改任何資料。
+3. 拿掉 `CUEFLOW_SECRET_KEY_PREVIOUS`，再重啟一次。
+
+注意：`docker compose down -v` 會刪除 volume，也就是 CueFlow 和 Postiz 的資料庫。
 
 ## 開發
 

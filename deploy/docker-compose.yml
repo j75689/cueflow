@@ -30,6 +30,7 @@ services:
     environment:
       DATABASE_URL: postgres://cueflow:${CUEFLOW_DB_PASSWORD:-cueflow}@cueflow-db:5432/cueflow?sslmode=disable
       CUEFLOW_SECRET_KEY: ${CUEFLOW_SECRET_KEY:?set CUEFLOW_SECRET_KEY in .env (openssl rand -base64 32)}
+      CUEFLOW_SECRET_KEY_PREVIOUS: ${CUEFLOW_SECRET_KEY_PREVIOUS:-}
       CUEFLOW_ADMIN_TOKEN: ${CUEFLOW_ADMIN_TOKEN:-}
       CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
       CUEFLOW_DIGEST_CRON: ${CUEFLOW_DIGEST_CRON:-}

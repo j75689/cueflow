@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -279,3 +280,78 @@ func dropEmpty(m map[string]any) {
 		}
 	}
 }
+
+// RotationReport describes a re-encryption pass over connector secrets.
+type RotationReport struct {
+	Total          int      `json:"total"`           // connectors with stored secrets
+	AlreadyPrimary int      `json:"already_primary"` // already sealed with the primary key
+	Reencrypted    int      `json:"reencrypted"`     // sealed with a previous key, now re-sealed
+	Undecryptable  []string `json:"undecryptable"`   // names of connectors no configured key can open
+	DryRun         bool     `json:"dry_run"`
+}
+
+// ReencryptConnectorSecrets re-seals every connector's secrets with the primary key (reading with
+// the primary or previous keys) in one transaction. If any connector cannot be decrypted it
+// changes nothing and reports them, so a wrong key never destroys data.
+func (s *Store) ReencryptConnectorSecrets(ctx context.Context, dryRun bool) (*RotationReport, error) {
+	rep := &RotationReport{DryRun: dryRun, Undecryptable: []string{}}
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, name, secrets FROM connectors
+			WHERE secrets IS NOT NULL AND length(secrets) > 0 ORDER BY created_at FOR UPDATE`)
+		if err != nil {
+			return err
+		}
+		type row struct {
+			id     uuid.UUID
+			name   string
+			sealed []byte
+		}
+		var todo []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.id, &r.name, &r.sealed); err != nil {
+				rows.Close()
+				return err
+			}
+			rep.Total++
+			plain, idx, err := s.box.OpenWithKeyIndex(r.sealed, r.id[:])
+			switch {
+			case err != nil:
+				rep.Undecryptable = append(rep.Undecryptable, r.name)
+			case idx == 0:
+				rep.AlreadyPrimary++
+			default:
+				sealed, err := s.box.Seal(plain, r.id[:])
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				todo = append(todo, row{id: r.id, name: r.name, sealed: sealed})
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(rep.Undecryptable) > 0 {
+			return errUndecryptable
+		}
+		rep.Reencrypted = len(todo)
+		if dryRun {
+			return nil
+		}
+		for _, r := range todo {
+			if _, err := tx.Exec(ctx, "UPDATE connectors SET secrets=$2, updated_at=NOW() WHERE id=$1", r.id, r.sealed); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errUndecryptable) {
+		return rep, fmt.Errorf("%d connector(s) cannot be decrypted with the configured keys: %s; nothing was changed",
+			len(rep.Undecryptable), strings.Join(rep.Undecryptable, ", "))
+	}
+	return rep, err
+}
+
+var errUndecryptable = errors.New("undecryptable connector secrets")

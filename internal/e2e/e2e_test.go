@@ -399,3 +399,62 @@ func TestMetaAndUI(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestSecretKeyRotation(t *testing.T) {
+	e := setup(t) // store sealed with the all-zero test key
+	ctx := context.Background()
+	oldKey := make([]byte, 32)
+	newKey := bytes.Repeat([]byte{7}, 32)
+
+	c, err := e.store.CreateConnector(ctx, "Postiz", "postiz_mcp", true, map[string]any{
+		"endpoint_url": "http://x/api/mcp", "api_key": "postiz-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withKeys := func(primary []byte, previous ...[]byte) *store.Store {
+		box, err := secret.New(primary, previous...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.New(e.pool, box)
+	}
+
+	// Step 1: new primary + old previous key -> everything still readable.
+	rotating := withKeys(newKey, oldKey)
+	if _, cfg, err := rotating.ConnectorSettings(ctx, c.ID); err != nil || cfg.String("api_key") != "postiz-secret" {
+		t.Fatalf("previous key should still decrypt: %v %v", cfg, err)
+	}
+
+	// Dry run reports without writing.
+	rep, err := rotating.ReencryptConnectorSecrets(ctx, true)
+	if err != nil || rep.Total != 1 || rep.Reencrypted != 1 {
+		t.Fatalf("dry run: %+v %v", rep, err)
+	}
+	if _, _, err := withKeys(newKey).ConnectorSettings(ctx, c.ID); err == nil {
+		t.Fatal("dry run must not re-encrypt")
+	}
+
+	// A wrong key set aborts without touching anything.
+	if _, err := withKeys(bytes.Repeat([]byte{9}, 32)).ReencryptConnectorSecrets(ctx, false); err == nil ||
+		!strings.Contains(err.Error(), "Postiz") {
+		t.Fatalf("undecryptable connector should abort: %v", err)
+	}
+	if _, cfg, _ := withKeys(oldKey).ConnectorSettings(ctx, c.ID); cfg.String("api_key") != "postiz-secret" {
+		t.Fatal("aborted rotation must leave data unchanged")
+	}
+
+	// Step 2: rotate for real.
+	if rep, err := rotating.ReencryptConnectorSecrets(ctx, false); err != nil || rep.Reencrypted != 1 {
+		t.Fatalf("rotate: %+v %v", rep, err)
+	}
+	// Step 3: only the new key is needed now; the old one no longer works.
+	if _, cfg, err := withKeys(newKey).ConnectorSettings(ctx, c.ID); err != nil || cfg.String("api_key") != "postiz-secret" {
+		t.Fatalf("new key should decrypt after rotation: %v %v", cfg, err)
+	}
+	if _, _, err := withKeys(oldKey).ConnectorSettings(ctx, c.ID); err == nil {
+		t.Fatal("old key should no longer decrypt")
+	}
+	if rep, err := rotating.ReencryptConnectorSecrets(ctx, false); err != nil || rep.AlreadyPrimary != 1 || rep.Reencrypted != 0 {
+		t.Fatalf("second rotation should be a no-op: %+v %v", rep, err)
+	}
+}
