@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type DragEvent, type ReactNode, useMemo, useState } from "react";
+import { type DragEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import {
   AgentAvatar,
   AgentSelect,
@@ -85,6 +85,19 @@ export default function BoardPage() {
   const [over, setOver] = useState<{ col: string; index: number } | null>(null);
 
   const dragged = dragId ? (tasks.data?.items ?? []).find((t) => t.id === dragId) : undefined;
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  // Scroll the board sideways while a card is held near its left or right edge.
+  function autoScroll(e: DragEvent) {
+    const el = boardRef.current;
+    if (!dragId || !el) return;
+    const rect = el.getBoundingClientRect();
+    const zone = 96;
+    const left = e.clientX - rect.left;
+    const right = rect.right - e.clientX;
+    if (left < zone) el.scrollLeft -= Math.ceil((zone - left) / 4);
+    else if (right < zone) el.scrollLeft += Math.ceil((zone - right) / 4);
+  }
 
   function canDrop(col: Column, t: Task | undefined): boolean {
     if (!t) return false;
@@ -197,7 +210,11 @@ export default function BoardPage() {
       {tasks.loading && !tasks.data ? (
         <Loading />
       ) : (
-        <div className="-mx-4 flex flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div
+          ref={boardRef}
+          onDragOverCapture={autoScroll}
+          className="-mx-4 flex flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+        >
           {columns.map((col) => {
             const list = byColumn[col.key] ?? [];
             const droppable = canDrop(col, dragged);
@@ -211,7 +228,7 @@ export default function BoardPage() {
                   if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setOver(null);
                 }}
                 className={cx(
-                  "flex w-[300px] shrink-0 flex-col rounded-lg border bg-zinc-50 transition-colors dark:bg-zinc-900/50",
+                  "flex min-w-[160px] max-w-[340px] flex-1 basis-0 flex-col rounded-lg border bg-zinc-50 transition-colors dark:bg-zinc-900/50",
                   dragId && droppable
                     ? isOver
                       ? "border-indigo-400 bg-indigo-50/50 dark:border-indigo-500/60 dark:bg-indigo-500/5"
@@ -362,8 +379,8 @@ function TaskCard({
           ))}
         </div>
       )}
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <span className="flex max-w-full items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
           <AgentAvatar agent={t.assignee} size="xs" />
           <span className="truncate">{t.assignee?.name ?? "Unassigned"}</span>
         </span>
