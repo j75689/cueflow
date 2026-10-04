@@ -32,6 +32,11 @@ ENTRYPOINT ["/usr/local/bin/cueflow"]
 FROM node:22-bookworm-slim AS full
 ARG CLAUDE_ACP_VERSION=0.85.1
 ARG CODEX_ACP_VERSION=2.1.1
+# ca-certificates: the Go binary verifies TLS with the system trust store (node images ship without it).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && test -s /etc/ssl/certs/ca-certificates.crt
 RUN npm install -g --omit=dev \
       @agentclientprotocol/claude-agent-acp@${CLAUDE_ACP_VERSION} \
       @agentclientprotocol/codex-acp@${CODEX_ACP_VERSION} \
