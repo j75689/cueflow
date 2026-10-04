@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_TASK_STATUSES,
   AgentAvatar,
@@ -355,14 +355,30 @@ function Thread({
   agents: Agent[];
   onSent: () => void;
 }) {
-  const bottom = useRef<HTMLDivElement>(null);
-  const count = messages.length;
-  useEffect(() => {
-    bottom.current?.scrollIntoView({
-      block: "end",
-      behavior: count > 0 ? "smooth" : "auto",
-    });
-  }, [count, task.running]);
+  // Keep the thread pinned to the newest message: jump to the bottom on first load, then follow
+  // new messages only while the reader is already near the bottom (don't yank them away from
+  // older messages they scrolled up to read). Scrolls the thread container, never the page.
+  const scroller = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const initialized = useRef(false);
+  const lastId = messages.length ? messages[messages.length - 1].id : "";
+  const onScroll = () => {
+    const el = scroller.current;
+    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || messages.length === 0) return;
+    if (!initialized.current || pinned.current) {
+      el.scrollTop = el.scrollHeight;
+      initialized.current = true;
+      pinned.current = true;
+    }
+  }, [lastId, messages.length, task.running]);
+  const handleSent = () => {
+    pinned.current = true; // your own message always scrolls into view
+    onSent();
+  };
 
   return (
     <Card>
@@ -370,7 +386,11 @@ function Thread({
         title="Conversation"
         subtitle="Talk to the assigned agent. Start with @slug to hand the task to another agent."
       />
-      <div className="max-h-[65vh] min-h-[200px] space-y-3 overflow-y-auto px-4 py-4">
+      <div
+        ref={scroller}
+        onScroll={onScroll}
+        className="max-h-[65vh] min-h-[200px] space-y-3 overflow-y-auto overscroll-contain px-4 py-4"
+      >
         {loading && <Loading />}
         {error && <ErrorBox onRetry={onRetry}>{error}</ErrorBox>}
         {!loading && messages.length === 0 && (
@@ -393,9 +413,8 @@ function Thread({
             </span>
           </div>
         )}
-        <div ref={bottom} />
       </div>
-      <Composer task={task} agents={agents} onSent={onSent} />
+      <Composer task={task} agents={agents} onSent={handleSent} />
     </Card>
   );
 }
