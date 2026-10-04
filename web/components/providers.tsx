@@ -12,6 +12,7 @@ import {
 } from "react";
 import { UNAUTHORIZED_EVENT, api, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
 import type { Meta } from "@/lib/types";
+import { DialogProvider } from "./dialog";
 import { Button, Field, Input, Modal, cx } from "./ui";
 
 /* ---------------------------------- Toasts --------------------------------- */
@@ -224,9 +225,11 @@ export function Providers({ children }: { children: ReactNode }) {
       <MetaCtx.Provider value={metaState}>
         <BusCtx.Provider value={bus}>
           {/* Re-mount pages after a new token so they refetch. */}
-          <div key={authEpoch} className="contents">
-            {children}
-          </div>
+          <DialogProvider>
+            <div key={authEpoch} className="contents">
+              {children}
+            </div>
+          </DialogProvider>
           <Modal
             open={authOpen}
             onClose={() => setAuthOpen(false)}

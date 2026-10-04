@@ -13,6 +13,7 @@ import {
   timezones,
   useAgents,
 } from "@/components/agents";
+import { useDialog } from "@/components/dialog";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -48,6 +49,7 @@ const blank = (): ScheduleInput => ({
 
 export default function SchedulesPage() {
   const toast = useToast();
+  const dialog = useDialog();
   const router = useRouter();
   const agents = useAgents();
   const schedules = useAsync(() => api.listSchedules(), []);
@@ -72,7 +74,16 @@ export default function SchedulesPage() {
     }
   };
   const remove = async (s: Schedule) => {
-    if (!window.confirm(`Delete schedule “${s.name}”?`)) return;
+    if (
+      !(await dialog.confirm({
+        title: `Delete schedule “${s.name}”?`,
+        message:
+          "No more tasks will be created from it. Existing tasks are kept.",
+        confirmLabel: "Delete schedule",
+        tone: "danger",
+      }))
+    )
+      return;
     try {
       await api.deleteSchedule(s.id);
       void schedules.reload();
@@ -94,7 +105,9 @@ export default function SchedulesPage() {
           </Button>
         }
       />
-      {schedules.error && <ErrorBox onRetry={schedules.reload}>{schedules.error}</ErrorBox>}
+      {schedules.error && (
+        <ErrorBox onRetry={schedules.reload}>{schedules.error}</ErrorBox>
+      )}
       {schedules.loading && !schedules.data ? (
         <Loading />
       ) : list.length === 0 ? (
@@ -115,34 +128,64 @@ export default function SchedulesPage() {
             {list.map((s) => {
               const a = agentRef(agents.data, s.assignee_agent_id);
               return (
-                <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <Toggle checked={s.is_active} onChange={(v) => void toggle(s, v)} />
+                <li
+                  key={s.id}
+                  className="flex flex-wrap items-center gap-3 px-4 py-3"
+                >
+                  <Toggle
+                    checked={s.is_active}
+                    onChange={(v) => void toggle(s, v)}
+                  />
                   <AgentAvatar agent={a} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      <button onClick={() => setEditing(s)} className="truncate hover:underline">
+                      <button
+                        onClick={() => setEditing(s)}
+                        className="truncate hover:underline"
+                      >
                         {s.name || s.task_title}
                       </button>
                       {s.created_by === "agent" && (
-                        <Pill className="bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300">created by agent</Pill>
+                        <Pill className="bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300">
+                          created by agent
+                        </Pill>
                       )}
                     </p>
                     <p className="truncate text-xs text-zinc-500">
-                      <code className="font-mono">{s.cron_expr}</code> ({s.timezone}) → “{s.task_title}” for {a?.name ?? "unassigned"}
+                      <code className="font-mono">{s.cron_expr}</code> (
+                      {s.timezone}) → “{s.task_title}” for{" "}
+                      {a?.name ?? "unassigned"}
                     </p>
                   </div>
                   <div className="text-right text-xs text-zinc-500">
-                    <p title={fmtTime(s.next_run_at)}>{s.is_active && s.next_run_at ? `next ${fmtRelative(s.next_run_at)}` : "paused"}</p>
+                    <p title={fmtTime(s.next_run_at)}>
+                      {s.is_active && s.next_run_at
+                        ? `next ${fmtRelative(s.next_run_at)}`
+                        : "paused"}
+                    </p>
                     <p>last {fmtRelative(s.last_run_at)}</p>
                   </div>
                   <div className="flex gap-1.5">
-                    <Button size="sm" variant="secondary" onClick={() => void runNow(s)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void runNow(s)}
+                    >
                       <Icon name="play" className="h-3.5 w-3.5" /> Run now
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(s)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditing(s)}
+                    >
                       Edit
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void remove(s)} aria-label="Delete">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void remove(s)}
+                      aria-label="Delete"
+                    >
                       <Icon name="trash" className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -205,8 +248,10 @@ function ScheduleModal({
       );
     }
   }
-  const set = <K extends keyof ScheduleInput>(k: K, v: ScheduleInput[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const valid = form.cron_expr.trim() && form.task_title.trim() && form.assignee_agent_id;
+  const set = <K extends keyof ScheduleInput>(k: K, v: ScheduleInput[K]) =>
+    setForm((f) => ({ ...f, [k]: v }));
+  const valid =
+    form.cron_expr.trim() && form.task_title.trim() && form.assignee_agent_id;
 
   const save = async () => {
     if (!valid) return;
@@ -235,7 +280,12 @@ function ScheduleModal({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" loading={busy} disabled={!valid} onClick={save}>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!valid}
+            onClick={save}
+          >
             Save
           </Button>
         </>
@@ -243,13 +293,28 @@ function ScheduleModal({
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name" className="sm:col-span-2">
-          <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Morning AI digest" />
+          <Input
+            value={form.name}
+            onChange={(e) => set("name", e.target.value)}
+            placeholder="Morning AI digest"
+          />
         </Field>
-        <Field label="Cron" required help="5 fields, or @daily / @every 2h. At most every 5 minutes.">
-          <Input value={form.cron_expr} onChange={(e) => set("cron_expr", e.target.value)} className="font-mono" />
+        <Field
+          label="Cron"
+          required
+          help="5 fields, or @daily / @every 2h. At most every 5 minutes."
+        >
+          <Input
+            value={form.cron_expr}
+            onChange={(e) => set("cron_expr", e.target.value)}
+            className="font-mono"
+          />
         </Field>
         <Field label="Preset">
-          <Select value="" onChange={(e) => e.target.value && set("cron_expr", e.target.value)}>
+          <Select
+            value=""
+            onChange={(e) => e.target.value && set("cron_expr", e.target.value)}
+          >
             <option value="">Choose a preset…</option>
             {CRON_PRESETS.map((p) => (
               <option key={p.value} value={p.value}>
@@ -259,7 +324,10 @@ function ScheduleModal({
           </Select>
         </Field>
         <Field label="Timezone">
-          <Select value={form.timezone} onChange={(e) => set("timezone", e.target.value)}>
+          <Select
+            value={form.timezone}
+            onChange={(e) => set("timezone", e.target.value)}
+          >
             {[...new Set([form.timezone, ...tzs])].map((z) => (
               <option key={z} value={z}>
                 {z}
@@ -268,16 +336,32 @@ function ScheduleModal({
           </Select>
         </Field>
         <Field label="Assign to" required>
-          <AgentSelect agents={agents} value={form.assignee_agent_id} onChange={(v) => set("assignee_agent_id", v)} noneLabel="Choose an agent…" />
+          <AgentSelect
+            agents={agents}
+            value={form.assignee_agent_id}
+            onChange={(v) => set("assignee_agent_id", v)}
+            noneLabel="Choose an agent…"
+          />
         </Field>
         <Field label="Task title" required className="sm:col-span-2">
-          <Input value={form.task_title} onChange={(e) => set("task_title", e.target.value)} placeholder="Summarize today's AI news and draft a Threads post" />
+          <Input
+            value={form.task_title}
+            onChange={(e) => set("task_title", e.target.value)}
+            placeholder="Summarize today's AI news and draft a Threads post"
+          />
         </Field>
         <Field label="Task description" className="sm:col-span-2">
-          <Textarea rows={4} value={form.task_description} onChange={(e) => set("task_description", e.target.value)} />
+          <Textarea
+            rows={4}
+            value={form.task_description}
+            onChange={(e) => set("task_description", e.target.value)}
+          />
         </Field>
         <Field label="Priority">
-          <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TaskPriority)}>
+          <Select
+            value={form.priority}
+            onChange={(e) => set("priority", e.target.value as TaskPriority)}
+          >
             {PRIORITIES.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -286,7 +370,11 @@ function ScheduleModal({
           </Select>
         </Field>
         <div className="flex items-end">
-          <Toggle checked={form.is_active} onChange={(v) => set("is_active", v)} label="Active" />
+          <Toggle
+            checked={form.is_active}
+            onChange={(v) => set("is_active", v)}
+            label="Active"
+          />
         </div>
       </div>
     </Modal>

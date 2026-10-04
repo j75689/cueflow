@@ -4,15 +4,18 @@ import {
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
-  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
   forwardRef,
   useEffect,
+  useId,
+  useRef,
 } from "react";
 
-export function cx(...parts: (string | false | null | undefined)[]): string {
-  return parts.filter(Boolean).join(" ");
-}
+import { cx, inputBase } from "./cx";
+
+export { cx, inputBase };
+export { Select } from "./select";
+export { DateTimePicker } from "./date-time-picker";
 
 type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 
@@ -96,11 +99,6 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   );
 }
 
-const inputBase =
-  "w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 " +
-  "focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-zinc-100 disabled:text-zinc-500 " +
-  "dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:disabled:bg-zinc-900";
-
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...rest },
   ref,
@@ -113,14 +111,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
     return <textarea ref={ref} className={cx(inputBase, "min-h-[80px] leading-relaxed", className)} {...rest} />;
   },
 );
-
-export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select className={cx(inputBase, "h-9 pr-8", className)} {...rest}>
-      {children}
-    </select>
-  );
-}
 
 export function Field({
   label,
@@ -215,6 +205,11 @@ export function Checkbox({
   );
 }
 
+const FOCUSABLE =
+  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+let scrollLocks = 0;
+
 export function Modal({
   open,
   onClose,
@@ -222,6 +217,9 @@ export function Modal({
   children,
   footer,
   wide,
+  role = "dialog",
+  describedBy,
+  hideClose,
 }: {
   open: boolean;
   onClose: () => void;
@@ -229,30 +227,92 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  role?: "dialog" | "alertdialog";
+  describedBy?: string;
+  hideClose?: boolean;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const opener = document.activeElement as HTMLElement | null;
+    // Body scroll lock (reference-counted for stacked modals).
+    if (scrollLocks++ === 0) document.body.style.overflow = "hidden";
+    // Initial focus: an [autofocus] / [data-autofocus] element, else the first focusable.
+    const t = setTimeout(() => {
+      const panel = panelRef.current;
+      if (!panel || panel.contains(document.activeElement)) return;
+      const target =
+        panel.querySelector<HTMLElement>("[data-autofocus],[autofocus]") ?? panel.querySelector<HTMLElement>(FOCUSABLE);
+      (target ?? panel).focus();
+    }, 0);
+    const onKey = (e: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      // Only the top-most modal reacts.
+      const all = document.querySelectorAll("[data-cf-modal]");
+      if (all[all.length - 1] !== panel) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+      } else if (e.key === "Tab") {
+        const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+        if (items.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+      if (--scrollLocks === 0) document.body.style.overflow = "";
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/50 p-0 sm:items-center sm:p-4" onMouseDown={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/50 p-0 backdrop-blur-[1px] sm:items-center sm:p-4"
+      onMouseDown={onClose}
+    >
       <div
-        role="dialog"
+        ref={panelRef}
+        data-cf-modal=""
+        role={role}
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={describedBy}
+        tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
         className={cx(
-          "max-h-[90vh] w-full overflow-auto rounded-t-xl border border-zinc-200 bg-white shadow-xl sm:rounded-xl dark:border-zinc-800 dark:bg-zinc-900",
+          "max-h-[90vh] w-full overflow-auto rounded-t-xl border border-zinc-200 bg-white shadow-xl outline-none sm:rounded-xl dark:border-zinc-800 dark:bg-zinc-900",
           wide ? "sm:max-w-3xl" : "sm:max-w-md",
         )}
       >
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
-          <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Close">
-            <Icon name="x" className="h-4 w-4" />
-          </button>
+          <h3 id={titleId} className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            {title}
+          </h3>
+          {!hideClose && (
+            <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Close">
+              <Icon name="x" className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <div className="px-4 py-4">{children}</div>
         {footer && (

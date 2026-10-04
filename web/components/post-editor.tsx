@@ -5,7 +5,7 @@ import { charCount, fromLocalInput, toLocalInput } from "@/lib/format";
 import type { Connector, Platform } from "@/lib/types";
 import { StringListInput, TagInput } from "./inputs";
 import { GenericPreview, InstagramPreview, ThreadsPreview } from "./post";
-import { Button, Card, CardHeader, Checkbox, Field, Icon, Input, Select, Textarea, cx } from "./ui";
+import { Button, Card, CardHeader, Checkbox, DateTimePicker, Field, Icon, Input, Select, Textarea, cx } from "./ui";
 
 export interface PostDraft {
   title: string;
@@ -307,11 +307,12 @@ export function PostEditor({
         <CardHeader title="Delivery" />
         <div className="grid gap-4 p-4 md:grid-cols-2">
           <Field label="Scheduled at" help="Leave empty to publish as soon as it is approved.">
-            <Input
-              type="datetime-local"
+            <DateTimePicker
+              aria-label="Scheduled at"
               disabled={readOnly}
+              placeholder="Publish when approved"
               value={toLocalInput(draft.scheduled_at)}
-              onChange={(e) => set("scheduled_at", fromLocalInput(e.target.value))}
+              onChange={(v) => set("scheduled_at", fromLocalInput(v))}
             />
           </Field>
           <Field label="Publisher" help="Defaults to the pipeline's publisher or the first active one.">

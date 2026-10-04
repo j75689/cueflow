@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { HealthDot, RunStatusBadge } from "@/components/badges";
 import { TagInput } from "@/components/inputs";
+import { useDialog } from "@/components/dialog";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -47,12 +48,20 @@ function defaultTimezone(): string {
 
 function timezones(): string[] {
   try {
-    const fn = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    const fn = (
+      Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
+    ).supportedValuesOf;
     if (fn) return ["UTC", ...fn("timeZone").filter((z) => z !== "UTC")];
   } catch {
     /* fall through */
   }
-  return ["UTC", "Asia/Taipei", "Asia/Tokyo", "America/New_York", "Europe/London"];
+  return [
+    "UTC",
+    "Asia/Taipei",
+    "Asia/Tokyo",
+    "America/New_York",
+    "Europe/London",
+  ];
 }
 
 const blank = (): PipelineInput => ({
@@ -87,7 +96,10 @@ function ConnectorSelect({
   placeholder: string;
 }) {
   return (
-    <Select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+    <Select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+    >
       <option value="">{placeholder}</option>
       {options.map((c) => (
         <option key={c.id} value={c.id}>
@@ -103,17 +115,26 @@ function PipelineEdit() {
   const isNew = !id;
   const router = useRouter();
   const toast = useToast();
+  const dialog = useDialog();
   const { meta } = useMeta();
 
   const connectors = useAsync(() => api.listConnectors(), []);
-  const pipeline = useAsync(async () => (id ? api.getPipeline(id) : null), [id]);
-  const runs = useAsync(async () => (id ? api.listRuns({ pipeline_id: id, limit: 10 }) : []), [id]);
+  const pipeline = useAsync(
+    async () => (id ? api.getPipeline(id) : null),
+    [id],
+  );
+  const runs = useAsync(
+    async () => (id ? api.listRuns({ pipeline_id: id, limit: 10 }) : []),
+    [id],
+  );
   const refreshRuns = useDebouncedCallback(() => void runs.reload(), 300);
   useServerEvent("run.updated", (d) => {
     if (d.pipeline_id === id) refreshRuns();
   });
 
-  const [form, setForm] = useState<PipelineInput | null>(isNew ? blank() : null);
+  const [form, setForm] = useState<PipelineInput | null>(
+    isNew ? blank() : null,
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const tzs = useMemo(timezones, []);
 
@@ -143,7 +164,13 @@ function PipelineEdit() {
   }, [pipeline.data]);
 
   const byKind = useMemo(() => {
-    const g: Record<string, Connector[]> = { llm: [], source: [], search: [], publisher: [], notifier: [] };
+    const g: Record<string, Connector[]> = {
+      llm: [],
+      source: [],
+      search: [],
+      publisher: [],
+      notifier: [],
+    };
     for (const c of connectors.data ?? []) (g[c.kind] ??= []).push(c);
     return g;
   }, [connectors.data]);
@@ -155,11 +182,17 @@ function PipelineEdit() {
     }
   }, [isNew, form, byKind.llm]);
 
-  if (!isNew && pipeline.error) return <ErrorBox onRetry={pipeline.reload}>{pipeline.error}</ErrorBox>;
+  if (!isNew && pipeline.error)
+    return <ErrorBox onRetry={pipeline.reload}>{pipeline.error}</ErrorBox>;
   if (!form || !meta) return <Loading />;
 
-  const set = <K extends keyof PipelineInput>(k: K, v: PipelineInput[K]) => setForm({ ...form, [k]: v });
-  const valid = form.name.trim() && form.cron_expr.trim() && form.platforms.length > 0 && form.llm_connector_id;
+  const set = <K extends keyof PipelineInput>(k: K, v: PipelineInput[K]) =>
+    setForm({ ...form, [k]: v });
+  const valid =
+    form.name.trim() &&
+    form.cron_expr.trim() &&
+    form.platforms.length > 0 &&
+    form.llm_connector_id;
 
   const save = async () => {
     setBusy("save");
@@ -194,7 +227,15 @@ function PipelineEdit() {
   };
 
   const remove = async () => {
-    if (!window.confirm("Delete this pipeline? Generated posts are kept.")) return;
+    if (
+      !(await dialog.confirm({
+        title: "Delete pipeline?",
+        message: "Its schedule stops. Posts it already generated are kept.",
+        confirmLabel: "Delete pipeline",
+        tone: "danger",
+      }))
+    )
+      return;
     setBusy("delete");
     try {
       await api.deletePipeline(id);
@@ -211,7 +252,10 @@ function PipelineEdit() {
   return (
     <div>
       <div className="mb-2">
-        <Link href="/pipelines/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+        <Link
+          href="/pipelines/"
+          className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+        >
           ← Pipelines
         </Link>
       </div>
@@ -226,7 +270,11 @@ function PipelineEdit() {
           <>
             {!isNew && (
               <>
-                <Button variant="ghost" onClick={remove} loading={busy === "delete"}>
+                <Button
+                  variant="ghost"
+                  onClick={remove}
+                  loading={busy === "delete"}
+                >
                   <Icon name="trash" /> Delete
                 </Button>
                 <Button onClick={runNow} loading={busy === "run"}>
@@ -234,27 +282,54 @@ function PipelineEdit() {
                 </Button>
               </>
             )}
-            <Button variant="primary" onClick={save} disabled={!valid} loading={busy === "save"}>
+            <Button
+              variant="primary"
+              onClick={save}
+              disabled={!valid}
+              loading={busy === "save"}
+            >
               {isNew ? "Create pipeline" : "Save"}
             </Button>
           </>
         }
       />
 
-      {connectors.error && <ErrorBox onRetry={connectors.reload}>{connectors.error}</ErrorBox>}
+      {connectors.error && (
+        <ErrorBox onRetry={connectors.reload}>{connectors.error}</ErrorBox>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           <Card>
-            <CardHeader title="General" actions={<Toggle checked={form.is_active} onChange={(v) => set("is_active", v)} label="Active" />} />
+            <CardHeader
+              title="General"
+              actions={
+                <Toggle
+                  checked={form.is_active}
+                  onChange={(v) => set("is_active", v)}
+                  label="Active"
+                />
+              }
+            />
             <div className="grid gap-4 p-4 md:grid-cols-2">
               <Field label="Name" required className="md:col-span-2">
-                <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Daily AI digest" />
+                <Input
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder="Daily AI digest"
+                />
               </Field>
               <Field label="Description" className="md:col-span-2">
-                <Input value={form.description} onChange={(e) => set("description", e.target.value)} />
+                <Input
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                />
               </Field>
-              <Field label="Schedule (cron)" required help="5-field cron, or @daily / @every 1h. Evaluated in the timezone.">
+              <Field
+                label="Schedule (cron)"
+                required
+                help="5-field cron, or @daily / @every 1h. Evaluated in the timezone."
+              >
                 <div className="flex gap-1.5">
                   <Input
                     className="font-mono"
@@ -265,7 +340,9 @@ function PipelineEdit() {
                     className="w-10 shrink-0 px-1"
                     value=""
                     aria-label="Cron presets"
-                    onChange={(e) => e.target.value && set("cron_expr", e.target.value)}
+                    onChange={(e) =>
+                      e.target.value && set("cron_expr", e.target.value)
+                    }
                   >
                     <option value="">…</option>
                     {CRON_PRESETS.map((c) => (
@@ -277,8 +354,13 @@ function PipelineEdit() {
                 </div>
               </Field>
               <Field label="Timezone">
-                <Select value={form.timezone} onChange={(e) => set("timezone", e.target.value)}>
-                  {!tzs.includes(form.timezone) && <option value={form.timezone}>{form.timezone}</option>}
+                <Select
+                  value={form.timezone}
+                  onChange={(e) => set("timezone", e.target.value)}
+                >
+                  {!tzs.includes(form.timezone) && (
+                    <option value={form.timezone}>{form.timezone}</option>
+                  )}
                   {tzs.map((z) => (
                     <option key={z} value={z}>
                       {z}
@@ -292,10 +374,22 @@ function PipelineEdit() {
           <Card>
             <CardHeader title="Agent brief" />
             <div className="grid gap-4 p-4 md:grid-cols-2">
-              <Field label="Topic" className="md:col-span-2" help="What these posts are about.">
-                <Input value={form.topic} onChange={(e) => set("topic", e.target.value)} placeholder="AI tooling news for developers" />
+              <Field
+                label="Topic"
+                className="md:col-span-2"
+                help="What these posts are about."
+              >
+                <Input
+                  value={form.topic}
+                  onChange={(e) => set("topic", e.target.value)}
+                  placeholder="AI tooling news for developers"
+                />
               </Field>
-              <Field label="Instructions" className="md:col-span-2" help="Voice, audience, do's and don'ts. Added to the system prompt.">
+              <Field
+                label="Instructions"
+                className="md:col-span-2"
+                help="Voice, audience, do's and don'ts. Added to the system prompt."
+              >
                 <Textarea
                   rows={6}
                   value={form.instructions}
@@ -304,8 +398,13 @@ function PipelineEdit() {
                 />
               </Field>
               <Field label="Language">
-                <Select value={form.language} onChange={(e) => set("language", e.target.value)}>
-                  {!LANGUAGES.includes(form.language) && <option value={form.language}>{form.language}</option>}
+                <Select
+                  value={form.language}
+                  onChange={(e) => set("language", e.target.value)}
+                >
+                  {!LANGUAGES.includes(form.language) && (
+                    <option value={form.language}>{form.language}</option>
+                  )}
                   {LANGUAGES.map((l) => (
                     <option key={l} value={l}>
                       {l}
@@ -321,7 +420,12 @@ function PipelineEdit() {
                       label={pl.name}
                       checked={form.platforms.includes(pl.id)}
                       onChange={(on) =>
-                        set("platforms", on ? [...form.platforms, pl.id] : form.platforms.filter((x) => x !== pl.id))
+                        set(
+                          "platforms",
+                          on
+                            ? [...form.platforms, pl.id]
+                            : form.platforms.filter((x) => x !== pl.id),
+                        )
                       }
                     />
                   ))}
@@ -332,20 +436,30 @@ function PipelineEdit() {
                   value={form.llm_connector_id}
                   onChange={(v) => set("llm_connector_id", v)}
                   options={byKind.llm}
-                  placeholder={byKind.llm.length ? "Select an LLM…" : "No LLM connectors — add one first"}
+                  placeholder={
+                    byKind.llm.length
+                      ? "Select an LLM…"
+                      : "No LLM connectors — add one first"
+                  }
                 />
               </Field>
             </div>
           </Card>
 
           <Card>
-            <CardHeader title="Inputs" subtitle="Material the agent reads before writing." />
+            <CardHeader
+              title="Inputs"
+              subtitle="Material the agent reads before writing."
+            />
             <div className="grid gap-4 p-4 md:grid-cols-2">
               <Field label="Sources" className="md:col-span-2">
                 {byKind.source.length === 0 ? (
                   <p className="text-sm text-zinc-500">
                     No source connectors.{" "}
-                    <Link href="/connectors/edit/" className="text-indigo-600 hover:underline dark:text-indigo-400">
+                    <Link
+                      href="/connectors/edit/"
+                      className="text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
                       Add RSS or IMAP
                     </Link>
                   </p>
@@ -356,7 +470,10 @@ function PipelineEdit() {
                         <Checkbox
                           label={
                             <span className="flex items-center gap-1.5">
-                              {c.name} <span className="text-xs text-zinc-400">{c.type}</span>
+                              {c.name}{" "}
+                              <span className="text-xs text-zinc-400">
+                                {c.type}
+                              </span>
                             </span>
                           }
                           checked={form.source_connector_ids.includes(c.id)}
@@ -365,7 +482,9 @@ function PipelineEdit() {
                               "source_connector_ids",
                               on
                                 ? [...form.source_connector_ids, c.id]
-                                : form.source_connector_ids.filter((x) => x !== c.id),
+                                : form.source_connector_ids.filter(
+                                    (x) => x !== c.id,
+                                  ),
                             )
                           }
                         />
@@ -375,20 +494,30 @@ function PipelineEdit() {
                   </div>
                 )}
               </Field>
-              <Field label="Look-back (hours)" help="Only items newer than this are considered.">
+              <Field
+                label="Look-back (hours)"
+                help="Only items newer than this are considered."
+              >
                 <Input
                   type="number"
                   min={1}
                   value={form.lookback_hours}
-                  onChange={(e) => set("lookback_hours", Number(e.target.value) || 1)}
+                  onChange={(e) =>
+                    set("lookback_hours", Number(e.target.value) || 1)
+                  }
                 />
               </Field>
-              <Field label="Max items" help="Cap on items passed to the LLM per run.">
+              <Field
+                label="Max items"
+                help="Cap on items passed to the LLM per run."
+              >
                 <Input
                   type="number"
                   min={1}
                   value={form.max_items}
-                  onChange={(e) => set("max_items", Number(e.target.value) || 1)}
+                  onChange={(e) =>
+                    set("max_items", Number(e.target.value) || 1)
+                  }
                 />
               </Field>
               <Field label="Web search">
@@ -399,7 +528,10 @@ function PipelineEdit() {
                   placeholder="None"
                 />
               </Field>
-              <Field label="Search queries" help="The agent may also search on its own.">
+              <Field
+                label="Search queries"
+                help="The agent may also search on its own."
+              >
                 <TagInput
                   value={form.search_queries}
                   onChange={(v) => set("search_queries", v)}
@@ -413,7 +545,10 @@ function PipelineEdit() {
           <Card>
             <CardHeader title="Outputs" />
             <div className="grid gap-4 p-4 md:grid-cols-2">
-              <Field label="Publisher" help="Used after approval. Empty = first active publisher.">
+              <Field
+                label="Publisher"
+                help="Used after approval. Empty = first active publisher."
+              >
                 <ConnectorSelect
                   value={form.publisher_connector_id}
                   onChange={(v) => set("publisher_connector_id", v)}
@@ -421,7 +556,10 @@ function PipelineEdit() {
                   placeholder="Default publisher"
                 />
               </Field>
-              <Field label="Notify reviewers" help="Send an email when new drafts await review.">
+              <Field
+                label="Notify reviewers"
+                help="Send an email when new drafts await review."
+              >
                 <ConnectorSelect
                   value={form.notifier_connector_id}
                   onChange={(v) => set("notifier_connector_id", v)}
@@ -439,12 +577,17 @@ function PipelineEdit() {
               <CardHeader
                 title="Recent runs"
                 actions={
-                  <Link href={`/runs/?pipeline_id=${id}`} className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+                  <Link
+                    href={`/runs/?pipeline_id=${id}`}
+                    className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  >
                     All
                   </Link>
                 }
               />
-              {runs.data && runs.data.length === 0 && <p className="px-4 py-6 text-sm text-zinc-500">No runs yet.</p>}
+              {runs.data && runs.data.length === 0 && (
+                <p className="px-4 py-6 text-sm text-zinc-500">No runs yet.</p>
+              )}
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {(runs.data ?? []).map((r) => (
                   <li key={r.id}>
@@ -453,11 +596,15 @@ function PipelineEdit() {
                       className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs text-zinc-700 dark:text-zinc-300" title={fmtTime(r.started_at)}>
+                        <div
+                          className="text-xs text-zinc-700 dark:text-zinc-300"
+                          title={fmtTime(r.started_at)}
+                        >
                           {fmtRelative(r.started_at)} · {r.trigger}
                         </div>
                         <div className="text-[11px] text-zinc-500">
-                          {r.stats?.posts_created ?? 0} posts · {r.stats?.items_used ?? 0} items
+                          {r.stats?.posts_created ?? 0} posts ·{" "}
+                          {r.stats?.items_used ?? 0} items
                         </div>
                       </div>
                       <RunStatusBadge status={r.status} />

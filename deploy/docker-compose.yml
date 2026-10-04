@@ -75,6 +75,9 @@ services:
     image: cueflow:local
     profiles: ["mock"]
     entrypoint: ["/usr/local/bin/mock-postiz-mcp"]
+    # The image's HEALTHCHECK probes CueFlow's API, which the mock does not serve.
+    healthcheck:
+      disable: true
     environment:
       MOCK_POSTIZ_API_KEY: dev-key
     ports:
@@ -144,12 +147,15 @@ services:
       timeout: 3s
       retries: 20
 
-  # Postiz schedules publishing through Temporal. SQL visibility keeps it light (no Elasticsearch).
+  # Postiz schedules publishing through Temporal. Postiz registers more Text search attributes than
+  # SQL visibility allows (3), so Temporal needs Elasticsearch for visibility, as in Postiz's own compose.
   temporal:
     image: temporalio/auto-setup:1.28.1
     restart: unless-stopped
     depends_on:
       temporal-db:
+        condition: service_healthy
+      temporal-es:
         condition: service_healthy
     environment:
       DB: postgres12
@@ -157,6 +163,29 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporal}
       POSTGRES_SEEDS: temporal-db
+      ENABLE_ES: "true"
+      ES_SEEDS: temporal-es
+      ES_VERSION: v7
+      TEMPORAL_NAMESPACE: default
+
+  temporal-es:
+    image: elasticsearch:7.17.27
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: -Xms256m -Xmx256m
+      xpack.security.enabled: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "true"
+      cluster.routing.allocation.disk.watermark.low: 512mb
+      cluster.routing.allocation.disk.watermark.high: 256mb
+      cluster.routing.allocation.disk.watermark.flood_stage: 128mb
+    volumes:
+      - temporal-es:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   temporal-db:
     image: postgres:16-alpine
@@ -177,3 +206,4 @@ volumes:
   postiz-config:
   postiz-uploads:
   temporal-db:
+  temporal-es:

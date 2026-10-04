@@ -16,11 +16,13 @@ import {
 } from "@/components/agents";
 import { RunStatusBadge, StatusBadge } from "@/components/badges";
 import { TagInput } from "@/components/inputs";
+import { useDialog } from "@/components/dialog";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
   Card,
   CardHeader,
+  DateTimePicker,
   ErrorBox,
   Field,
   Icon,
@@ -31,15 +33,28 @@ import {
   cx,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { fmtRelative, fmtTime, fromLocalInput, toLocalInput } from "@/lib/format";
+import {
+  fmtRelative,
+  fmtTime,
+  fromLocalInput,
+  toLocalInput,
+} from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
-import type { Agent, TaskDetail, TaskMessage, TaskPatch, TaskPriority, TaskStatus } from "@/lib/types";
+import type {
+  Agent,
+  TaskDetail,
+  TaskMessage,
+  TaskPatch,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/types";
 
 function TaskView() {
   const params = useSearchParams();
   const id = params.get("id") ?? "";
   const router = useRouter();
   const toast = useToast();
+  const dialog = useDialog();
   const agents = useAgents();
 
   const task = useAsync(() => api.getTask(id), [id]);
@@ -52,7 +67,10 @@ function TaskView() {
   useServerEvent(["task.updated", "task.deleted"], (d) => {
     const t = task.data;
     if (!t) return;
-    const related = d.id === id || d.id === t.parent_id || (t.subtasks ?? []).some((s) => s.id === d.id);
+    const related =
+      d.id === id ||
+      d.id === t.parent_id ||
+      (t.subtasks ?? []).some((s) => s.id === d.id);
     if (!related) return;
     void task.reload();
     if (d.id === id) void runs.reload();
@@ -71,19 +89,26 @@ function TaskView() {
 
   if (!id) return <ErrorBox>Missing task id.</ErrorBox>;
   if (task.loading && !task.data) return <Loading />;
-  if (task.error && !task.data) return <ErrorBox onRetry={task.reload}>{task.error}</ErrorBox>;
+  if (task.error && !task.data)
+    return <ErrorBox onRetry={task.reload}>{task.error}</ErrorBox>;
   const t = task.data!;
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-        <Link href="/board/" className="hover:text-zinc-800 dark:hover:text-zinc-200">
+        <Link
+          href="/board/"
+          className="hover:text-zinc-800 dark:hover:text-zinc-200"
+        >
           Board
         </Link>
         <span>/</span>
         {t.parent && (
           <>
-            <Link href={`/tasks/view/?id=${t.parent.id}`} className="hover:text-zinc-800 dark:hover:text-zinc-200">
+            <Link
+              href={`/tasks/view/?id=${t.parent.id}`}
+              className="hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
               #{t.parent.number}
             </Link>
             <span>/</span>
@@ -96,7 +121,10 @@ function TaskView() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
           <TitleEditor value={t.title} onSave={(title) => patch({ title })} />
-          <DescriptionEditor value={t.description} onSave={(description) => patch({ description })} />
+          <DescriptionEditor
+            value={t.description}
+            onSave={(description) => patch({ description })}
+          />
           {t.result && t.status !== "IN_PROGRESS" && (
             <ResultCard text={t.result} agentName={t.assignee?.name} />
           )}
@@ -124,7 +152,18 @@ function TaskView() {
               void runs.reload();
             }}
             onDelete={async () => {
-              if (!window.confirm(`Delete task #${t.number}${(t.subtasks?.length ?? 0) > 0 ? " and its subtasks" : ""}?`)) return;
+              if (
+                !(await dialog.confirm({
+                  title: `Delete task #${t.number}?`,
+                  message:
+                    (t.subtasks?.length ?? 0) > 0
+                      ? `Its ${t.subtasks?.length} subtask(s) and the whole conversation are deleted too. A running agent is stopped.`
+                      : "The conversation is deleted too. A running agent is stopped.",
+                  confirmLabel: "Delete task",
+                  tone: "danger",
+                }))
+              )
+                return;
               try {
                 await api.deleteTask(id);
                 toast.success("Task deleted");
@@ -146,14 +185,23 @@ function TaskView() {
                   <li key={r.id} className="space-y-1 px-4 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <RunStatusBadge status={r.status} />
-                      <span className="text-zinc-500" title={fmtTime(r.started_at)}>
+                      <span
+                        className="text-zinc-500"
+                        title={fmtTime(r.started_at)}
+                      >
                         {fmtRelative(r.started_at)}
                       </span>
                     </div>
                     <p className="text-zinc-600 dark:text-zinc-400">
-                      {r.turns} turns · {r.tool_calls} tools · {(r.input_tokens + r.output_tokens).toLocaleString()} tokens
+                      {r.turns} turns · {r.tool_calls} tools ·{" "}
+                      {(r.input_tokens + r.output_tokens).toLocaleString()}{" "}
+                      tokens
                     </p>
-                    {r.error && <p className="break-words text-red-600 dark:text-red-400">{r.error}</p>}
+                    {r.error && (
+                      <p className="break-words text-red-600 dark:text-red-400">
+                        {r.error}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -167,7 +215,13 @@ function TaskView() {
 
 /* --------------------------------- Header ---------------------------------- */
 
-function TitleEditor({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+function TitleEditor({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (v: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
@@ -205,14 +259,25 @@ function TitleEditor({ value, onSave }: { value: string; onSave: (v: string) => 
   );
 }
 
-function DescriptionEditor({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+function DescriptionEditor({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (v: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   if (editing) {
     return (
       <div className="space-y-2">
-        <Textarea autoFocus rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <Textarea
+          autoFocus
+          rows={5}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
         <div className="flex justify-end gap-2">
           <Button
             size="sm"
@@ -241,7 +306,9 @@ function DescriptionEditor({ value, onSave }: { value: string; onSave: (v: strin
   return (
     <div className="group relative">
       {value ? (
-        <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">{value}</p>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+          {value}
+        </p>
       ) : (
         <p className="text-sm text-zinc-400 italic">No description.</p>
       )}
@@ -259,9 +326,12 @@ function ResultCard({ text, agentName }: { text: string; agentName?: string }) {
   return (
     <div className="rounded-lg border border-teal-200 bg-teal-50/70 p-4 dark:border-teal-900/60 dark:bg-teal-950/30">
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-teal-800 uppercase dark:text-teal-300">
-        <Icon name="check" className="h-3.5 w-3.5" /> Result{agentName ? ` from ${agentName}` : ""}
+        <Icon name="check" className="h-3.5 w-3.5" /> Result
+        {agentName ? ` from ${agentName}` : ""}
       </p>
-      <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">{text}</p>
+      <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+        {text}
+      </p>
     </div>
   );
 }
@@ -288,12 +358,18 @@ function Thread({
   const bottom = useRef<HTMLDivElement>(null);
   const count = messages.length;
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end", behavior: count > 0 ? "smooth" : "auto" });
+    bottom.current?.scrollIntoView({
+      block: "end",
+      behavior: count > 0 ? "smooth" : "auto",
+    });
   }, [count, task.running]);
 
   return (
     <Card>
-      <CardHeader title="Conversation" subtitle="Talk to the assigned agent. Start with @slug to hand the task to another agent." />
+      <CardHeader
+        title="Conversation"
+        subtitle="Talk to the assigned agent. Start with @slug to hand the task to another agent."
+      />
       <div className="max-h-[65vh] min-h-[200px] space-y-3 overflow-y-auto px-4 py-4">
         {loading && <Loading />}
         {error && <ErrorBox onRetry={onRetry}>{error}</ErrorBox>}
@@ -344,7 +420,9 @@ function argSummary(args: unknown): string {
     .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
     .filter(Boolean);
   const s = vals.join(" · ");
-  return Array.from(s).length > 90 ? Array.from(s).slice(0, 90).join("") + "…" : s;
+  return Array.from(s).length > 90
+    ? Array.from(s).slice(0, 90).join("") + "…"
+    : s;
 }
 
 function MessageRow({ m }: { m: TaskMessage }) {
@@ -370,9 +448,14 @@ function MessageRow({ m }: { m: TaskMessage }) {
   if (m.kind === "tool_call" || m.kind === "tool_result") {
     const tool = String(m.data?.tool ?? "tool");
     const isErr = m.kind === "tool_result" && Boolean(m.data?.is_error);
-    const summary = m.kind === "tool_call" ? argSummary(m.data?.arguments) : m.content.replace(/\s+/g, " ").slice(0, 90);
+    const summary =
+      m.kind === "tool_call"
+        ? argSummary(m.data?.arguments)
+        : m.content.replace(/\s+/g, " ").slice(0, 90);
     const detail =
-      m.kind === "tool_call" ? JSON.stringify(m.data?.arguments ?? {}, null, 2) : m.content;
+      m.kind === "tool_call"
+        ? JSON.stringify(m.data?.arguments ?? {}, null, 2)
+        : m.content;
     return (
       <div className="ml-10">
         <button
@@ -382,10 +465,16 @@ function MessageRow({ m }: { m: TaskMessage }) {
             isErr ? "text-red-600 dark:text-red-400" : "text-zinc-500",
           )}
         >
-          <span className="shrink-0">{m.kind === "tool_call" ? "🔧" : isErr ? "⚠" : "↳"}</span>
-          <span className="shrink-0 font-semibold">{m.kind === "tool_call" ? tool : `${tool} result`}</span>
+          <span className="shrink-0">
+            {m.kind === "tool_call" ? "🔧" : isErr ? "⚠" : "↳"}
+          </span>
+          <span className="shrink-0 font-semibold">
+            {m.kind === "tool_call" ? tool : `${tool} result`}
+          </span>
           <span className="min-w-0 truncate opacity-80">{summary}</span>
-          <span className="ml-auto shrink-0 opacity-60">{open ? "▾" : "▸"}</span>
+          <span className="ml-auto shrink-0 opacity-60">
+            {open ? "▾" : "▸"}
+          </span>
         </button>
         {open && (
           <pre className="mt-1 max-h-64 overflow-auto rounded bg-zinc-50 p-2 text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
@@ -420,8 +509,12 @@ function MessageRow({ m }: { m: TaskMessage }) {
       <div className="min-w-0 max-w-[85%]">
         <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
           {m.agent?.name ?? "Agent"}
-          {m.kind === "question" && <span className="text-amber-700 dark:text-amber-400">asks you</span>}
-          {m.kind === "result" && <span className="text-teal-700 dark:text-teal-400">finished</span>}
+          {m.kind === "question" && (
+            <span className="text-amber-700 dark:text-amber-400">asks you</span>
+          )}
+          {m.kind === "result" && (
+            <span className="text-teal-700 dark:text-teal-400">finished</span>
+          )}
           {time}
         </p>
         <div
@@ -439,11 +532,22 @@ function MessageRow({ m }: { m: TaskMessage }) {
 
 /* -------------------------------- Composer --------------------------------- */
 
-function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[]; onSent: () => void }) {
+function Composer({
+  task,
+  agents,
+  onSent,
+}: {
+  task: TaskDetail;
+  agents: Agent[];
+  onSent: () => void;
+}) {
   const toast = useToast();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mention, setMention] = useState<{
+    query: string;
+    start: number;
+  } | null>(null);
   const [sel, setSel] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -451,7 +555,11 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
     if (!mention) return [];
     const q = mention.query.toLowerCase();
     return agents
-      .filter((a) => a.is_active && (a.slug.startsWith(q) || a.name.toLowerCase().includes(q)))
+      .filter(
+        (a) =>
+          a.is_active &&
+          (a.slug.startsWith(q) || a.name.toLowerCase().includes(q)),
+      )
       .slice(0, 6);
   }, [mention, agents]);
 
@@ -467,7 +575,8 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
   const pick = (a: Agent) => {
     if (!mention) return;
     const caret = ref.current?.selectionStart ?? text.length;
-    const next = text.slice(0, mention.start) + "@" + a.slug + " " + text.slice(caret);
+    const next =
+      text.slice(0, mention.start) + "@" + a.slug + " " + text.slice(caret);
     setText(next);
     setMention(null);
     requestAnimationFrame(() => {
@@ -493,7 +602,8 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
     }
   };
 
-  const willWake = task.assignee && task.status !== "BACKLOG" && task.status !== "CANCELED";
+  const willWake =
+    task.assignee && task.status !== "BACKLOG" && task.status !== "CANCELED";
 
   return (
     <div className="relative border-t border-zinc-200 p-3 dark:border-zinc-800">
@@ -508,12 +618,18 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
                 }}
                 className={cx(
                   "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
-                  i === sel ? "bg-indigo-50 dark:bg-indigo-500/10" : "hover:bg-zinc-50 dark:hover:bg-zinc-800",
+                  i === sel
+                    ? "bg-indigo-50 dark:bg-indigo-500/10"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800",
                 )}
               >
                 <AgentAvatar agent={a} size="xs" />
-                <span className="text-zinc-900 dark:text-zinc-100">{a.name}</span>
-                <span className="ml-auto font-mono text-xs text-zinc-500">@{a.slug}</span>
+                <span className="text-zinc-900 dark:text-zinc-100">
+                  {a.name}
+                </span>
+                <span className="ml-auto font-mono text-xs text-zinc-500">
+                  @{a.slug}
+                </span>
               </button>
             </li>
           ))}
@@ -525,11 +641,16 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
           rows={2}
           value={text}
           placeholder={
-            task.assignee ? `Message ${task.assignee.name}… (Enter to send, Shift+Enter for a new line)` : "Add a comment… (@slug to assign an agent)"
+            task.assignee
+              ? `Message ${task.assignee.name}… (Enter to send, Shift+Enter for a new line)`
+              : "Add a comment… (@slug to assign an agent)"
           }
           onChange={(e) => {
             setText(e.target.value);
-            detect(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            detect(
+              e.target.value,
+              e.target.selectionStart ?? e.target.value.length,
+            );
           }}
           onKeyDown={(e) => {
             if (mention && candidates.length > 0) {
@@ -553,19 +674,31 @@ function Composer({ task, agents, onSent }: { task: TaskDetail; agents: Agent[];
                 return;
               }
             }
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing
+            ) {
               e.preventDefault();
               void send();
             }
           }}
           className="min-h-[44px] resize-none"
         />
-        <Button variant="primary" loading={busy} disabled={!text.trim()} onClick={send} aria-label="Send">
+        <Button
+          variant="primary"
+          loading={busy}
+          disabled={!text.trim()}
+          onClick={send}
+          aria-label="Send"
+        >
           <Icon name="send" className="h-4 w-4" />
         </Button>
       </div>
       <p className="mt-1.5 text-[11px] text-zinc-500">
-        {willWake ? `${task.assignee!.name} will respond to your message.` : "Comments on unassigned or backlog tasks don't start an agent."}
+        {willWake
+          ? `${task.assignee!.name} will respond to your message.`
+          : "Comments on unassigned or backlog tasks don't start an agent."}
       </p>
     </div>
   );
@@ -589,7 +722,9 @@ function Sidebar({
   const toast = useToast();
   const [busy, setBusy] = useState<"run" | "stop" | null>(null);
   const [subOpen, setSubOpen] = useState(false);
-  const statusOptions = ALL_TASK_STATUSES.filter((s) => s !== "IN_PROGRESS" || t.status === "IN_PROGRESS");
+  const statusOptions = ALL_TASK_STATUSES.filter(
+    (s) => s !== "IN_PROGRESS" || t.status === "IN_PROGRESS",
+  );
 
   const run = async () => {
     setBusy("run");
@@ -622,7 +757,12 @@ function Sidebar({
         <div className="space-y-3 p-4">
           <div className="flex gap-2">
             {t.running ? (
-              <Button variant="danger" className="flex-1" loading={busy === "stop"} onClick={stop}>
+              <Button
+                variant="danger"
+                className="flex-1"
+                loading={busy === "stop"}
+                onClick={stop}
+              >
                 <Icon name="stop" className="h-4 w-4" /> Stop agent
               </Button>
             ) : (
@@ -631,7 +771,11 @@ function Sidebar({
                 className="flex-1"
                 loading={busy === "run"}
                 disabled={!t.assignee_agent_id}
-                title={t.assignee_agent_id ? "Start the assigned agent now" : "Assign an agent first"}
+                title={
+                  t.assignee_agent_id
+                    ? "Start the assigned agent now"
+                    : "Assign an agent first"
+                }
                 onClick={run}
               >
                 <Icon name="play" className="h-4 w-4" /> Run now
@@ -642,7 +786,9 @@ function Sidebar({
             <Select
               value={t.status}
               disabled={t.status === "IN_PROGRESS"}
-              onChange={(e) => void onPatch({ status: e.target.value as TaskStatus })}
+              onChange={(e) =>
+                void onPatch({ status: e.target.value as TaskStatus })
+              }
             >
               {statusOptions.map((s) => (
                 <option key={s} value={s} disabled={s === "IN_PROGRESS"}>
@@ -652,10 +798,19 @@ function Sidebar({
             </Select>
           </Field>
           <Field label="Assignee">
-            <AgentSelect agents={agents} value={t.assignee_agent_id} onChange={(v) => void onPatch({ assignee_agent_id: v })} />
+            <AgentSelect
+              agents={agents}
+              value={t.assignee_agent_id}
+              onChange={(v) => void onPatch({ assignee_agent_id: v })}
+            />
           </Field>
           <Field label="Priority" right={<PriorityDot priority={t.priority} />}>
-            <Select value={t.priority} onChange={(e) => void onPatch({ priority: e.target.value as TaskPriority })}>
+            <Select
+              value={t.priority}
+              onChange={(e) =>
+                void onPatch({ priority: e.target.value as TaskPriority })
+              }
+            >
               {PRIORITIES.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -664,30 +819,39 @@ function Sidebar({
             </Select>
           </Field>
           <Field label="Labels">
-            <TagInput value={t.labels ?? []} onChange={(labels) => void onPatch({ labels })} placeholder="Add label" />
+            <TagInput
+              value={t.labels ?? []}
+              onChange={(labels) => void onPatch({ labels })}
+              placeholder="Add label"
+            />
           </Field>
           <Field label="Due">
-            <Input
-              type="datetime-local"
+            <DateTimePicker
+              aria-label="Due"
               value={toLocalInput(t.due_at)}
-              onChange={(e) => void onPatch({ due_at: fromLocalInput(e.target.value) })}
+              onChange={(v) => void onPatch({ due_at: fromLocalInput(v) })}
             />
           </Field>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
             <dt className="text-zinc-500">Created</dt>
             <dd className="text-zinc-700 dark:text-zinc-300">
-              {fmtTime(t.created_at)} by {t.created_by === "agent" ? "an agent" : "you"}
+              {fmtTime(t.created_at)} by{" "}
+              {t.created_by === "agent" ? "an agent" : "you"}
             </dd>
             {t.started_at && (
               <>
                 <dt className="text-zinc-500">Started</dt>
-                <dd className="text-zinc-700 dark:text-zinc-300">{fmtTime(t.started_at)}</dd>
+                <dd className="text-zinc-700 dark:text-zinc-300">
+                  {fmtTime(t.started_at)}
+                </dd>
               </>
             )}
             {t.completed_at && (
               <>
                 <dt className="text-zinc-500">Completed</dt>
-                <dd className="text-zinc-700 dark:text-zinc-300">{fmtTime(t.completed_at)}</dd>
+                <dd className="text-zinc-700 dark:text-zinc-300">
+                  {fmtTime(t.completed_at)}
+                </dd>
               </>
             )}
             <dt className="text-zinc-500">Attempts</dt>
@@ -696,7 +860,10 @@ function Sidebar({
               <>
                 <dt className="text-zinc-500">From</dt>
                 <dd>
-                  <Link href="/schedules/" className="text-indigo-600 hover:underline dark:text-indigo-400">
+                  <Link
+                    href="/schedules/"
+                    className="text-indigo-600 hover:underline dark:text-indigo-400"
+                  >
                     schedule
                   </Link>
                 </dd>
@@ -713,9 +880,14 @@ function Sidebar({
             href={`/tasks/view/?id=${t.parent.id}`}
             className="flex items-center gap-2 px-4 py-3 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
           >
-            <span className="font-mono text-xs text-zinc-400">#{t.parent.number}</span>
+            <span className="font-mono text-xs text-zinc-400">
+              #{t.parent.number}
+            </span>
             <span className="min-w-0 flex-1 truncate">{t.parent.title}</span>
-            <TaskStatusBadge status={t.parent.status} running={t.parent.running} />
+            <TaskStatusBadge
+              status={t.parent.status}
+              running={t.parent.running}
+            />
           </Link>
         </Card>
       )}
@@ -730,7 +902,9 @@ function Sidebar({
           }
         />
         {(t.subtasks ?? []).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-zinc-500">No subtasks. Manager agents create them when they delegate.</p>
+          <p className="px-4 py-3 text-xs text-zinc-500">
+            No subtasks. Manager agents create them when they delegate.
+          </p>
         ) : (
           <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {t.subtasks!.map((s) => (
@@ -741,7 +915,9 @@ function Sidebar({
                 >
                   <AgentAvatar agent={s.assignee} size="xs" />
                   <span className="min-w-0 flex-1 truncate">
-                    <span className="mr-1 font-mono text-xs text-zinc-400">#{s.number}</span>
+                    <span className="mr-1 font-mono text-xs text-zinc-400">
+                      #{s.number}
+                    </span>
                     {s.title}
                   </span>
                   <TaskStatusBadge status={s.status} running={s.running} />
@@ -753,7 +929,10 @@ function Sidebar({
       </Card>
 
       <Card>
-        <CardHeader title="Drafts" subtitle="Posts written for this task (they wait in Review)" />
+        <CardHeader
+          title="Drafts"
+          subtitle="Posts written for this task (they wait in Review)"
+        />
         {(t.posts ?? []).length === 0 ? (
           <p className="px-4 py-3 text-xs text-zinc-500">No drafts yet.</p>
         ) : (
@@ -764,8 +943,12 @@ function Sidebar({
                   href={`/posts/view/?id=${p.id}`}
                   className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
                 >
-                  <span className="min-w-0 flex-1 truncate">{p.title || "(untitled draft)"}</span>
-                  <span className="shrink-0 text-[11px] text-zinc-500">{(p.platforms ?? []).join(", ")}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {p.title || "(untitled draft)"}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-zinc-500">
+                    {(p.platforms ?? []).join(", ")}
+                  </span>
                   <StatusBadge status={p.status} />
                 </Link>
               </li>
@@ -775,7 +958,12 @@ function Sidebar({
       </Card>
 
       <div className="flex justify-end">
-        <Button variant="ghost" size="sm" onClick={onDelete} className="text-red-600 dark:text-red-400">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDelete}
+          className="text-red-600 dark:text-red-400"
+        >
           <Icon name="trash" className="h-3.5 w-3.5" /> Delete task
         </Button>
       </div>

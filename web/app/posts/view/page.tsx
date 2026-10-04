@@ -4,10 +4,23 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
-import { type PostDraft, PostEditor, PostPreviews } from "@/components/post-editor";
+import {
+  type PostDraft,
+  PostEditor,
+  PostPreviews,
+} from "@/components/post-editor";
 import { AuditTimeline, RejectDialog, Warnings } from "@/components/post";
+import { useDialog } from "@/components/dialog";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
-import { Button, Card, CardHeader, ErrorBox, Icon, Loading, PageHeader } from "@/components/ui";
+import {
+  Button,
+  Card,
+  CardHeader,
+  ErrorBox,
+  Icon,
+  Loading,
+  PageHeader,
+} from "@/components/ui";
 import { ApiError, type PostPatch, api } from "@/lib/api";
 import { fmtTime, hostOf, shortId } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
@@ -39,8 +52,10 @@ function diffDraft(before: PostDraft, after: PostDraft): Partial<PostDraft> {
 
 function clean(d: Partial<PostDraft>): Partial<PostDraft> {
   const out = { ...d };
-  if (out.media_urls) out.media_urls = out.media_urls.map((u) => u.trim()).filter(Boolean);
-  if (out.thread_parts) out.thread_parts = out.thread_parts.filter((p) => p.trim());
+  if (out.media_urls)
+    out.media_urls = out.media_urls.map((u) => u.trim()).filter(Boolean);
+  if (out.thread_parts)
+    out.thread_parts = out.thread_parts.filter((p) => p.trim());
   return out;
 }
 
@@ -50,6 +65,7 @@ function PostView() {
   const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const toast = useToast();
+  const dialog = useDialog();
   const { meta } = useMeta();
 
   const post = useAsync(() => api.getPost(id), [id]);
@@ -61,7 +77,10 @@ function PostView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  const base = useMemo(() => (post.data ? toDraft(post.data) : null), [post.data]);
+  const base = useMemo(
+    () => (post.data ? toDraft(post.data) : null),
+    [post.data],
+  );
   useEffect(() => {
     if (base) {
       setDraft(base);
@@ -97,14 +116,19 @@ function PostView() {
     if (!post.data || !dirty) return post.data ?? null;
     setBusy("save");
     try {
-      const updated = await api.updatePost(id, { ...changes, version: post.data.version } as PostPatch);
+      const updated = await api.updatePost(id, {
+        ...changes,
+        version: post.data.version,
+      } as PostPatch);
       post.setData(updated);
       toast.success("Saved");
       return updated;
     } catch (e) {
       if (e instanceof ApiError && e.code === "version_conflict") {
         setStale(true);
-        toast.error("Someone else changed this post. Reload to see the latest version.");
+        toast.error(
+          "Someone else changed this post. Reload to see the latest version.",
+        );
       } else toast.error(e);
       return null;
     } finally {
@@ -112,7 +136,11 @@ function PostView() {
     }
   }, [post, dirty, changes, id, toast]);
 
-  const act = async (name: string, fn: () => Promise<Post | void>, msg: string) => {
+  const act = async (
+    name: string,
+    fn: () => Promise<Post | void>,
+    msg: string,
+  ) => {
     setBusy(name);
     try {
       const res = await fn();
@@ -128,7 +156,8 @@ function PostView() {
   };
 
   if (!id) return <ErrorBox>Missing post id.</ErrorBox>;
-  if (post.error && !post.data) return <ErrorBox onRetry={post.reload}>{post.error}</ErrorBox>;
+  if (post.error && !post.data)
+    return <ErrorBox onRetry={post.reload}>{post.error}</ErrorBox>;
   if (!post.data || !draft || !meta) return <Loading />;
 
   const p = post.data;
@@ -158,7 +187,10 @@ function PostView() {
   return (
     <div>
       <div className="mb-2">
-        <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+        <Link
+          href="/"
+          className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+        >
           ← Review
         </Link>
       </div>
@@ -174,12 +206,18 @@ function PostView() {
             <span className="font-mono text-xs">#{shortId(p.id)}</span>
             <span>Created {fmtTime(p.created_at)}</span>
             {p.pipeline_id && (
-              <Link className="hover:underline" href={`/pipelines/edit/?id=${p.pipeline_id}`}>
+              <Link
+                className="hover:underline"
+                href={`/pipelines/edit/?id=${p.pipeline_id}`}
+              >
                 Pipeline
               </Link>
             )}
             {p.run_id && (
-              <Link className="hover:underline" href={`/runs/view/?id=${p.run_id}`}>
+              <Link
+                className="hover:underline"
+                href={`/runs/view/?id=${p.run_id}`}
+              >
                 Run #{shortId(p.run_id)}
               </Link>
             )}
@@ -190,7 +228,11 @@ function PostView() {
         actions={
           <>
             {editable && (
-              <Button onClick={() => void save()} disabled={!dirty} loading={busy === "save"}>
+              <Button
+                onClick={() => void save()}
+                disabled={!dirty}
+                loading={busy === "save"}
+              >
                 Save
               </Button>
             )}
@@ -200,19 +242,31 @@ function PostView() {
                 loading={busy === "submit"}
                 onClick={async () => {
                   if (dirty && !(await save())) return;
-                  await act("submit", () => api.submitPost(id), "Submitted for review");
+                  await act(
+                    "submit",
+                    () => api.submitPost(id),
+                    "Submitted for review",
+                  );
                 }}
               >
                 Submit for review
               </Button>
             )}
             {allowed.has("REJECTED") && (
-              <Button variant="danger" onClick={() => setRejectOpen(true)} disabled={!!busy}>
+              <Button
+                variant="danger"
+                onClick={() => setRejectOpen(true)}
+                disabled={!!busy}
+              >
                 Reject
               </Button>
             )}
             {allowed.has("APPROVED") && (
-              <Button variant="success" onClick={approve} loading={busy === "approve"}>
+              <Button
+                variant="success"
+                onClick={approve}
+                loading={busy === "approve"}
+              >
                 <Icon name="check" /> Approve &amp; publish
               </Button>
             )}
@@ -220,7 +274,13 @@ function PostView() {
               <Button
                 variant="primary"
                 loading={busy === "retry"}
-                onClick={() => act("retry", () => api.retryPost(id), "Re-queued for publishing")}
+                onClick={() =>
+                  act(
+                    "retry",
+                    () => api.retryPost(id),
+                    "Re-queued for publishing",
+                  )
+                }
               >
                 <Icon name="refresh" /> Retry
               </Button>
@@ -230,7 +290,16 @@ function PostView() {
                 variant="ghost"
                 loading={busy === "delete"}
                 onClick={async () => {
-                  if (!window.confirm("Delete this post permanently?")) return;
+                  if (
+                    !(await dialog.confirm({
+                      title: "Delete this post?",
+                      message:
+                        "The draft and its audit history are deleted permanently.",
+                      confirmLabel: "Delete post",
+                      tone: "danger",
+                    }))
+                  )
+                    return;
                   setBusy("delete");
                   try {
                     await api.deletePost(id);
@@ -252,14 +321,18 @@ function PostView() {
       <div className="space-y-3">
         {stale && (
           <ErrorBox onRetry={() => void post.reload()}>
-            This post was changed elsewhere (status or content). Reload to get the latest version
+            This post was changed elsewhere (status or content). Reload to get
+            the latest version
             {dirty ? " — your unsaved edits will be discarded." : "."}
           </ErrorBox>
         )}
         {p.status === "FAILED" && (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/60 dark:bg-red-950/40">
             <div className="text-sm font-semibold text-red-800 dark:text-red-300">
-              Publishing failed{p.attempts ? ` after ${p.attempts} attempt${p.attempts > 1 ? "s" : ""}` : ""}
+              Publishing failed
+              {p.attempts
+                ? ` after ${p.attempts} attempt${p.attempts > 1 ? "s" : ""}`
+                : ""}
             </div>
             <pre className="mt-1 font-mono text-xs break-words whitespace-pre-wrap text-red-700 dark:text-red-300">
               {p.error_message || "No error message returned."}
@@ -274,17 +347,20 @@ function PostView() {
         {p.status === "PUBLISHED" && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
             Published {fmtTime(p.published_at)}
-            {p.external_post_ids && Object.keys(p.external_post_ids).length > 0 && (
-              <span className="ml-2 font-mono text-xs">
-                {Object.entries(p.external_post_ids)
-                  .map(([k, v]) => `${k}: ${v}`)
-                  .join(" · ")}
-              </span>
-            )}
+            {p.external_post_ids &&
+              Object.keys(p.external_post_ids).length > 0 && (
+                <span className="ml-2 font-mono text-xs">
+                  {Object.entries(p.external_post_ids)
+                    .map(([k, v]) => `${k}: ${v}`)
+                    .join(" · ")}
+                </span>
+              )}
           </div>
         )}
         {!editable && p.status !== "FAILED" && (
-          <p className="text-xs text-zinc-500">Content is read-only once a post leaves review.</p>
+          <p className="text-xs text-zinc-500">
+            Content is read-only once a post leaves review.
+          </p>
         )}
         <Warnings warnings={p.warnings} />
       </div>
@@ -310,9 +386,14 @@ function PostView() {
           </Card>
 
           <Card>
-            <CardHeader title="Source context" subtitle={p.source_context?.topic || undefined} />
+            <CardHeader
+              title="Source context"
+              subtitle={p.source_context?.topic || undefined}
+            />
             {sources.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-zinc-500">No sources recorded (manual post).</p>
+              <p className="px-4 py-4 text-sm text-zinc-500">
+                No sources recorded (manual post).
+              </p>
             ) : (
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {sources.map((s, i) => (
@@ -326,8 +407,14 @@ function PostView() {
                       {s.title || s.url}
                     </a>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
-                      <span>{s.kind === "search" ? "web search" : s.source || "source"}</span>
-                      {s.url && <span className="truncate">{hostOf(s.url)}</span>}
+                      <span>
+                        {s.kind === "search"
+                          ? "web search"
+                          : s.source || "source"}
+                      </span>
+                      {s.url && (
+                        <span className="truncate">{hostOf(s.url)}</span>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -354,7 +441,11 @@ function PostView() {
         open={rejectOpen}
         onClose={() => setRejectOpen(false)}
         onConfirm={async (reason) => {
-          await act("reject", () => api.rejectPost(id, reason), "Rejected and archived");
+          await act(
+            "reject",
+            () => api.rejectPost(id, reason),
+            "Rejected and archived",
+          );
         }}
       />
     </div>
@@ -373,9 +464,14 @@ export default function Page() {
 function TaskLink({ id }: { id: string }) {
   const task = useAsync(() => api.getTask(id), [id]);
   return (
-    <Link className="text-indigo-600 hover:underline dark:text-indigo-400" href={`/tasks/view/?id=${id}`}>
+    <Link
+      className="text-indigo-600 hover:underline dark:text-indigo-400"
+      href={`/tasks/view/?id=${id}`}
+    >
       Drafted for task {task.data ? `#${task.data.number}` : "…"}
-      {task.data?.assignee ? ` by ${task.data.assignee.avatar} ${task.data.assignee.name}` : ""}
+      {task.data?.assignee
+        ? ` by ${task.data.assignee.avatar} ${task.data.assignee.name}`
+        : ""}
     </Link>
   );
 }
