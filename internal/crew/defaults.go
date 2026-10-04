@@ -8,7 +8,7 @@ import (
 
 // DefaultAgents is the starter team created on first launch. Everything is editable in the UI.
 // Names and instructions are English; each agent writes to the human (and drafts posts) in its
-// configured language, which defaults to zh-TW.
+// configured language, which defaults to English.
 func DefaultAgents() []*store.Agent {
 	return []*store.Agent{
 		{

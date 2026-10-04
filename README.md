@@ -29,7 +29,7 @@ actually does the work, but on a board you can watch:
   it to another agent.
 - **Agents**: roles with their own persona, capabilities, LLM, sources and memory. Defaults:
   🧭 Chief (plans and delegates), 🔎 Researcher (research with sources), ✍️ Writer (platform drafts),
-  🧐 Editor (reviews and revises drafts). Agents write in their configured language (default `zh-TW`).
+  🧐 Editor (reviews and revises drafts). Agents write in their configured language (default English).
   Add your own.
 - **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
 
@@ -74,7 +74,7 @@ sends them to Postiz.
 ## Quick start (Docker)
 
 ```bash
-git clone https://github.com/j75689/cueflow && cd cueflow
+git clone https://github.com/j75689/cueflow && cd cueflow/deploy
 cp .env.example .env
 # fill in CUEFLOW_SECRET_KEY (openssl rand -base64 32) and POSTIZ_JWT_SECRET (openssl rand -hex 32)
 docker compose up -d
@@ -102,6 +102,7 @@ Then:
 ### Try it without Postiz
 
 ```bash
+cd deploy
 docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 ```
 
@@ -165,6 +166,7 @@ internal/scheduler     cron heartbeat
 internal/store         PostgreSQL repositories; migrations in internal/db/migrations
 internal/api           REST + SSE (docs/api.md), serves the embedded UI
 web/                   Next.js + Tailwind dashboard (static export)
+deploy/                docker-compose.yml and .env.example
 ```
 
 ## Documentation

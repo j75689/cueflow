@@ -86,7 +86,7 @@ func (p *Pipeline) normalize(validate CronValidator) error {
 		return invalid(err.Error())
 	}
 	if p.Language == "" {
-		p.Language = "zh-TW"
+		p.Language = "en"
 	}
 	if p.LookbackHours <= 0 {
 		p.LookbackHours = 24

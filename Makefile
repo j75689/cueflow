@@ -41,7 +41,7 @@ mock:
 	go run ./cmd/mock-postiz-mcp
 
 docker:
-	docker compose build
+	docker compose -f deploy/docker-compose.yml build
 
 clean:
 	rm -rf bin web/out web/.next

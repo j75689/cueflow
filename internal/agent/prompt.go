@@ -105,7 +105,7 @@ func languageName(code string) string {
 		return n
 	}
 	if code == "" {
-		return languageNames["zh-TW"]
+		return languageNames["en"]
 	}
 	return code
 }

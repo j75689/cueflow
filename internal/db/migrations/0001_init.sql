@@ -46,7 +46,7 @@ CREATE TABLE pipelines (
     timezone               VARCHAR(64) NOT NULL DEFAULT 'UTC',
     topic                  TEXT   NOT NULL DEFAULT '',
     instructions           TEXT   NOT NULL DEFAULT '',
-    language               VARCHAR(16) NOT NULL DEFAULT 'zh-TW',
+    language               VARCHAR(16) NOT NULL DEFAULT 'en',
     platforms              TEXT[] NOT NULL,
     llm_connector_id       UUID REFERENCES connectors(id) ON DELETE SET NULL,
     source_connector_ids   UUID[] NOT NULL DEFAULT '{}',

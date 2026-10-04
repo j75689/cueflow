@@ -35,7 +35,7 @@ const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Mondays at 10:00", value: "0 10 * * 1" },
 ];
 
-const LANGUAGES = ["zh-TW", "zh-CN", "en", "ja", "ko"];
+const LANGUAGES = ["en", "zh-TW", "zh-CN", "ja", "ko"];
 
 function defaultTimezone(): string {
   try {
@@ -63,7 +63,7 @@ const blank = (): PipelineInput => ({
   timezone: defaultTimezone(),
   topic: "",
   instructions: "",
-  language: "zh-TW",
+  language: "en",
   platforms: ["threads", "instagram"],
   llm_connector_id: null,
   source_connector_ids: [],
@@ -128,7 +128,7 @@ function PipelineEdit() {
         timezone: p.timezone,
         topic: p.topic ?? "",
         instructions: p.instructions ?? "",
-        language: p.language ?? "zh-TW",
+        language: p.language ?? "en",
         platforms: p.platforms ?? [],
         llm_connector_id: p.llm_connector_id,
         source_connector_ids: p.source_connector_ids ?? [],

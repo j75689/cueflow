@@ -289,7 +289,7 @@ flowchart LR
     CF -->|"HTTPS"| EXT["LLM API · 搜尋 · RSS · IMAP"]
 ```
 
-- `docker compose up -d` 一次帶起全部服務，所有 port 都只綁 `127.0.0.1`。遠端存取建議用 SSH tunnel 或 Tailscale。
+- `deploy/docker-compose.yml`：`cd deploy && docker compose up -d` 一次帶起全部服務，所有 port 都只綁 `127.0.0.1`。遠端存取建議用 SSH tunnel 或 Tailscale。
 - CueFlow 映像是 distroless、非 root，內建 `healthcheck` 子命令。
 - 開發或試用可用 `--profile mock` 啟動模擬的 Postiz MCP server。
 - 目前設計為**單實例**。任務與發布的認領都用資料庫租約與 `SKIP LOCKED`，跑兩個實例不會重複處理，但 cron 會在每個實例各觸發一次，因此不建議水平擴充。

@@ -33,7 +33,7 @@ Delegation:
 const planningPrompt = `
 Planning:
 - For recurring requests ("every morning…", "weekly…"), create a schedule with schedule_task instead of doing it once.
-  Pick the timezone the human implies (default Asia/Taipei for zh-TW). Tell the human what you set up.`
+  Use the timezone the human implies; if it is unclear, ask. Tell the human what you set up.`
 
 func buildSystemPrompt(a *store.Agent, task *store.Task, team []*store.Agent, memories []store.AgentMemory) string {
 	var b strings.Builder
@@ -162,7 +162,7 @@ func languageName(code string) string {
 		return n
 	}
 	if code == "" {
-		return languageNames["zh-TW"]
+		return languageNames["en"]
 	}
 	return code
 }

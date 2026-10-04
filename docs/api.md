@@ -138,7 +138,7 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 {
   "id":"uuid","name":"Daily AI digest","description":"","is_active":true,
   "cron_expr":"0 8 * * *","timezone":"Asia/Taipei",
-  "topic":"AI tooling news","instructions":"Write as a senior engineer...","language":"zh-TW",
+  "topic":"AI tooling news","instructions":"Write as a senior engineer...","language":"en",
   "platforms":["threads","instagram"],
   "llm_connector_id":"uuid","source_connector_ids":["uuid"],
   "search_connector_id":"uuid|null","search_queries":["LLM agents"],
@@ -178,7 +178,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
   "llm_connector_id":"uuid|null",          // null = first active LLM connector
   "search_connector_id":"uuid|null",       // null = first active search connector
   "source_connector_ids":["uuid"],         // sources this agent may read/fetch
-  "language":"zh-TW","platforms":["threads","instagram"],
+  "language":"en","platforms":["threads","instagram"],
   "max_turns":12,"is_active":true,
   "stats":{"open_tasks":2,"running":1},
   "created_at":"...","updated_at":"..."

@@ -137,7 +137,7 @@ func (s *Server) createPipeline(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	p := &store.Pipeline{IsActive: true, Timezone: "UTC", Language: "zh-TW", LookbackHours: 24, MaxItems: 20}
+	p := &store.Pipeline{IsActive: true, Timezone: "UTC", Language: "en", LookbackHours: 24, MaxItems: 20}
 	body.apply(p)
 	out, err := s.Store.CreatePipeline(r.Context(), p, scheduler.Validate)
 	if err != nil {

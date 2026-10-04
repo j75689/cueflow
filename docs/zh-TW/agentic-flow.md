@@ -50,7 +50,7 @@ flowchart LR
 | ✍️ Writer（文案） | `writer` | drafting, research, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
 | 🧐 Editor（編輯） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
 
-預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設 `zh-TW`），所以照常會用繁體中文工作。
+預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設英文 `en`）；想讓 agent 用繁體中文工作，把該角色的 Language 改成 `zh-TW` 即可。
 
 ## 4. 能力與工具
 

@@ -27,7 +27,7 @@ import { useAsync } from "@/lib/hooks";
 import type { AgentInput, AgentRole, Connector } from "@/lib/types";
 
 const AVATARS = ["🧭", "🔎", "✍️", "🧐", "📅", "📈", "🎨", "🤖", "🦉", "🚀", "💡", "🗞️"];
-const LANGUAGES = ["zh-TW", "zh-CN", "en", "ja", "ko"];
+const LANGUAGES = ["en", "zh-TW", "zh-CN", "ja", "ko"];
 const FALLBACK_ROLES: AgentRole[] = ["manager", "researcher", "writer", "editor", "custom"];
 
 const blank = (): AgentInput => ({
@@ -41,7 +41,7 @@ const blank = (): AgentInput => ({
   llm_connector_id: null,
   search_connector_id: null,
   source_connector_ids: [],
-  language: "zh-TW",
+  language: "en",
   platforms: ["threads"],
   max_turns: 12,
   is_active: true,

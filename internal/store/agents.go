@@ -154,7 +154,7 @@ func (a *Agent) normalize() error {
 		a.Platforms = []string{}
 	}
 	if a.Language == "" {
-		a.Language = "zh-TW"
+		a.Language = "en"
 	}
 	if a.MaxTurns <= 0 {
 		a.MaxTurns = 12

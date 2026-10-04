@@ -1,6 +1,7 @@
 # CueFlow + Postiz on one host. Every port is bound to 127.0.0.1 (no public exposure);
 # reach it from other machines through an SSH tunnel or a VPN such as Tailscale.
 #
+#   cd deploy
 #   cp .env.example .env    # then fill in CUEFLOW_SECRET_KEY, POSTIZ_JWT_SECRET, ...
 #   docker compose up -d                 # CueFlow + Postiz
 #   docker compose --profile mock up -d  # also start a mock Postiz MCP server for trying CueFlow out
@@ -18,7 +19,9 @@ x-postgres-health: &pg-health
 services:
   # ---------------------------------------------------------------- CueFlow
   cueflow:
-    build: .
+    build:
+      context: ..
+      dockerfile: Dockerfile
     image: cueflow:local
     restart: unless-stopped
     depends_on:

@@ -3,6 +3,8 @@
 bin
 .env
 .env.*
+deploy/.env
+deploy/.env.*
 web/node_modules
 web/.next
 web/out

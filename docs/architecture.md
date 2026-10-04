@@ -290,7 +290,7 @@ flowchart LR
     CF -->|"HTTPS"| EXT["LLM APIs · search · RSS · IMAP"]
 ```
 
-- `docker compose up -d` brings up every service; all ports are bound to `127.0.0.1`. For remote access use an SSH tunnel or Tailscale.
+- `deploy/docker-compose.yml`: `cd deploy && docker compose up -d` brings up every service; all ports are bound to `127.0.0.1`. For remote access use an SSH tunnel or Tailscale.
 - The CueFlow image is distroless and non-root, with a built-in `healthcheck` subcommand.
 - For development or a trial run, `--profile mock` starts a mock Postiz MCP server.
 - The current design is **single-instance**. Task and publish claiming use database leases and `SKIP LOCKED`, so two instances will not process the same work twice, but cron fires once per instance, so horizontal scaling is not recommended.

@@ -12,7 +12,7 @@ CREATE TABLE agents (
     llm_connector_id     UUID REFERENCES connectors(id) ON DELETE SET NULL,
     search_connector_id  UUID REFERENCES connectors(id) ON DELETE SET NULL,
     source_connector_ids UUID[] NOT NULL DEFAULT '{}',
-    language             VARCHAR(16) NOT NULL DEFAULT 'zh-TW',
+    language             VARCHAR(16) NOT NULL DEFAULT 'en',
     platforms            TEXT[] NOT NULL DEFAULT '{threads}',
     max_turns            INT NOT NULL DEFAULT 12,
     is_active            BOOLEAN NOT NULL DEFAULT TRUE,

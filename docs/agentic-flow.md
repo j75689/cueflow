@@ -51,7 +51,7 @@ On first start, when no agents exist, the system creates these four roles (`inte
 | ✍️ Writer | `writer` | drafting, research, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
 | 🧐 Editor | `editor` | drafting, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
 
-The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `zh-TW`).
+The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `en`).
 
 ## 4. Capabilities and tools
 

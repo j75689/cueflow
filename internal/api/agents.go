@@ -89,7 +89,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	a := &store.Agent{IsActive: true, Language: "zh-TW", MaxTurns: 12}
+	a := &store.Agent{IsActive: true, Language: "en", MaxTurns: 12}
 	body.apply(a)
 	out, err := s.Store.CreateAgent(r.Context(), a)
 	if err != nil {

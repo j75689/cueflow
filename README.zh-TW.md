@@ -17,7 +17,7 @@ CueFlow 內建一組可以用自然語言交代事情的 agent，像聊天機器
 
 - **Command（指令中心）**：直接說你要什麼，例如「每天早上 8 點整理 AI 新聞並寫成 Threads 草稿」。管理型 agent（🧭 Chief，總管）會規劃步驟、把子任務分派給隊友、設定定時排程，最後回報結果。
 - **Board（看板）**：每個需求都是一張任務卡，依序經過 Backlog → 待辦 → 進行中 → 等待中 → 待確認 → 完成。把指派了 agent 的卡片拖到「待辦」，它就會開始工作。每個任務都有一條對話串，記錄 agent 的進度、工具呼叫、提問與成果；回覆就能讓它繼續，用 `@writer` 開頭則可以把任務轉給另一個 agent。
-- **Agents（角色）**：每個角色有自己的人設、能力、LLM、資料來源與記憶。預設有四位：🧭 Chief（總管：規劃與委派）、🔎 Researcher（研究員：附來源的研究）、✍️ Writer（文案：各平台草稿）、🧐 Editor（編輯：檢查與修稿）。預設的名稱與指示是英文，但它們回覆與寫稿用的語言由各自的 `language` 設定決定（預設 `zh-TW`）。也可以自己新增角色。
+- **Agents（角色）**：每個角色有自己的人設、能力、LLM、資料來源與記憶。預設有四位：🧭 Chief（總管：規劃與委派）、🔎 Researcher（研究員：附來源的研究）、✍️ Writer（文案：各平台草稿）、🧐 Editor（編輯：檢查與修稿）。預設的名稱與指示是英文，但它們回覆與寫稿用的語言由各自的 `language` 設定決定（預設英文 `en`，要用繁體中文請改成 `zh-TW`）。也可以自己新增角色。
 - **Schedules（排程）**：定時為 agent 建立任務；agent 也能自己建立排程，最密每 5 分鐘一次。
 
 | 能力 | 工具 |
@@ -54,7 +54,7 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 ## 快速開始（Docker）
 
 ```bash
-git clone https://github.com/j75689/cueflow && cd cueflow
+git clone https://github.com/j75689/cueflow && cd cueflow/deploy
 cp .env.example .env
 # 填入 CUEFLOW_SECRET_KEY（openssl rand -base64 32）與 POSTIZ_JWT_SECRET（openssl rand -hex 32）
 docker compose up -d
@@ -79,6 +79,7 @@ docker compose up -d
 ### 不接 Postiz 先試用
 
 ```bash
+cd deploy
 docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 ```
 
