@@ -3,11 +3,10 @@
 **Open-source, self-hosted Agent Ops Console for social media.** CueFlow wakes up on a schedule,
 collects material (RSS, mailboxes, web search), has an LLM write platform-specific drafts, puts every
 draft in front of a human reviewer, and only then publishes it through [Postiz](https://github.com/gitroomhq/postiz-app)
-over the Model Context Protocol (MCP).
+over the Model Context Protocol (MCP). No public IP, domain or webhook required: it runs on a NAS,
+a home lab or a laptop with Docker.
 
-> CueFlow 是給個人創作者、技術團隊與獨立運營者的開源自託管「社群 Agent 運營控制台」：
-> 定時收集 RSS / 信箱 / 網路搜尋 → LLM 依平台風格產生草稿 → **人工審核** → 透過 MCP 交給 Postiz 發布到 Threads、Instagram、X、LinkedIn。
-> 不需要 Public IP、網域或 Webhook，家裡的 NAS / Home Lab / 本機 Docker 就能跑。
+Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md)
 
 ```
  Cron ─▶ Ingest (RSS · IMAP · Search) ─▶ Agent (LLM tool loop) ─▶ PENDING_REVIEW
@@ -21,16 +20,17 @@ over the Model Context Protocol (MCP).
 CueFlow ships with a small team of agents you can talk to in plain language - like a chat bot that
 actually does the work, but on a board you can watch:
 
-- **Command**: tell the team what you want, e.g. 「每天早上 8 點整理 AI 新聞並寫成 Threads 草稿」. The
-  manager agent (🧭 總管) works out the plan, delegates subtasks to teammates, sets up recurring
+- **Command**: tell the team what you want, e.g. "Every morning at 8, summarize AI news and draft a
+  Threads post". The manager agent (🧭 Chief) works out the plan, delegates subtasks to teammates, sets up recurring
   schedules, and reports back.
 - **Board**: every request is a task card - Backlog → To do → In progress → Waiting → Review → Done.
   Drag a card to *To do* with an agent assigned and it starts working. Each task has a thread: the
   agent's progress, tool calls, questions and result. Reply to continue, or start with `@writer` to hand
   it to another agent.
 - **Agents**: roles with their own persona, capabilities, LLM, sources and memory. Defaults:
-  🧭 總管 (plans and delegates), 🔎 研究員 (research with sources), ✍️ 文案 (platform drafts), 🧐 編輯
-  (reviews and revises drafts). Add your own.
+  🧭 Chief (plans and delegates), 🔎 Researcher (research with sources), ✍️ Writer (platform drafts),
+  🧐 Editor (reviews and revises drafts). Agents write in their configured language (default `zh-TW`).
+  Add your own.
 - **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
 
 | Capability | Tools |
@@ -50,8 +50,8 @@ sends them to Postiz.
 - **Human-in-the-loop by construction.** Posts follow a strict state machine
   `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED` (plus `FAILED → QUEUED` for manual retry).
   Every change is recorded in an audit log, including before/after diffs of reviewer edits.
-- **The agent cannot publish.** It only sees `web_search` and `submit_drafts`. Publishers are wrapped so
-  `Publish` fails unless the dispatch worker attached a grant for that exact, human-approved post (FR-4.2).
+- **Agents cannot publish.** No agent tool can publish, and publishers are wrapped so `Publish` fails
+  unless the dispatch worker attached a grant for that exact, human-approved post (FR-4.2).
 - **Everything is a connector plugin.** Publishers, sources, search engines, LLMs and notifiers implement
   small Go interfaces and self-register with a config schema; the UI renders their forms automatically.
   See [docs/connectors.md](docs/connectors.md).
@@ -92,8 +92,10 @@ Then:
    - an LLM - e.g. *Anthropic Claude* (model `claude-opus-5-5`) or *OpenAI-compatible* pointing at Ollama.
    - one or more sources - e.g. an RSS feed.
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
-3. **CueFlow → Pipelines**: create a pipeline (cron such as `0 8 * * *`, timezone, topic, platforms,
-   instructions - see [docs/prompt-templates.md](docs/prompt-templates.md)) and press **Run now**.
+3. Either:
+   - **Command**: tell the agent team what you want, or
+   - **Pipelines**: create a fixed content pipeline (cron such as `0 8 * * *`, timezone, topic, platforms,
+     instructions - see [docs/prompt-templates.md](docs/prompt-templates.md)) and press **Run now**.
 4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
    show the reason and a **Retry** button.
 
@@ -167,11 +169,12 @@ web/                   Next.js + Tailwind dashboard (static export)
 
 ## Documentation
 
-- [Architecture (整體架構設計)](docs/architecture.md)
-- [Agentic flow (Agent 團隊設計)](docs/agentic-flow.md)
+- [Architecture](docs/architecture.md)
+- [Agentic flow](docs/agentic-flow.md)
 - [REST API](docs/api.md)
 - [Writing a connector plugin](docs/connectors.md)
 - [Prompt templates](docs/prompt-templates.md)
+- Traditional Chinese docs: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
 ## License
 

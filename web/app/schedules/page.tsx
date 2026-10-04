@@ -101,7 +101,7 @@ export default function SchedulesPage() {
         <Card>
           <EmptyState
             title="No schedules yet"
-            hint="Create one here, or tell a manager agent in Command: 「每天早上 8 點幫我整理 AI 新聞」."
+            hint="Create one here, or tell a manager agent in Command: 'Every morning at 8, summarize AI news for me'."
             action={
               <Link href="/command/">
                 <Button variant="secondary">Open Command</Button>
@@ -271,7 +271,7 @@ function ScheduleModal({
           <AgentSelect agents={agents} value={form.assignee_agent_id} onChange={(v) => set("assignee_agent_id", v)} noneLabel="Choose an agent…" />
         </Field>
         <Field label="Task title" required className="sm:col-span-2">
-          <Input value={form.task_title} onChange={(e) => set("task_title", e.target.value)} placeholder="整理今天的 AI 新聞並寫 Threads 草稿" />
+          <Input value={form.task_title} onChange={(e) => set("task_title", e.target.value)} placeholder="Summarize today's AI news and draft a Threads post" />
         </Field>
         <Field label="Task description" className="sm:col-span-2">
           <Textarea rows={4} value={form.task_description} onChange={(e) => set("task_description", e.target.value)} />

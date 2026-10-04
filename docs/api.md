@@ -171,7 +171,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
 `Agent`:
 ```json
 {
-  "id":"uuid","name":"總管","slug":"chief","avatar":"🧭","role":"manager",
+  "id":"uuid","name":"Chief","slug":"chief","avatar":"🧭","role":"manager",
   "description":"Short summary shown to other agents for delegation",
   "instructions":"Persona / standing orders (system prompt)",
   "capabilities":["planning","delegation","research","memory"],
@@ -219,7 +219,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 {
   "id":"uuid","number":12,"title":"...","description":"...","status":"TODO","priority":"normal",
   "labels":["threads"],
-  "assignee_agent_id":"uuid|null","assignee":{"id":"uuid","name":"文案","slug":"writer","avatar":"✍️"}|null,
+  "assignee_agent_id":"uuid|null","assignee":{"id":"uuid","name":"Writer","slug":"writer","avatar":"✍️"}|null,
   "created_by":"human|agent","creator_agent_id":"uuid|null",
   "parent_id":"uuid|null","subtask_counts":{"total":3,"done":1},
   "result":"final summary from the agent","due_at":"...|null","position":1024.0,

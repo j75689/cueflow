@@ -93,8 +93,8 @@ func buildUserPrompt(in Input, maxContent int) string {
 }
 
 var languageNames = map[string]string{
-	"zh-TW": "Traditional Chinese (Taiwan, 繁體中文)",
-	"zh-CN": "Simplified Chinese (简体中文)",
+	"zh-TW": "Traditional Chinese (Taiwan)",
+	"zh-CN": "Simplified Chinese",
 	"en":    "English",
 	"ja":    "Japanese",
 	"ko":    "Korean",

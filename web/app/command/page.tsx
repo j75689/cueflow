@@ -12,10 +12,10 @@ import { useAsync } from "@/lib/hooks";
 import type { TaskPriority } from "@/lib/types";
 
 const EXAMPLES = [
-  "每天早上 8 點整理 AI 新聞並寫成 Threads 草稿",
-  "研究一下 MCP 最近一週的新聞，給我重點摘要",
-  "幫我規劃下週 5 篇 Instagram 貼文的主題，分派給文案寫草稿",
-  "看看待審核的草稿，挑出語氣太硬的幫我改寫",
+  "Every morning at 8, summarize AI news and draft a Threads post",
+  "Research this week's MCP news and give me the key points",
+  "Plan 5 Instagram post topics for next week and have the writer draft them",
+  "Go through the drafts waiting for review and soften any that sound too stiff",
 ];
 
 // Short title from a free-form instruction: first line, trimmed to ~60 chars.

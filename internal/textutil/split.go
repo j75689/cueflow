@@ -107,7 +107,8 @@ func isTerminator(r rune) bool {
 }
 
 func isCJKTerminator(r rune) bool {
-	return r == '。' || r == '！' || r == '？' || r == '；'
+	// Ideographic full stop, fullwidth exclamation/question marks, fullwidth semicolon.
+	return r == '\u3002' || r == '\uff01' || r == '\uff1f' || r == '\uff1b'
 }
 
 // hardWrap cuts at the last space before the limit, or exactly at the limit for unspaced text.

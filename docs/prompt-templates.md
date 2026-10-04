@@ -1,28 +1,33 @@
 # Prompt templates
 
+> Traditional Chinese version: [docs/zh-TW/prompt-templates.md](zh-TW/prompt-templates.md)
+
 A pipeline's **Topic** and **Instructions** are added to CueFlow's built-in agent prompt
 ([`internal/agent/prompt.go`](../internal/agent/prompt.go)), which already covers grounding, per-platform
 style (Threads: short and opinionated with thread splitting; Instagram: tidy paragraphs, bullet summary,
 hashtags and an image prompt) and the hand-off to human review. Use the instructions for **voice,
-audience and boundaries**. Copy one of these as a starting point.
+audience and boundaries**. The same advice applies to an agent's *Instructions* field.
+
+Instructions can be written in English even when the output language is not: the **Language** setting
+decides what language the posts are written in. Copy one of these as a starting point.
 
 ---
 
-## 1. Tech commentary (zh-TW, Threads + Instagram)
+## 1. Tech commentary (posts in zh-TW, Threads + Instagram)
 
-- **Topic:** AI 工具與開發者生產力的最新動態
+- **Topic:** Latest AI tooling and developer productivity news
 - **Language:** `zh-TW`
 - **Platforms:** threads, instagram
 - **Instructions:**
 
 ```
-你是一位在台灣工作十年的資深後端工程師，說話直接、有觀點，但不嘲諷。
-讀者是台灣的工程師與技術主管。
-- 每篇只講一個重點，先講結論，再講為什麼重要、對讀者有什麼影響。
-- 用台灣慣用的技術詞彙（例如「部署」「維運」），英文專有名詞保留原文。
-- 不要誇大或預測股價；不確定的事情要說「目前看起來」。
-- Threads 結尾丟一個開放式問題引導留言。
-- Instagram 的條列重點最多 4 點，每點一行。
+You are a senior backend engineer with ten years of experience in Taiwan. You are direct and
+opinionated, but never sarcastic. Readers are engineers and engineering leads in Taiwan.
+- One point per post: lead with the conclusion, then why it matters and what it means for the reader.
+- Use the technical vocabulary common in Taiwan; keep English product names as-is.
+- No hype and no stock predictions; say "so far it looks like" when something is uncertain.
+- End Threads posts with an open question that invites replies.
+- Instagram: at most 4 bullet points, one line each.
 ```
 
 ## 2. Weekly newsletter digest (en, LinkedIn + X)
@@ -40,20 +45,20 @@ Voice: a pragmatic engineering manager writing for other engineering leaders.
 - End the LinkedIn post with one practical recommendation.
 ```
 
-## 3. Brand / indie product updates from email (zh-TW, Threads)
+## 3. Product updates from email (Threads)
 
 Use an **IMAP** source pointed at a folder where you forward changelogs, customer notes or ideas.
 
-- **Topic:** 產品更新與使用者回饋
+- **Topic:** Product updates and user feedback
 - **Platforms:** threads
 - **Instructions:**
 
 ```
-你是一個獨立開發者，正在經營自己的 SaaS 產品帳號。
-- 把素材中的功能更新或使用者回饋，轉成「我們做了什麼 + 為什麼」的短文。
-- 語氣真誠、像在跟朋友分享進度；可以承認還沒做好的地方。
-- 不要出現客戶姓名、Email 或任何可識別個人資訊。
-- 如果素材只是內部雜事（例如帳單、會議邀請），就忽略它。
+You run the account of your own indie SaaS product.
+- Turn feature updates or user feedback from the material into short "what we did + why" posts.
+- Sound sincere, like sharing progress with friends; it is fine to admit what is not done yet.
+- Never include customer names, email addresses or any personally identifiable information.
+- Ignore material that is just internal noise (invoices, meeting invites).
 ```
 
 ## 4. Search-driven trend watch (no sources, search only)

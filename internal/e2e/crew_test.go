@@ -70,9 +70,9 @@ func calls(pairs ...any) llm.Message {
 	return m
 }
 
-// whoAmI extracts the agent slug from the system prompt ("You are 🧭 總管 ...") via the default names.
+// whoAmI extracts the agent slug from the system prompt ("You are 🧭 Chief, an AI agent ...") via the default names.
 func whoAmI(system string) string {
-	for name, slug := range map[string]string{"總管": "chief", "研究員": "researcher", "文案": "writer", "編輯": "editor"} {
+	for name, slug := range map[string]string{"Chief": "chief", "Researcher": "researcher", "Writer": "writer", "Editor": "editor"} {
 		if strings.Contains(system, " "+name+", an AI agent") {
 			return slug
 		}
@@ -132,16 +132,16 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 			}
 			switch {
 			case !strings.Contains(b, "## Subtasks"):
-				return calls("create_subtask", map[string]any{"title": "研究 MCP 最新消息", "description": "找出重點並附來源", "assignee": "researcher"},
+				return calls("create_subtask", map[string]any{"title": "Research the latest MCP news", "description": "Find the key points, with sources", "assignee": "researcher"},
 					"wait_for_subtasks", map[string]any{})
 			case !strings.Contains(b, "@writer"):
-				if !strings.Contains(b, "MCP 1.0 已發布") {
+				if !strings.Contains(b, "MCP 1.0 is out") {
 					t.Errorf("chief should be resumed with the research result:\n%s", b)
 				}
-				return calls("create_subtask", map[string]any{"title": "寫 Threads 草稿", "description": "根據研究：MCP 1.0 已發布", "assignee": "writer"},
+				return calls("create_subtask", map[string]any{"title": "Write a Threads draft", "description": "Based on the research: MCP 1.0 is out", "assignee": "writer"},
 					"wait_for_subtasks", map[string]any{})
 			default:
-				return calls("complete_task", map[string]any{"summary": "研究與草稿都完成了，草稿已送審。"})
+				return calls("complete_task", map[string]any{"summary": "Research and draft are done; the draft is waiting for review."})
 			}
 		case "researcher":
 			if len(toolResults(req)) == 0 {
@@ -157,20 +157,20 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 			if !strings.Contains(toolResults(req)[1].Content, "MCP 1.0 released") {
 				t.Errorf("search_materials did not return the item: %s", toolResults(req)[1].Content)
 			}
-			return calls("complete_task", map[string]any{"summary": "MCP 1.0 已發布（https://example.com/mcp）"})
+			return calls("complete_task", map[string]any{"summary": "MCP 1.0 is out (https://example.com/mcp)"})
 		case "writer":
 			if len(toolResults(req)) == 0 {
 				return calls("create_post_draft", map[string]any{"platform": "threads", "title": "MCP 1.0",
-					"content": "MCP 1.0 終於發布了。你的團隊準備好了嗎？", "hashtags": []string{"MCP"}, "source_urls": []string{"https://example.com/mcp"}})
+					"content": "MCP 1.0 is finally out. Is your team ready?", "hashtags": []string{"MCP"}, "source_urls": []string{"https://example.com/mcp"}})
 			}
-			return calls("complete_task", map[string]any{"summary": "已建立 Threads 草稿：" + toolResults(req)[0].Content})
+			return calls("complete_task", map[string]any{"summary": "Created a Threads draft: " + toolResults(req)[0].Content})
 		}
 		t.Errorf("unexpected agent: %s", req.System[:80])
 		return llm.Message{Content: "?"}
 	})
 
 	var task store.Task
-	if code := e.do("POST", "/tasks", map[string]any{"title": "幫我寫一篇關於 MCP 的 Threads", "assignee_agent_id": team["chief"].ID}, &task); code != 201 {
+	if code := e.do("POST", "/tasks", map[string]any{"title": "Write a Threads post about MCP", "assignee_agent_id": team["chief"].ID}, &task); code != 201 {
 		t.Fatalf("create task: %d", code)
 	}
 	if task.Status != store.TaskTodo {
@@ -184,7 +184,7 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 		Posts    []store.PostRef `json:"posts"`
 	}
 	e.do("GET", "/tasks/"+task.ID.String(), nil, &got)
-	if got.Status != store.TaskReview || !strings.Contains(got.Result, "草稿已送審") {
+	if got.Status != store.TaskReview || !strings.Contains(got.Result, "waiting for review") {
 		t.Fatalf("chief task should be in REVIEW with a result: %s %q", got.Status, got.Result)
 	}
 	if len(got.Subtasks) != 2 {
@@ -211,7 +211,7 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 	// The researcher's attempt to call a publishing tool is visible in its thread.
 	var research store.Task
 	for _, s := range got.Subtasks {
-		if strings.Contains(s.Title, "研究") {
+		if strings.Contains(s.Title, "Research") {
 			research = s
 		}
 	}
@@ -222,7 +222,7 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 		thread = append(thread, m.Kind+":"+m.Content)
 	}
 	joined := strings.Join(thread, "\n")
-	if !strings.Contains(joined, "not available to you") || !strings.Contains(joined, "result:MCP 1.0 已發布") {
+	if !strings.Contains(joined, "not available to you") || !strings.Contains(joined, "result:MCP 1.0 is out") {
 		t.Fatalf("research thread:\n%s", joined)
 	}
 
@@ -240,31 +240,31 @@ func TestAskHumanScheduleAndMention(t *testing.T) {
 		b := brief(req)
 		switch whoAmI(req.System) {
 		case "chief":
-			if !strings.Contains(b, "早上 8 點") {
-				return calls("ask_human", map[string]any{"question": "要幾點整理？"})
+			if !strings.Contains(b, "8 in the morning") {
+				return calls("ask_human", map[string]any{"question": "What time should I prepare it?"})
 			}
 			res := toolResults(req)
 			switch len(res) {
 			case 0:
-				return calls("schedule_task", map[string]any{"cron": "* * * * *", "title": "AI 新聞", "description": "x", "assignee": "writer"})
+				return calls("schedule_task", map[string]any{"cron": "* * * * *", "title": "AI news", "description": "x", "assignee": "writer"})
 			case 1:
 				if !res[0].IsError || !strings.Contains(res[0].Content, "5 minutes") {
 					t.Errorf("every-minute schedule should be rejected: %+v", res[0])
 				}
-				return calls("schedule_task", map[string]any{"name": "每日 AI 新聞", "cron": "0 8 * * *", "timezone": "Asia/Taipei",
-					"title": "整理 AI 新聞寫成 Threads 草稿", "description": "蒐集昨天的 AI 新聞並寫草稿", "assignee": "writer"},
-					"remember", map[string]any{"content": "使用者希望每天早上 8 點收到 AI 新聞草稿"})
+				return calls("schedule_task", map[string]any{"name": "Daily AI news", "cron": "0 8 * * *", "timezone": "Asia/Taipei",
+					"title": "Summarize AI news as a Threads draft", "description": "Collect yesterday's AI news and write a draft", "assignee": "writer"},
+					"remember", map[string]any{"content": "The user wants AI news drafts every day at 08:00"})
 			default:
-				return calls("complete_task", map[string]any{"summary": "已設定每天 08:00 (Asia/Taipei) 由 @writer 整理 AI 新聞。"})
+				return calls("complete_task", map[string]any{"summary": "Scheduled @writer to summarize AI news every day at 08:00 (Asia/Taipei)."})
 			}
 		case "editor":
-			return llm.Message{Content: "我看過了，沒有需要修改的地方。"}
+			return llm.Message{Content: "I reviewed it; nothing needs to change."}
 		}
 		return calls("complete_task", map[string]any{"summary": "ok"})
 	})
 
 	var task store.Task
-	e.do("POST", "/tasks", map[string]any{"title": "每天幫我整理 AI 新聞", "assignee_agent_id": team["chief"].ID}, &task)
+	e.do("POST", "/tasks", map[string]any{"title": "Summarize AI news for me every day", "assignee_agent_id": team["chief"].ID}, &task)
 	e.crew.RunPending(ctx, 5)
 	got, _ := e.store.GetTask(ctx, task.ID)
 	if got.Status != store.TaskWaitingHuman {
@@ -273,7 +273,7 @@ func TestAskHumanScheduleAndMention(t *testing.T) {
 
 	// Human answers in the thread -> back to TODO -> the chief continues.
 	var msg store.TaskMessage
-	if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "早上 8 點"}, &msg); code != 201 {
+	if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "8 in the morning"}, &msg); code != 201 {
 		t.Fatalf("post message: %d", code)
 	}
 	got, _ = e.store.GetTask(ctx, task.ID)
@@ -292,7 +292,7 @@ func TestAskHumanScheduleAndMention(t *testing.T) {
 		schedules[0].AssigneeAgentID == nil || *schedules[0].AssigneeAgentID != team["writer"].ID {
 		t.Fatalf("schedule: %+v", schedules)
 	}
-	mems, _ := e.store.Memories(ctx, team["chief"].ID, "8 點", 10)
+	mems, _ := e.store.Memories(ctx, team["chief"].ID, "08:00", 10)
 	if len(mems) != 1 {
 		t.Fatalf("chief should have remembered the preference: %+v", mems)
 	}
@@ -308,14 +308,14 @@ func TestAskHumanScheduleAndMention(t *testing.T) {
 	}
 
 	// "@editor ..." hands the finished task to the editor, who replies with plain text.
-	e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "@editor 幫我看看排程內容"}, nil)
+	e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "@editor please check the schedule"}, nil)
 	got, _ = e.store.GetTask(ctx, task.ID)
 	if got.AssigneeAgentID == nil || *got.AssigneeAgentID != team["editor"].ID || got.Status != store.TaskTodo {
 		t.Fatalf("mention should reassign to editor and requeue: %+v", got)
 	}
 	e.crew.RunPending(ctx, 3)
 	got, _ = e.store.GetTask(ctx, task.ID)
-	if got.Status != store.TaskReview || !strings.Contains(got.Result, "沒有需要修改") {
+	if got.Status != store.TaskReview || !strings.Contains(got.Result, "nothing needs to change") {
 		t.Fatalf("editor's plain reply should complete the task: %s %q", got.Status, got.Result)
 	}
 }

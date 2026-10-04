@@ -55,7 +55,7 @@ func TestEditableDeletable(t *testing.T) {
 func TestComputeWarnings(t *testing.T) {
 	p := &Post{
 		Platforms:   []string{"threads", "instagram"},
-		ThreadParts: []string{"short", strings.Repeat("字", 501)},
+		ThreadParts: []string{"short", strings.Repeat("x", 501)},
 		Hashtags:    []string{"a", "b"},
 	}
 	w := strings.Join(p.ComputeWarnings(), "\n")

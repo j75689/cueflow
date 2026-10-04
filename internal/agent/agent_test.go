@@ -47,7 +47,7 @@ func call(id, name string, args any) llm.ToolCall {
 }
 
 func TestAgentLoopBlocksPublishingAndSubmitsDrafts(t *testing.T) {
-	long := strings.Repeat("這是一段很長的觀點，說明代理工具的發展。", 40) // > 500 runes, no thread_parts
+	long := strings.Repeat("Agent tooling keeps moving from chat boxes to ops consoles. ", 20) // > 500 runes, no thread_parts
 	model := &scriptedLLM{turns: []llm.Message{
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
 			call("1", "integrationSchedulePostTool", map[string]any{"socialPost": []any{}}),

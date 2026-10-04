@@ -1,31 +1,34 @@
-# CueFlow 整體架構設計
+# CueFlow Architecture
 
-> 對象：要部署、維運或擴充 CueFlow 的開發者。Agent 團隊的運作細節見 [agentic-flow.md](agentic-flow.md)，
-> REST 介面見 [api.md](api.md)，插件開發見 [connectors.md](connectors.md)。
+> Traditional Chinese version: [docs/zh-TW/architecture.md](zh-TW/architecture.md)
 
-## 1. 設計目標與原則
+> Audience: developers who deploy, operate or extend CueFlow. For how the agent team works see
+> [agentic-flow.md](agentic-flow.md); for the REST interface see [api.md](api.md); for plugin development see
+> [connectors.md](connectors.md).
 
-| 原則 | 在架構上的落實 |
+## 1. Goals and principles
+
+| Principle | How the architecture implements it |
 |---|---|
-| **Human-in-the-loop First** | 所有貼文走嚴格狀態機；只有人能把貼文推到 `APPROVED`；發布器被包一層授權檢查，只有發布 worker 能對「已核准的那一篇」呼叫 |
-| **Zero-Public-Exposure** | 全部採主動輪詢（RSS / IMAP / MCP 呼叫），不需要 Webhook；預設只綁 `127.0.0.1:3000` |
-| **Protocol-Driven** | 核心不依賴任何社群平台 SDK；發布透過 MCP 呼叫 Postiz，且 Postiz 本身只是一個 connector 插件 |
-| **一切皆插件** | 發布器、資料來源、搜尋、LLM、通知都是 connector，用同一套註冊／設定／加密機制 |
-| **單一程序、易部署** | Go 單一 binary（API + 排程 + 發布 worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL |
-| **可觀測、可稽核** | 貼文每次狀態變動與人工修改都寫入 `audit_logs`；agent 的每一步寫入任務對話串與 `agent_runs` |
+| **Human-in-the-loop first** | Every post follows a strict state machine; only a human can move a post to `APPROVED`; publishers are wrapped in an authorization check so only the dispatch worker can call them, and only for that one approved post |
+| **Zero public exposure** | Everything is outbound polling (RSS / IMAP / MCP calls), no webhooks needed; binds to `127.0.0.1:3000` by default |
+| **Protocol-driven** | The core depends on no social platform SDK; publishing goes through MCP to Postiz, and Postiz itself is just a connector plugin |
+| **Everything is a plugin** | Publishers, sources, search, LLMs and notifiers are all connectors sharing one registration / configuration / encryption mechanism |
+| **One process, easy to deploy** | A single Go binary (API + scheduler + publish worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL |
+| **Observable and auditable** | Every post status change and human edit is written to `audit_logs`; every agent step is written to the task thread and `agent_runs` |
 
-## 2. 系統全貌
+## 2. System overview
 
 ```mermaid
 flowchart TB
-    subgraph Browser["瀏覽器（localhost:3000）"]
+    subgraph Browser["Browser (localhost:3000)"]
         UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Pipelines · Runs · Connectors"]
     end
 
-    subgraph Core["CueFlow（單一 Go 程序）"]
+    subgraph Core["CueFlow (single Go process)"]
         API["REST API + SSE<br/>internal/api"]
         Broker(("Event Broker<br/>internal/events"))
-        Sched["Scheduler（cron）<br/>internal/scheduler"]
+        Sched["Scheduler (cron)<br/>internal/scheduler"]
         Pipe["Pipeline Runner<br/>internal/pipeline"]
         Crew["Agent Team Runner<br/>internal/crew"]
         Disp["Dispatch Worker<br/>internal/dispatch"]
@@ -37,10 +40,10 @@ flowchart TB
 
     DB[("PostgreSQL")]
 
-    subgraph Plugins["Connectors（internal/connectors/*）"]
+    subgraph Plugins["Connectors (internal/connectors/*)"]
         Src["source: RSS · IMAP"]
         Search["search: SearXNG · Tavily"]
-        LLM["llm: OpenAI 相容 · Anthropic"]
+        LLM["llm: OpenAI-compatible · Anthropic"]
         Notif["notifier: SMTP"]
         Pub["publisher: Postiz (MCP)"]
     end
@@ -52,59 +55,59 @@ flowchart TB
     API --> Crew
     API --> Disp
     API --> Pipe
-    Broker -->|"SSE 推播"| API
-    Sched -->|"cron 觸發"| Pipe
-    Sched -->|"建立定時任務"| Crew
+    Broker -->|"SSE push"| API
+    Sched -->|"cron trigger"| Pipe
+    Sched -->|"create scheduled tasks"| Crew
     Pipe --> Hub
     Crew --> Hub
     Disp --> Hub
     Hub --> Reg
     Reg --> Src & Search & LLM & Notif & Pub
-    Pub -.->|"必須通過"| Guard
+    Pub -.->|"must pass"| Guard
     Pub -->|"JSON-RPC over HTTP"| Postiz
     Store --> DB
-    Pipe & Crew & Disp -->|"事件"| Broker
+    Pipe & Crew & Disp -->|"events"| Broker
 ```
 
-### 2.1 套件職責
+### 2.1 Package responsibilities
 
-| 套件 | 職責 |
+| Package | Responsibility |
 |---|---|
-| `cmd/cueflow` | 進入點：載入設定、連線 DB、跑 migration、組裝所有元件、優雅關機；子命令 `migrate` / `genkey` / `healthcheck` |
-| `internal/config` | 從環境變數載入設定（`CUEFLOW_*`、`DATABASE_URL`） |
-| `internal/db` | 連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate） |
-| `internal/domain` | 貼文狀態機、平台規則（字數、hashtag、是否支援串文、是否需要圖片） |
-| `internal/store` | 所有 PostgreSQL 存取；交易內同時寫狀態與稽核紀錄 |
-| `internal/secret` | AES-256-GCM 加解密 connector 機密欄位 |
-| `internal/connector` | 插件註冊表、設定 schema、五種 kind 介面、發布器授權包裝 |
-| `internal/connectors/*` | 內建插件實作 |
-| `internal/hub` | 從 DB 讀出 connector、解密、呼叫工廠建立實例 |
-| `internal/mcpx` | MCP client 封裝（Streamable HTTP / SSE / stdio）、工具分類 |
-| `internal/guard` | 發布授權（context 上的 grant 與 agent 標記） |
-| `internal/agent` | Pipeline 用的草稿產生器（固定兩個工具的 LLM 迴圈） |
-| `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶 |
-| `internal/pipeline` | 排程內容管線：收集 → 產生 → 存成待審 → 通知 |
-| `internal/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
-| `internal/scheduler` | cron：觸發 pipeline、產生定時任務、寄送待審摘要 |
-| `internal/events` | 程序內 pub/sub，供 SSE 即時推播 |
-| `internal/api` | REST + SSE、管理 token 驗證、提供內嵌前端 |
-| `internal/webui` | 內嵌 Next.js 靜態輸出（`web/out` → `internal/webui/dist`） |
-| `web/` | Next.js + Tailwind 前端（static export） |
+| `cmd/cueflow` | Entry point: load config, connect to the DB, run migrations, wire all components, graceful shutdown; subcommands `migrate` / `genkey` / `healthcheck` |
+| `internal/config` | Load settings from environment variables (`CUEFLOW_*`, `DATABASE_URL`) |
+| `internal/db` | Connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) |
+| `internal/domain` | Post state machine, platform rules (character limits, hashtags, thread support, media requirement) |
+| `internal/store` | All PostgreSQL access; status changes and audit entries are written in the same transaction |
+| `internal/secret` | AES-256-GCM encryption of connector secret fields |
+| `internal/connector` | Plugin registry, config schema, the five kind interfaces, the publisher authorization wrapper |
+| `internal/connectors/*` | Built-in plugin implementations |
+| `internal/hub` | Loads a connector from the DB, decrypts it and calls its factory to build an instance |
+| `internal/mcpx` | MCP client wrapper (Streamable HTTP / SSE / stdio), tool classification |
+| `internal/guard` | Publish authorization (a grant and an agent marker carried on the context) |
+| `internal/agent` | Draft generator used by pipelines (an LLM loop with two fixed tools) |
+| `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory |
+| `internal/pipeline` | Scheduled content pipeline: collect → generate → store for review → notify |
+| `internal/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/scheduler` | cron: triggers pipelines, spawns scheduled tasks, sends the review digest |
+| `internal/events` | In-process pub/sub for live SSE updates |
+| `internal/api` | REST + SSE, admin token check, serves the embedded frontend |
+| `internal/webui` | Embedded Next.js static export (`web/out` → `internal/webui/dist`) |
+| `web/` | Next.js + Tailwind frontend (static export) |
 
-### 2.2 背景迴圈
+### 2.2 Background loops
 
-一個 CueFlow 程序內同時跑四種背景工作，彼此只透過資料庫狀態溝通：
+A CueFlow process runs four kinds of background work, which communicate only through database state:
 
-| 迴圈 | 頻率 | 做什麼 |
+| Loop | Frequency | What it does |
 |---|---|---|
-| Scheduler | cron 表達式 | 觸發 pipeline run；依排程建立任務；（選用）寄待審摘要 |
-| Pipeline Runner | 被觸發時 | 一次完整的「收集 → 產生 → 待審」流程，單次上限 30 分鐘 |
-| Dispatch Worker | 每 3 秒，或核准後立即喚醒 | 把已核准貼文送去發布 |
-| Crew（Agent Runner） | 每 2 秒，或有新任務時立即喚醒 | 認領 `TODO` 任務並讓 agent 執行，預設同時 3 個 |
+| Scheduler | cron expressions | Triggers pipeline runs; creates tasks from schedules; (optional) sends the review digest |
+| Pipeline Runner | when triggered | One full "collect → generate → pending review" pass, capped at 30 minutes |
+| Dispatch Worker | every 3 seconds, or woken immediately after an approval | Sends approved posts for publishing |
+| Crew (agent runner) | every 2 seconds, or woken immediately when there is a new task | Claims `TODO` tasks and lets agents work them, 3 at a time by default |
 
-「喚醒」是非阻塞的 channel 通知，所以按下核准或指派任務後幾乎立刻開始處理；定時輪詢只是保險。
+"Waking" is a non-blocking channel notification, so work starts almost immediately after an approval or an assignment; the periodic polling is only a safety net.
 
-## 3. Connector 插件模型
+## 3. Connector plugin model
 
 ```mermaid
 classDiagram
@@ -148,74 +151,74 @@ classDiagram
     Notifier <|.. SMTP
 ```
 
-一個插件 = 一個 package，在 `init()` 裡呼叫 `connector.Register(spec, factory)`：
+One plugin = one package that calls `connector.Register(spec, factory)` in `init()`:
 
-- **Spec**：型別名稱、kind、欄位清單（型別、必填、預設值、是否機密）。前端依 Spec 自動產生設定表單，`/api/v1/meta` 會回傳所有 Spec。
-- **Factory**：拿到「已驗證、已套預設值、已解密」的設定與 `Env`（logger、HTTP client、狀態儲存），回傳實例。
-- **Build 流程**：`hub.Instance(id)` → 讀 DB → 解密 secrets → `Spec.WithDefaults` → `Spec.Validate` → factory → 檢查實例確實實作該 kind 的介面 → 若是 publisher，**包上 `guardedPublisher`**。
+- **Spec**: type name, kind, field list (type, required, default, secret). The frontend generates the config form from the Spec; `/api/v1/meta` returns all Specs.
+- **Factory**: receives settings that are already validated, defaulted and decrypted, plus an `Env` (logger, HTTP client, state store), and returns an instance.
+- **Build flow**: `hub.Instance(id)` → read from DB → decrypt secrets → `Spec.WithDefaults` → `Spec.Validate` → factory → check the instance really implements the kind's interface → if it is a publisher, **wrap it in `guardedPublisher`**.
 
-新增一個整合不需要改核心，只要新增 package 並在 `internal/connectors/all` 加一行 blank import。
+Adding an integration needs no core changes: add a package and one blank import in `internal/connectors/all`.
 
-## 4. 資料模型
+## 4. Data model
 
 ```mermaid
 erDiagram
-    connectors ||--o{ source_items : "抓取"
-    connectors ||--o{ pipelines : "被引用（LLM / 搜尋 / 發布 / 通知）"
-    connectors ||--o{ agents : "被引用（LLM / 搜尋 / 來源）"
-    pipelines ||--o{ pipeline_runs : "執行"
-    pipeline_runs ||--o{ posts : "產生"
-    posts ||--o{ audit_logs : "稽核"
-    agents ||--o{ agent_memories : "記憶"
-    agents ||--o{ tasks : "被指派"
-    tasks ||--o{ tasks : "子任務"
-    tasks ||--o{ task_messages : "對話串"
-    tasks ||--o{ agent_runs : "執行紀錄"
-    tasks ||--o{ posts : "產生草稿"
-    schedules ||--o{ tasks : "定時建立"
-    agents ||--o{ schedules : "被指派"
+    connectors ||--o{ source_items : "fetches"
+    connectors ||--o{ pipelines : "referenced by (LLM / search / publisher / notifier)"
+    connectors ||--o{ agents : "referenced by (LLM / search / sources)"
+    pipelines ||--o{ pipeline_runs : "runs"
+    pipeline_runs ||--o{ posts : "produces"
+    posts ||--o{ audit_logs : "audited by"
+    agents ||--o{ agent_memories : "remembers"
+    agents ||--o{ tasks : "assigned"
+    tasks ||--o{ tasks : "subtasks"
+    tasks ||--o{ task_messages : "thread"
+    tasks ||--o{ agent_runs : "runs"
+    tasks ||--o{ posts : "drafts"
+    schedules ||--o{ tasks : "spawns"
+    agents ||--o{ schedules : "assigned"
 ```
 
-| 資料表 | 重點設計 |
+| Table | Key design points |
 |---|---|
-| `connectors` | 一般設定放 `config`（JSONB，可顯示）；機密欄位加密後放 `secrets`（BYTEA）；`state` 給插件存游標 |
-| `source_items` | `UNIQUE(connector_id, external_id)` 實現增量抓取（RSS 用 GUID、信件用 Message-ID）；`consumed_at` 避免同一則素材被重複寫文 |
-| `pipelines` / `pipeline_runs` | 排程內容管線與每次執行的統計、逐步 log |
-| `posts` | 狀態、串文分段、hashtag、媒體、`version`（樂觀鎖）、`lease_until`（發布租約）、`external_post_ids`、`task_id` / `run_id`（來源追溯） |
-| `audit_logs` | 每次狀態變動與修改（含前後差異）；`seq` 保證同一交易內的順序 |
-| `agents` / `agent_memories` | 角色設定與長期記憶 |
-| `tasks` / `task_messages` / `agent_runs` | 看板任務、對話串、每次 agent 執行的回合數與 token 用量 |
-| `schedules` | 定時建立任務的 cron 設定 |
+| `connectors` | Plain settings in `config` (JSONB, displayable); secret fields encrypted into `secrets` (BYTEA); `state` lets plugins store a cursor |
+| `source_items` | `UNIQUE(connector_id, external_id)` gives delta fetching (GUID for RSS, Message-ID for mail); `consumed_at` keeps the same item from being written up twice |
+| `pipelines` / `pipeline_runs` | Scheduled content pipelines and per-run stats and step logs |
+| `posts` | Status, thread parts, hashtags, media, `version` (optimistic locking), `lease_until` (publish lease), `external_post_ids`, `task_id` / `run_id` (provenance) |
+| `audit_logs` | Every status change and edit (with before/after diffs); `seq` preserves order within one transaction |
+| `agents` / `agent_memories` | Role configuration and long-term memory |
+| `tasks` / `task_messages` / `agent_runs` | Board tasks, threads, and per-run turn and token counts |
+| `schedules` | cron settings that create tasks |
 
-Migration 檔在 `internal/db/migrations/`，啟動時自動套用。
+Migrations live in `internal/db/migrations/` and are applied automatically at startup.
 
-## 5. 貼文生命週期與發布
+## 5. Post lifecycle and publishing
 
-### 5.1 狀態機
+### 5.1 State machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFT: 手動建立 / agent 產生
-    DRAFT --> PENDING_REVIEW: 送審（產生後自動送審）
-    PENDING_REVIEW --> APPROVED: 人工核准
-    PENDING_REVIEW --> REJECTED: 人工退回（必填原因）
-    APPROVED --> QUEUED: 發布 worker 接手
-    QUEUED --> PUBLISHED: Postiz 接受
-    QUEUED --> FAILED: 發布失敗 / worker 中途掛掉
-    FAILED --> QUEUED: 人工重試
+    [*] --> DRAFT: created manually / generated by an agent
+    DRAFT --> PENDING_REVIEW: submitted (automatic after generation)
+    PENDING_REVIEW --> APPROVED: human approves
+    PENDING_REVIEW --> REJECTED: human rejects (reason required)
+    APPROVED --> QUEUED: picked up by the publish worker
+    QUEUED --> PUBLISHED: accepted by Postiz
+    QUEUED --> FAILED: publish error / worker died mid-publish
+    FAILED --> QUEUED: manual retry
     REJECTED --> [*]
     PUBLISHED --> [*]
 ```
 
-- 轉換規則只定義在 `internal/domain/post.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
-- 只有 `DRAFT` / `PENDING_REVIEW` 可以編輯，編輯需帶 `version`，版本不符回 `409`。
-- 每次轉換與稽核紀錄在**同一個交易**內寫入。
+- Transitions are defined in exactly one place, `internal/domain/post.go`; anything not in the table returns `invalid_transition`.
+- Only `DRAFT` / `PENDING_REVIEW` posts can be edited; edits must carry `version`, and a stale version returns `409`.
+- Each transition and its audit entry are written in **the same transaction**.
 
-### 5.2 發布流程
+### 5.2 Publish flow
 
 ```mermaid
 sequenceDiagram
-    actor R as 審核者
+    actor R as Reviewer
     participant API
     participant DB as PostgreSQL
     participant W as Dispatch Worker
@@ -223,59 +226,59 @@ sequenceDiagram
     participant Z as Postiz MCP
 
     R->>API: POST /posts/{id}/approve
-    API->>DB: PENDING_REVIEW → APPROVED（+ audit）
+    API->>DB: PENDING_REVIEW → APPROVED (+ audit)
     API->>W: Wake()
-    W->>DB: APPROVED → QUEUED（+ audit）
-    W->>DB: 認領：lease_until = now+5m、attempts+1（SKIP LOCKED）
+    W->>DB: APPROVED → QUEUED (+ audit)
+    W->>DB: claim: lease_until = now+5m, attempts+1 (SKIP LOCKED)
     W->>W: ctx = WithPublishGrant(postID)
     W->>P: Publish(ctx, req)
     P->>P: guard.CheckPublish(ctx, postID)
     P->>Z: integrationList → uploadFromUrlTool → integrationSchedulePostTool
-    alt 成功
+    alt success
         Z-->>P: postId
-        W->>DB: QUEUED → PUBLISHED、external_post_ids
-    else 失敗（含 Postiz 驗證錯誤）
-        W->>DB: QUEUED → FAILED、error_message
+        W->>DB: QUEUED → PUBLISHED, external_post_ids
+    else failure (including Postiz validation errors)
+        W->>DB: QUEUED → FAILED, error_message
     end
 ```
 
-### 5.3 防止重複發布
+### 5.3 Preventing duplicate posts
 
-發布前先取得租約（`lease_until`）。如果 worker 在發布途中掛掉、租約過期，下次啟動時該貼文會被標成 `FAILED`，並註明「可能已發出，重試前請先確認平台」，**不會自動重發**。因為我們無法得知 Postiz 是否已經收到，自動重試可能造成重複貼文。
+The worker takes a lease (`lease_until`) before publishing. If it dies mid-publish and the lease expires, the post is marked `FAILED` on the next start with a note that it "may have been published; check the platform before retrying". It is **never retried automatically**: we cannot know whether Postiz already received it, so an automatic retry could double-post.
 
-### 5.4 Pipeline（排程內容管線）
+### 5.4 Pipelines (scheduled content)
 
-Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
+A pipeline is a simpler, more predictable automation than the agent team:
 
-1. cron 觸發，以 `SELECT … FOR UPDATE` 加上「同一 pipeline 只能有一個 RUNNING」防止重疊執行。
-2. 對每個來源 connector 增量抓取，寫入 `source_items`（重複的自動略過）。
-3. 取回看回時間內、尚未用過的素材（上限 `max_items`）。
-4. `internal/agent` 的產生器只開放 `web_search` 與 `submit_drafts` 兩個工具，產出每個平台一篇草稿；超過字數的 Threads / X 內容會自動拆成串文。
-5. 存成 `PENDING_REVIEW` 貼文、標記素材已使用、寄出審核提醒信。
+1. cron triggers it; `SELECT … FOR UPDATE` plus "only one RUNNING run per pipeline" prevents overlapping runs.
+2. Each source connector is fetched incrementally into `source_items` (duplicates are skipped).
+3. Unused items within the lookback window are loaded (up to `max_items`).
+4. The generator in `internal/agent` exposes only `web_search` and `submit_drafts` and produces one draft per platform; Threads / X content over the character limit is split into a thread automatically.
+5. Drafts are stored as `PENDING_REVIEW` posts, the items are marked consumed, and a review reminder email is sent.
 
-需要「理解需求、拆解、委派、追問」的工作交給 agent 團隊；固定格式、每天產稿的工作用 pipeline 比較省、也比較穩定。
+Work that needs understanding, breakdown, delegation or follow-up questions goes to the agent team; fixed-format daily drafting is cheaper and steadier as a pipeline.
 
-## 6. 安全模型
+## 6. Security model
 
-| 威脅 | 防護 |
+| Threat | Mitigation |
 |---|---|
-| LLM 幻覺或被 prompt injection 誘導直接發文 | Agent 能用的工具裡沒有任何發布工具；agent 的 context 帶有標記，`guardedPublisher` 會拒絕；發布必須帶有 dispatch worker 對**該篇貼文**授予的 grant |
-| 外部素材（RSS、網頁）夾帶指令 | 同上：最壞情況只會產生一篇待審草稿；所有 agent 行為寫入對話串可追溯 |
-| Agent 被誘導存取內網（SSRF） | `read_url` 在連線（dial）時檢查解析後的 IP，擋掉 loopback、私有網段、link-local（含雲端 metadata `169.254.169.254`）、CGNAT；重新導向也會重新檢查；不走系統 proxy |
-| 資料庫外洩導致金鑰外洩 | Connector 機密欄位以 AES-256-GCM 加密，associated data 綁定 connector ID（把密文搬到別列也解不開）；API 永遠不回傳機密值 |
-| 未授權存取控制台 | 預設只綁 localhost；可設 `CUEFLOW_ADMIN_TOKEN` 要求 Bearer token（以 constant-time 比對） |
-| Agent 失控產生大量任務或費用 | 每次執行的回合數、子任務數、草稿數、委派深度都有上限；排程最密每 5 分鐘一次（詳見 agentic-flow.md） |
-| Worker 當機造成重複發布 | 租約機制，見 5.3 |
+| An LLM hallucinates or is prompt-injected into publishing directly | No agent tool can publish; agent runs carry a context marker that `guardedPublisher` rejects; publishing requires a grant issued by the dispatch worker for **that specific post** |
+| External material (RSS, web pages) carries injected instructions | Same as above: the worst case is a draft waiting for review; every agent action is written to the thread and traceable |
+| An agent is steered into the internal network (SSRF) | `read_url` checks the resolved IP at dial time and blocks loopback, private ranges, link-local (including cloud metadata `169.254.169.254`) and CGNAT; redirects are re-checked; the system proxy is bypassed |
+| A database leak exposes credentials | Connector secret fields are AES-256-GCM encrypted with the connector ID as associated data (a ciphertext moved to another row will not decrypt); the API never returns secret values |
+| Unauthorized access to the console | Binds to localhost by default; `CUEFLOW_ADMIN_TOKEN` can require a Bearer token (compared in constant time) |
+| An agent runs away creating tasks or spending money | Per-run caps on turns, subtasks, drafts and delegation depth; schedules fire at most every 5 minutes (see agentic-flow.md) |
+| A worker crash causes a duplicate post | Leases, see 5.3 |
 
-## 7. 即時更新
+## 7. Live updates
 
-`internal/events` 是程序內的 pub/sub。所有狀態變動（貼文、任務、對話串、執行、connector、agent、排程）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
+`internal/events` is an in-process pub/sub. Every state change (posts, tasks, threads, runs, connectors, agents, schedules) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
 
-## 8. 部署拓樸
+## 8. Deployment topology
 
 ```mermaid
 flowchart LR
-    subgraph Host["單一主機（NAS / Home Lab / 本機 Docker）"]
+    subgraph Host["Single host (NAS / home lab / local Docker)"]
         direction LR
         CF["cueflow<br/>127.0.0.1:3000"] --> CFDB[("cueflow-db<br/>postgres:17")]
         CF -->|"http://postiz:5000/api/mcp"| PZ["postiz<br/>127.0.0.1:4007"]
@@ -283,22 +286,22 @@ flowchart LR
         PZ --> RD[("postiz-redis")]
         PZ --> TP["temporal"] --> TPDB[("temporal-db")]
     end
-    PZ -->|"OAuth / 發布 API"| SNS["Threads · Instagram · X · LinkedIn"]
-    CF -->|"HTTPS"| EXT["LLM API · 搜尋 · RSS · IMAP"]
+    PZ -->|"OAuth / publish APIs"| SNS["Threads · Instagram · X · LinkedIn"]
+    CF -->|"HTTPS"| EXT["LLM APIs · search · RSS · IMAP"]
 ```
 
-- `docker compose up -d` 一次帶起全部服務，所有 port 都只綁 `127.0.0.1`。遠端存取建議用 SSH tunnel 或 Tailscale。
-- CueFlow 映像是 distroless、非 root，內建 `healthcheck` 子命令。
-- 開發或試用可用 `--profile mock` 啟動模擬的 Postiz MCP server。
-- 目前設計為**單實例**。任務與發布的認領都用資料庫租約與 `SKIP LOCKED`，跑兩個實例不會重複處理，但 cron 會在每個實例各觸發一次，因此不建議水平擴充。
+- `docker compose up -d` brings up every service; all ports are bound to `127.0.0.1`. For remote access use an SSH tunnel or Tailscale.
+- The CueFlow image is distroless and non-root, with a built-in `healthcheck` subcommand.
+- For development or a trial run, `--profile mock` starts a mock Postiz MCP server.
+- The current design is **single-instance**. Task and publish claiming use database leases and `SKIP LOCKED`, so two instances will not process the same work twice, but cron fires once per instance, so horizontal scaling is not recommended.
 
-## 9. 擴充點
+## 9. Extension points
 
-| 想做的事 | 從哪裡改 |
+| What you want to do | Where to change |
 |---|---|
-| 接新的發布管道、資料來源、搜尋、LLM、通知 | 新增 connector 插件（[connectors.md](connectors.md)） |
-| 新增平台規則（字數、hashtag 上限） | `internal/domain/platform.go` |
-| 給 agent 新工具 | `internal/crew/tools.go`：定義工具、歸屬能力（不要給任何能發布的工具） |
-| 新增預設角色 | `internal/crew/defaults.go` |
-| 改 agent 的工作守則 | `internal/crew/prompt.go`（全體）或在 UI 編輯單一角色的 instructions |
-| 新增資料表 | `internal/db/migrations/000N_*.sql` |
+| Add a publishing channel, source, search engine, LLM or notifier | Add a connector plugin ([connectors.md](connectors.md)) |
+| Add platform rules (character limits, hashtag caps) | `internal/domain/platform.go` |
+| Give agents a new tool | `internal/crew/tools.go`: define the tool and its capability (never add a tool that can publish) |
+| Add a default role | `internal/crew/defaults.go` |
+| Change the agents' working rules | `internal/crew/prompt.go` (all agents) or edit one role's instructions in the UI |
+| Add a table | `internal/db/migrations/000N_*.sql` |

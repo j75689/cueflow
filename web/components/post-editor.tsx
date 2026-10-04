@@ -41,7 +41,7 @@ export function splitThread(text: string, limit: number): string[] {
   };
   const units = text
     .split(/\n{2,}/)
-    .flatMap((para) => (charCount(para) <= limit ? [para] : para.split(/(?<=[.!?。！？])\s*/)));
+    .flatMap((para) => (charCount(para) <= limit ? [para] : para.split(/(?<=[.!?\u3002\uff01\uff1f])\s*/)));
   let cur = "";
   for (const u of units) {
     const candidate = cur ? `${cur}\n\n${u}` : u;

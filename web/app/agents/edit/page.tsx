@@ -175,7 +175,7 @@ function AgentEditor() {
                     const name = e.target.value;
                     setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name) }));
                   }}
-                  placeholder="e.g. 研究員"
+                  placeholder="e.g. Researcher"
                 />
               </Field>
               <Field label="Slug" help="Used for @mentions; lowercase letters, digits and dashes.">
@@ -236,7 +236,7 @@ function AgentEditor() {
                   rows={10}
                   value={form.instructions}
                   onChange={(e) => set("instructions", e.target.value)}
-                  placeholder={"你是團隊的研究員…\n- 每個結論都附上來源連結\n- 不確定的事情要明講"}
+                  placeholder={"You are the team's researcher…\n- Link a source for every conclusion\n- Say so when something is unconfirmed"}
                   className="font-mono text-[13px]"
                 />
               </Field>
@@ -420,7 +420,7 @@ function MemoryPanel({ agentId }: { agentId: string }) {
             void add();
           }}
         >
-          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. 讀者多為台灣工程師" />
+          <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. Most readers are engineers in Taiwan" />
           <Button type="submit" variant="secondary" loading={busy} disabled={!draft.trim()}>
             Add
           </Button>

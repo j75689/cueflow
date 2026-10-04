@@ -19,7 +19,7 @@ func TestSplitThreadShortTextUnchanged(t *testing.T) {
 func TestSplitThreadRespectsLimit(t *testing.T) {
 	cases := map[string]string{
 		"latin":      strings.Repeat("This is a sentence that goes on. ", 60),
-		"cjk":        strings.Repeat("這是一個關於人工智慧代理的句子。", 80),
+		"cjk":        strings.Repeat("Sentence ending with an ideographic full stop\u3002", 40),
 		"paragraphs": strings.Repeat("Paragraph text here.\n\n", 50),
 		"no breaks":  strings.Repeat("x", 1234),
 	}
@@ -46,9 +46,9 @@ func TestSplitThreadRespectsLimit(t *testing.T) {
 }
 
 func TestSplitThreadPrefersSentenceBoundaries(t *testing.T) {
-	parts := SplitThread("第一句話。第二句話比較長一點。第三句。", 10)
+	parts := SplitThread("One\u3002Two is longer\u3002Three\u3002", 14)
 	for _, p := range parts {
-		if !strings.HasSuffix(p, "。") {
+		if !strings.HasSuffix(p, "\u3002") {
 			t.Errorf("part %q does not end at a sentence boundary", p)
 		}
 	}
