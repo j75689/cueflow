@@ -38,6 +38,9 @@ func init() {
 			{Key: "base_url", Label: "Endpoint override", Type: connector.FieldString,
 				Help: "Optional, e.g. a Private Service Connect endpoint. Must end in .../endpoints/openapi"},
 		},
+		DefaultName: func(cfg connector.Config) string {
+			return connector.WithDetail("Gemini on Vertex", strings.TrimPrefix(cfg.String("model"), "google/"))
+		},
 	}, newVertexGemini)
 }
 

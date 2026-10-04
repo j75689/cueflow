@@ -322,7 +322,7 @@ function ConnectorEdit() {
 
   const pick = (s: ConnectorSpec) => {
     setSpec(s);
-    setName(s.name);
+    setName(""); // blank = the server names it from the settings (e.g. "Claude Code (ACP)")
     setValues(initialValues(s.fields));
     setCleared(new Set());
   };
@@ -448,7 +448,7 @@ function ConnectorEdit() {
                 variant="primary"
                 onClick={save}
                 loading={busy === "save"}
-                disabled={!name.trim() || missing.length > 0}
+                disabled={(!isNew && !name.trim()) || missing.length > 0}
                 title={
                   missing.length ? `Missing: ${missing.join(", ")}` : undefined
                 }
@@ -475,10 +475,11 @@ function ConnectorEdit() {
               <CardHeader title="Settings" subtitle={spec.description} />
               <div className="space-y-4 p-4">
                 <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                  <Field label="Name" required>
+                  <Field label="Name" required={!isNew}>
                     <Input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
+                      placeholder={isNew ? "Leave blank to name it from the settings" : undefined}
                     />
                   </Field>
                   <div className="pb-1.5">

@@ -41,6 +41,27 @@ type Spec struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Fields      []Field `json:"fields"`
+	// DefaultName, when set, names a new connector whose name was left blank from its settings
+	// (e.g. "Claude Code (ACP)"), so several connectors of one type stay distinguishable.
+	DefaultName func(cfg Config) string `json:"-"`
+}
+
+// NameFor returns the name for a new connector with the given settings.
+func (s Spec) NameFor(cfg Config) string {
+	if s.DefaultName != nil {
+		if n := strings.TrimSpace(s.DefaultName(s.WithDefaults(cfg))); n != "" {
+			return n
+		}
+	}
+	return s.Name
+}
+
+// WithDetail joins a base label and an optional detail: "OpenRouter · openrouter/auto".
+func WithDetail(base, detail string) string {
+	if detail = strings.TrimSpace(detail); detail == "" {
+		return base
+	}
+	return base + " · " + detail
 }
 
 func (s Spec) field(key string) (Field, bool) {

@@ -51,7 +51,19 @@ func init() {
 			{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 8000},
 			{Key: "temperature", Label: "Temperature", Type: connector.FieldString, Help: "Optional, e.g. 0.7. Blank uses the server default."},
 		},
+		DefaultName: func(cfg connector.Config) string {
+			label := providerLabels[cfg.String("provider")]
+			if label == "" {
+				label = "OpenAI-compatible"
+			}
+			return connector.WithDetail(label, cfg.String("model"))
+		},
 	}, New)
+}
+
+var providerLabels = map[string]string{
+	"openai": "OpenAI", "openrouter": "OpenRouter", "azure": "Azure OpenAI", "deepseek": "DeepSeek",
+	"ollama": "Ollama", "vllm": "vLLM", "localai": "LocalAI", "openai_compatible": "OpenAI-compatible",
 }
 
 type Client struct {

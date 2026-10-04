@@ -113,6 +113,11 @@ export default function ConnectorsPage() {
                         </Link>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
                           <Pill>{specName[c.type] ?? c.type}</Pill>
+                          {connectorSummary(c) && (
+                            <span className="truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                              {connectorSummary(c)}
+                            </span>
+                          )}
                           <span title={fmtTime(c.last_checked_at)}>
                             {c.last_checked_at ? `checked ${fmtRelative(c.last_checked_at)}` : "never checked"}
                           </span>
@@ -142,4 +147,23 @@ export default function ConnectorsPage() {
       )}
     </div>
   );
+}
+
+/** Key settings that tell connectors of the same type apart, e.g. "claude-code" or "openrouter · openrouter/auto". */
+function connectorSummary(c: Connector): string {
+  const cfg = (c.config ?? {}) as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const k of ["preset", "provider", "model", "region", "project_id"]) {
+    const v = cfg[k];
+    if (typeof v === "string" && v.trim()) parts.push(v.trim());
+  }
+  const raw = [cfg.endpoint_url, cfg.base_url, cfg.url, cfg.host].find((v) => typeof v === "string" && v.trim());
+  if (typeof raw === "string") {
+    try {
+      parts.push(new URL(raw).host);
+    } catch {
+      parts.push(raw);
+    }
+  }
+  return parts.join(" · ");
 }

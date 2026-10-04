@@ -63,7 +63,18 @@ func init() {
 			{Key: "allow_web", Label: "Allow web fetch/search tools", Type: connector.FieldBool, Default: true,
 				Help: "Let the agent use its own web tools. Shell, file edits and other local tools are always refused"},
 		},
+		DefaultName: func(cfg connector.Config) string {
+			if l, ok := presetLabels[cfg.String("preset")]; ok {
+				return l + " (ACP)"
+			}
+			return "External agent (ACP)"
+		},
 	}, New)
+}
+
+var presetLabels = map[string]string{
+	"claude-code": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI",
+	"opencode": "OpenCode", "goose": "Goose", "custom": "Custom agent",
 }
 
 type Runtime struct {

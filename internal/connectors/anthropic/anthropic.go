@@ -67,6 +67,7 @@ func init() {
 				Help: "Name of an `ant auth login` profile on the server. With no key, token or profile, the server environment is used (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_PROFILE, default profile)"},
 			{Key: "base_url", Label: "Base URL", Type: connector.FieldString, Help: "Optional proxy/gateway URL"},
 		}, commonFields(defaultModel, "")...),
+		DefaultName: func(cfg connector.Config) string { return connector.WithDetail("Claude", cfg.String("model")) },
 	}, newFirstParty)
 
 	connector.Register(connector.Spec{
@@ -83,6 +84,9 @@ func init() {
 			{Key: "api_key", Label: "Bedrock API key", Type: connector.FieldPassword, Secret: true, Help: "Alternative to AWS credentials; takes precedence"},
 			{Key: "base_url", Label: "Base URL", Type: connector.FieldString, Help: "Optional endpoint override"},
 		}, commonFields("anthropic."+defaultModel, "Bedrock model IDs take an anthropic. prefix")...),
+		DefaultName: func(cfg connector.Config) string {
+			return connector.WithDetail("Claude on Bedrock", strings.TrimPrefix(cfg.String("model"), "anthropic."))
+		},
 	}, newBedrock)
 
 	connector.Register(connector.Spec{
@@ -96,6 +100,7 @@ func init() {
 			{Key: "service_account_json", Label: "Service account key (JSON)", Type: connector.FieldText, Secret: true,
 				Help: "Blank uses Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS, gcloud, metadata server)"},
 		}, commonFields(defaultModel, "")...),
+		DefaultName: func(cfg connector.Config) string { return connector.WithDetail("Claude on Vertex", cfg.String("model")) },
 	}, newVertex)
 }
 

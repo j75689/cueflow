@@ -97,7 +97,7 @@ func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bo
 		return nil, invalid(fmt.Sprintf("unknown connector type %q", typ))
 	}
 	if strings.TrimSpace(name) == "" {
-		name = spec.Name
+		name = spec.NameFor(connector.Config(settings))
 	}
 	cfg, secrets := spec.Split(settings)
 	dropEmpty(secrets)

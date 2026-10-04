@@ -126,3 +126,19 @@ func TestRegisterPanicsOnDuplicate(t *testing.T) {
 	connector.Register(connector.Spec{Type: "test_publisher", Kind: connector.KindPublisher},
 		func(connector.Config, connector.Env) (connector.Instance, error) { return nil, nil })
 }
+
+func TestDefaultNames(t *testing.T) {
+	spec := connector.Spec{Name: "Thing", Fields: []connector.Field{{Key: "mode", Default: "fast"}},
+		DefaultName: func(cfg connector.Config) string { return connector.WithDetail("Thing", cfg.String("mode")) }}
+	if got := spec.NameFor(connector.Config{}); got != "Thing · fast" {
+		t.Fatalf("defaults should apply before naming: %q", got)
+	}
+	if got := (connector.Spec{Name: "Plain"}).NameFor(nil); got != "Plain" {
+		t.Fatalf("fallback: %q", got)
+	}
+	for typ, want := range map[string]string{"acp_agent": "Claude Code (ACP)", "openai": "OpenAI"} {
+		if s, ok := connector.Lookup(typ); ok && s.NameFor(connector.Config{}) != want {
+			t.Errorf("%s default name = %q, want %q", typ, s.NameFor(connector.Config{}), want)
+		}
+	}
+}
