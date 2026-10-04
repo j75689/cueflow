@@ -32,6 +32,12 @@ actually does the work, but on a board you can watch:
   🧐 Editor (reviews and revises drafts). Agents write in their configured language (default English).
   Add your own.
 - **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
+- **External agents (ACP)**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or Goose
+  instead of the built-in LLM loop, over the [Agent Client Protocol](https://agentclientprotocol.com). Add an
+  *External agent (ACP)* runtime connector and pick it as the agent's *Runtime*. The external agent gets
+  CueFlow's tools through a per-run MCP server; shell, file edits and local file access are refused, and its
+  drafts still go to Review. With Claude Code you can use a Claude subscription: run `claude setup-token` and
+  paste the token into the connector (the default Docker image ships the Claude Code and Codex adapters).
 
 | Capability | Tools |
 |---|---|

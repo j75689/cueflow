@@ -117,6 +117,9 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
+	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run
+	// token in the path, not the admin token: the agent process never sees admin credentials.
+	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler())
 	r.Handle("/*", webui.Handler())
 	return r
 }

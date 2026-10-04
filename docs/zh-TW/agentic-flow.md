@@ -256,6 +256,34 @@ System prompt 由程式組合，順序固定：
 
 角色之間的差異全部來自「能力（決定看得到哪些工具）」加上「instructions（決定怎麼做）」，因此新增一個角色（例如「數據分析師」或「客服回覆員」）不需要改程式。
 
+## 11a. 外部 agent（ACP runtime）
+
+agent 可以把執行工作交給外部的 coding agent，取代 CueFlow 內建的 LLM 迴圈。agent 的 **Runtime** 指向一個「External agent (ACP)」connector（型別 `acp_agent`、類型 `runtime`），裡面描述怎麼啟動它：預設有 Claude Code（`claude-agent-acp`）、Codex（`codex-acp`）、Gemini CLI（`gemini --acp`）、OpenCode（`opencode acp`）、Goose（`goose acp`），也可以自訂指令。憑證（API key、`claude setup-token` 產生的 Claude Code OAuth token）加密存在 connector，以環境變數傳給 agent。
+
+```mermaid
+sequenceDiagram
+    participant C as Crew runner
+    participant A as 外部 agent（ACP，stdio）
+    participant M as CueFlow MCP 端點（/mcp/run/{token}）
+    C->>C: 註冊只屬於這個任務與 agent 的一次性 MCP 端點
+    C->>A: 在空的暫存目錄啟動（獨立 process group）
+    C->>A: initialize（不提供 client 檔案系統與終端機）
+    C->>A: session/new {cwd, mcpServers: [cueflow → HTTP，或透過 `cueflow mcp-bridge` 走 stdio]}
+    C->>A: session/prompt（運作規則 + agent 提示詞 + 任務簡報）
+    A-->>C: session/update（訊息片段、工具呼叫）→ 寫進任務對話串
+    A->>C: session/request_permission → 允許 CueFlow 工具、think、網頁擷取；其餘拒絕
+    A->>M: tools/call create_post_draft、add_comment、complete_task…
+    M->>M: 與內建迴圈相同的工具程式與檢查
+    C->>A: 執行過終止型工具後（或逾時、按 Stop）送出 session/cancel
+    C->>C: 註銷端點、結束 process group、刪除暫存目錄
+```
+
+- **同樣的工具、同樣的保證**：MCP 端點只提供該 agent 能力範圍內的工具，由和內建迴圈相同的程式執行（寫入對話串、各種上限、草稿進審核），依然沒有任何發布工具。
+- **權限政策**：允許 CueFlow 的 MCP 工具、`think`，以及（可設定）`fetch`；`execute`、`edit`、`read`、`delete`、`move`、`search` 與其他類型一律拒絕，並記在對話串。client 也不宣告檔案系統與終端機能力。
+- **無狀態執行**：每次執行都是全新的 ACP session，用任務簡報重建上下文，和內建迴圈相同，不需要管理 session ID。
+- **結果對應**：有呼叫終止型工具就以它為準；否則 `end_turn` → 完成（以 agent 最後一則訊息為結果），`max_turn_requests`／`max_tokens` → 回合用盡，`refusal` → 失敗，逾時 → 失敗。
+- **Token 用量**：agent 在 prompt 結果中回報時才會記錄。
+
 ## 12. 端到端範例
 
 使用者在 Command 輸入：「每天早上 8 點整理 AI 新聞並寫成 Threads 草稿」。

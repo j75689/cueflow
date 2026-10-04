@@ -16,6 +16,7 @@ const KIND_HINT: Record<string, string> = {
   search: "Optional live web search the agent can call (SearXNG, Tavily).",
   publisher: "Where approved posts go. Only the publish worker can call these.",
   notifier: "Email reviewers when drafts are waiting.",
+  runtime: "External agents (Claude Code, Codex, Gemini CLI…) that can work an agent's tasks over ACP, using CueFlow's tools.",
 };
 
 export default function ConnectorsPage() {

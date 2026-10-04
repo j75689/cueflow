@@ -9,7 +9,7 @@ export type PostStatus =
   | "PUBLISHED"
   | "FAILED";
 
-export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier";
+export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime";
 
 export type FieldType =
   | "string"
@@ -241,6 +241,8 @@ export interface Agent {
   capabilities: string[];
   llm_connector_id: string | null;
   search_connector_id: string | null;
+  /** External ACP agent runtime; null = built-in LLM loop. */
+  runtime_connector_id: string | null;
   source_connector_ids: string[];
   language: string;
   platforms: string[];

@@ -38,6 +38,11 @@ type Crew struct {
 	ValidateSchedule store.CronValidator
 	// OnSchedulesChanged reloads the scheduler after an agent creates/pauses a schedule.
 	OnSchedulesChanged func(context.Context)
+	// MCPBaseURL is how external agent processes on this host reach CueFlow's HTTP server
+	// (e.g. http://127.0.0.1:3000); per-run tool servers live under MCPPathPrefix.
+	MCPBaseURL string
+
+	mcp mcpRegistry
 
 	mu      sync.Mutex
 	running map[uuid.UUID]context.CancelFunc
@@ -231,7 +236,12 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 	stopBeat := c.heartbeat(ctx, task.ID)
 	defer stopBeat()
 
-	out := c.loop(ctx, task, a, run)
+	var out *outcome
+	if a.RuntimeConnectorID != nil {
+		out = c.acpLoop(ctx, task, a, run)
+	} else {
+		out = c.loop(ctx, task, a, run)
+	}
 	if ctx.Err() != nil {
 		out = &outcome{kind: "canceled"}
 	}

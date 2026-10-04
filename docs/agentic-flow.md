@@ -257,6 +257,45 @@ The system prompt is assembled by code in a fixed order:
 
 All differences between roles come from "capabilities (which tools they see)" plus "instructions (how they work)", so adding a role (e.g. a data analyst or a customer-reply agent) needs no code changes.
 
+## 11a. External agents (ACP runtime)
+
+An agent can delegate its runs to an external coding agent instead of CueFlow's built-in LLM loop. The
+agent's **Runtime** points at an *External agent (ACP)* connector (`acp_agent`, kind `runtime`) that describes
+how to launch it: presets for Claude Code (`claude-agent-acp`), Codex (`codex-acp`), Gemini CLI
+(`gemini --acp`), OpenCode (`opencode acp`), Goose (`goose acp`), or a custom command; credentials (API key,
+Claude Code OAuth token from `claude setup-token`) are stored encrypted on the connector and passed as
+environment variables.
+
+```mermaid
+sequenceDiagram
+    participant C as Crew runner
+    participant A as External agent (ACP, stdio)
+    participant M as CueFlow MCP endpoint (/mcp/run/{token})
+    C->>C: register a one-time MCP endpoint scoped to this task and agent
+    C->>A: spawn in an empty temp dir (own process group)
+    C->>A: initialize (no client fs / terminal)
+    C->>A: session/new {cwd, mcpServers: [cueflow → HTTP, or stdio via `cueflow mcp-bridge`]}
+    C->>A: session/prompt (operating rules + agent prompt + task brief)
+    A-->>C: session/update (message chunks, tool calls) → written to the task thread
+    A->>C: session/request_permission → allow CueFlow tools, think, web fetch, refuse the rest
+    A->>M: tools/call create_post_draft, add_comment, complete_task ...
+    M->>M: same tool code and checks as the built-in loop
+    C->>A: session/cancel once a terminal tool ran (or on timeout / Stop)
+    C->>C: unregister the endpoint, kill the process group, remove the temp dir
+```
+
+- **Same tools, same guarantees.** The MCP endpoint serves exactly the tools of the agent's capabilities,
+  executed by the same code as the built-in loop (thread logging, limits, drafts to review). There is still
+  no publishing tool.
+- **Permission policy.** CueFlow's MCP tools, `think` and (optionally) `fetch` are allowed; `execute`, `edit`,
+  `read`, `delete`, `move`, `search` and anything else are refused and noted in the thread. The client also
+  declares no file system or terminal capability.
+- **Stateless runs.** Each run is a fresh ACP session seeded with the task brief, exactly like the built-in
+  loop; no session IDs to manage.
+- **Outcome mapping.** A terminal tool decides the outcome; otherwise `end_turn` → completed with the agent's
+  last message, `max_turn_requests`/`max_tokens` → turn limit, `refusal` → failed, timeout → failed.
+- **Tokens.** Usage is recorded when the agent reports it in the prompt result.
+
 ## 12. End-to-end example
 
 In Command, the user types: "Every morning at 8, summarize AI news and draft a Threads post".

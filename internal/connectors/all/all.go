@@ -5,6 +5,7 @@
 package all
 
 import (
+	_ "github.com/j75689/cueflow/internal/connectors/acpagent"
 	_ "github.com/j75689/cueflow/internal/connectors/anthropic"
 	_ "github.com/j75689/cueflow/internal/connectors/imap"
 	_ "github.com/j75689/cueflow/internal/connectors/openai"

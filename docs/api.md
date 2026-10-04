@@ -34,7 +34,7 @@ Static info the UI uses to render forms and badges.
 ```json
 {
   "type": "postiz_mcp",
-  "kind": "publisher",            // publisher | source | search | llm | notifier
+  "kind": "publisher",            // publisher | source | search | llm | notifier | runtime
   "name": "Postiz (MCP)",
   "description": "Publish through a Postiz MCP server",
   "fields": [
@@ -177,6 +177,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
   "capabilities":["planning","delegation","research","memory"],
   "llm_connector_id":"uuid|null",          // null = first active LLM connector
   "search_connector_id":"uuid|null",       // null = first active search connector
+  "runtime_connector_id":"uuid|null",      // external ACP agent runtime; null = built-in LLM loop
   "source_connector_ids":["uuid"],         // sources this agent may read/fetch
   "language":"en","platforms":["threads","instagram"],
   "max_turns":12,"is_active":true,

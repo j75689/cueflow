@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.78.0
+	github.com/coder/acp-go-sdk v0.13.5
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	github.com/go-chi/chi/v5 v5.3.2

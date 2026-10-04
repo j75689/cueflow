@@ -27,11 +27,14 @@ const (
 	KindSearch    Kind = "search"
 	KindLLM       Kind = "llm"
 	KindNotifier  Kind = "notifier"
+	// KindRuntime describes how to launch an external agent (spoken to over ACP) that can work
+	// tasks instead of the built-in LLM loop.
+	KindRuntime Kind = "runtime"
 )
 
 func (k Kind) Valid() bool {
 	switch k {
-	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier:
+	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime:
 		return true
 	}
 	return false
@@ -121,6 +124,23 @@ type Notification struct {
 	Subject string
 	Text    string
 	HTML    string
+}
+
+// Runtime launches an external agent process that speaks the Agent Client Protocol on stdio.
+type Runtime interface {
+	Instance
+	Launch() RuntimeLaunch
+}
+
+type RuntimeLaunch struct {
+	Command string
+	Args    []string
+	// Env is appended to the server's environment for the agent process (KEY=VALUE).
+	Env []string
+	// Timeout bounds one agent run.
+	Timeout time.Duration
+	// Model, when set, is requested from the agent (if it supports choosing one).
+	Model string
 }
 
 // ToolLister is implemented by MCP-backed connectors so the UI can show their tools.
@@ -245,6 +265,8 @@ func checkKind(k Kind, inst Instance) error {
 		_, ok = inst.(LLM)
 	case KindNotifier:
 		_, ok = inst.(Notifier)
+	case KindRuntime:
+		_, ok = inst.(Runtime)
 	}
 	if !ok {
 		return fmt.Errorf("instance does not implement the %s interface", k)

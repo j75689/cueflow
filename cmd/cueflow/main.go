@@ -4,6 +4,7 @@
 //	cueflow migrate    apply database migrations and exit
 //	cueflow genkey     print a new random CUEFLOW_SECRET_KEY
 //	cueflow healthcheck exit 0 if the local server answers /api/v1/health (for container healthchecks)
+//	cueflow mcp-bridge URL  serve the MCP server at URL on stdio (for agents that only launch stdio MCP servers)
 package main
 
 import (
@@ -31,6 +32,7 @@ import (
 	"github.com/j75689/cueflow/internal/dispatch"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
@@ -54,10 +56,16 @@ func main() {
 		fmt.Println(base64.StdEncoding.EncodeToString(b))
 	case "healthcheck":
 		err = healthcheck()
+	case "mcp-bridge":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: cueflow mcp-bridge URL")
+			os.Exit(2)
+		}
+		err = mcpx.Bridge(context.Background(), os.Args[2])
 	case "version", "-v", "--version":
 		fmt.Println("cueflow", api.Version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|mcp-bridge|version]\n")
 		os.Exit(2)
 	}
 	if err != nil {
@@ -135,6 +143,7 @@ func serve() error {
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
 	team.Concurrency = cfg.AgentConcurrency
+	team.MCPBaseURL = localBaseURL(cfg.Addr)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 	team.OnSchedulesChanged = func(ctx context.Context) { _ = sched.Reload(ctx) }
 	sched.OnTaskSpawned = func(ctx context.Context, t *store.Task) {
@@ -224,4 +233,17 @@ func healthcheck() error {
 		return fmt.Errorf("health: HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// localBaseURL turns a listen address into a URL processes on this host can use
+// (0.0.0.0:3000 -> http://127.0.0.1:3000).
+func localBaseURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }

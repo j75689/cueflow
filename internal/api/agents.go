@@ -43,6 +43,7 @@ type agentBody struct {
 	Capabilities       *[]string    `json:"capabilities"`
 	LLMConnectorID     nullableID   `json:"llm_connector_id"`
 	SearchConnectorID  nullableID   `json:"search_connector_id"`
+	RuntimeConnectorID nullableID   `json:"runtime_connector_id"`
 	SourceConnectorIDs *[]uuid.UUID `json:"source_connector_ids"`
 	Language           *string      `json:"language"`
 	Platforms          *[]string    `json:"platforms"`
@@ -80,6 +81,9 @@ func (b *agentBody) apply(a *store.Agent) {
 	}
 	if b.SearchConnectorID.Set {
 		a.SearchConnectorID = b.SearchConnectorID.Value
+	}
+	if b.RuntimeConnectorID.Set {
+		a.RuntimeConnectorID = b.RuntimeConnectorID.Value
 	}
 }
 

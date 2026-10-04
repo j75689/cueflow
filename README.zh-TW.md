@@ -19,6 +19,7 @@ CueFlow 內建一組可以用自然語言交代事情的 agent，像聊天機器
 - **Board（看板）**：每個需求都是一張任務卡，依序經過 Backlog → 待辦 → 進行中 → 等待中 → 待確認 → 完成。把指派了 agent 的卡片拖到「待辦」，它就會開始工作。每個任務都有一條對話串，記錄 agent 的進度、工具呼叫、提問與成果；回覆就能讓它繼續，用 `@writer` 開頭則可以把任務轉給另一個 agent。
 - **Agents（角色）**：每個角色有自己的人設、能力、LLM、資料來源與記憶。預設有四位：🧭 Chief（總管：規劃與委派）、🔎 Researcher（研究員：附來源的研究）、✍️ Writer（文案：各平台草稿）、🧐 Editor（編輯：檢查與修稿）。預設的名稱與指示是英文，但它們回覆與寫稿用的語言由各自的 `language` 設定決定（預設英文 `en`，要用繁體中文請改成 `zh-TW`）。也可以自己新增角色。
 - **Schedules（排程）**：定時為 agent 建立任務；agent 也能自己建立排程，最密每 5 分鐘一次。
+- **外部 agent（ACP）**：agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行任務，透過 [Agent Client Protocol](https://agentclientprotocol.com) 溝通，取代內建的 LLM 迴圈。新增一個「External agent (ACP)」runtime connector，再把它設為 agent 的 *Runtime* 即可。外部 agent 透過每次執行專屬的 MCP 端點使用 CueFlow 的工具；shell、改檔、讀取本機檔案一律拒絕，寫的草稿一樣要進審核。用 Claude Code 時可以使用 Claude 訂閱方案：執行 `claude setup-token`，把產生的 token 貼進 connector（預設的 Docker 映像已內建 Claude Code 與 Codex 的橋接器）。
 
 | 能力 | 工具 |
 |---|---|

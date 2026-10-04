@@ -59,6 +59,7 @@ const blank = (): AgentInput => ({
   instructions: "",
   capabilities: ["research", "memory"],
   llm_connector_id: null,
+  runtime_connector_id: null,
   search_connector_id: null,
   source_connector_ids: [],
   language: "en",
@@ -106,6 +107,7 @@ function AgentEditor() {
       instructions: a.instructions,
       capabilities: a.capabilities ?? [],
       llm_connector_id: a.llm_connector_id,
+      runtime_connector_id: a.runtime_connector_id ?? null,
       search_connector_id: a.search_connector_id,
       source_connector_ids: a.source_connector_ids ?? [],
       language: a.language,
@@ -389,8 +391,35 @@ function AgentEditor() {
                 onChange={(v) => set("is_active", v)}
                 label="Active (picks up assigned tasks)"
               />
-              <Field label="LLM">
+              <Field
+                label="Runtime"
+                help={
+                  form.runtime_connector_id
+                    ? "Tasks run in this external agent over ACP. It uses CueFlow's tools for the capabilities below; its drafts still go to Review."
+                    : "Built-in: CueFlow runs the agent loop with the LLM below."
+                }
+              >
                 <Select
+                  value={form.runtime_connector_id ?? ""}
+                  onChange={(e) =>
+                    set("runtime_connector_id", e.target.value || null)
+                  }
+                >
+                  <option value="">Built-in (LLM connector)</option>
+                  {byKind("runtime").map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {!c.is_active ? " (inactive)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field
+                label="LLM"
+                help={form.runtime_connector_id ? "Not used while an external runtime is selected." : undefined}
+              >
+                <Select
+                  disabled={!!form.runtime_connector_id}
                   value={form.llm_connector_id ?? ""}
                   onChange={(e) =>
                     set("llm_connector_id", e.target.value || null)
