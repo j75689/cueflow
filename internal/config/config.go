@@ -23,6 +23,7 @@ type Config struct {
 	// comma-separated); new data is always encrypted with SecretKey.
 	PreviousSecretKeys [][]byte
 	AdminToken         string
+	MCPToken           string
 	// PublicURL is used to build links in notification emails.
 	PublicURL string
 	// DigestCron, when set, sends a "pending review" summary via every active notifier.
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		Addr:                  env("CUEFLOW_ADDR", "127.0.0.1:3000"),
 		DatabaseURL:           env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
 		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
+		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
 		DigestCron:            os.Getenv("CUEFLOW_DIGEST_CRON"),
 		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),

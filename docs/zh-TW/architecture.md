@@ -269,6 +269,7 @@ Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
 | Agent 被誘導存取內網（SSRF） | `read_url` 在連線（dial）時檢查解析後的 IP，擋掉 loopback、私有網段、link-local（含雲端 metadata `169.254.169.254`）、CGNAT；重新導向也會重新檢查；不走系統 proxy |
 | 資料庫外洩導致金鑰外洩 | Connector 機密欄位以 AES-256-GCM 加密，associated data 綁定 connector ID（把密文搬到別列也解不開）；API 永遠不回傳機密值 |
 | 未授權存取控制台 | 預設只綁 localhost；可設 `CUEFLOW_ADMIN_TOKEN` 要求 Bearer token（以 constant-time 比對） |
+| 外部 agent 透過 MCP 操作看板 | 未設定 `CUEFLOW_MCP_TOKEN` 時 `/mcp` 不啟用；它能管理任務，但沒有任何核准或發布貼文的工具 |
 | Agent 失控產生大量任務或費用 | 每次執行的回合數、子任務數、草稿數、委派深度都有上限；排程最密每 5 分鐘一次（詳見 agentic-flow.md） |
 | Worker 當機造成重複發布 | 租約機制，見 5.3 |
 

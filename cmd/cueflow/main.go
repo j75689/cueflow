@@ -177,13 +177,13 @@ func serve() error {
 		Addr: cfg.Addr,
 		Handler: (&api.Server{
 			Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
-			Logger: logger, AdminToken: cfg.AdminToken,
+			Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", api.Version, "auth", cfg.AdminToken != "")
+		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", api.Version, "auth", cfg.AdminToken != "", "mcp", cfg.MCPToken != "")
 		errc <- srv.ListenAndServe()
 	}()
 

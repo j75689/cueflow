@@ -43,6 +43,8 @@ type Server struct {
 	Crew       *crew.Crew
 	Logger     *slog.Logger
 	AdminToken string
+	// MCPToken enables the operator MCP endpoint (CUEFLOW_MCP_TOKEN); empty disables it.
+	MCPToken string
 }
 
 func (s *Server) Handler() http.Handler {
@@ -122,6 +124,8 @@ func (s *Server) Handler() http.Handler {
 	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run
 	// token in the path, not the admin token: the agent process never sees admin credentials.
 	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler())
+	// Operator MCP endpoint for external agents, authenticated by CUEFLOW_MCP_TOKEN.
+	r.Handle(MCPPath, s.mcpHandler())
 	r.Handle("/*", webui.Handler())
 	return r
 }

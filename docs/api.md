@@ -299,6 +299,28 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 
 ---
 
+## MCP (external agents)
+
+`POST /mcp` is a stateless Streamable HTTP MCP server for external agents acting for the operator. It is
+off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authorization: Bearer <token>`
+(401 otherwise). It is independent of `CUEFLOW_ADMIN_TOKEN`.
+
+| Tool | Does |
+|---|---|
+| `list_agents` | The crew: slug, name, role, description, active |
+| `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query`, `all`, `limit` |
+| `get_task` | One task (`#12`, `12` or id) with description, subtasks, drafts and the last 30 thread messages |
+| `create_task` | `title`, `description`, `assignee` slug, `status` `TODO` (default) or `BACKLOG`, `priority`, `labels` |
+| `update_task` | Title, description, priority, labels, assignee (`none` unassigns), status `BACKLOG`/`TODO`/`REVIEW`/`DONE`/`CANCELED` |
+| `comment_task` | Operator message in the thread, same rules as `POST /tasks/{id}/messages` (`@slug` hand-off, resumes the agent) |
+| `run_task` / `stop_task` | Same as `POST /tasks/{id}/run` and `/cancel` |
+| `list_drafts` | Posts by status (default `PENDING_REVIEW`), read-only |
+
+Tasks created here have `created_by: "human"`. No tool approves, schedules or publishes posts. Mistakes
+(unknown task or agent, a status owned by the runner) come back as tool errors (`isError: true`).
+
+---
+
 ## Live updates
 
 ### `GET /api/v1/events` (Server-Sent Events)

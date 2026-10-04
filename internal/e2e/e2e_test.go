@@ -122,7 +122,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(mockSrv.Close)
 
 	apiSrv := httptest.NewServer((&api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
-		Dispatcher: worker, Crew: team, Logger: logger}).Handler())
+		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken}).Handler())
 	t.Cleanup(apiSrv.Close)
 
 	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, mock: mock}

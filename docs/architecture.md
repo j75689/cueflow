@@ -270,6 +270,7 @@ Work that needs understanding, breakdown, delegation or follow-up questions goes
 | An agent is steered into the internal network (SSRF) | `read_url` checks the resolved IP at dial time and blocks loopback, private ranges, link-local (including cloud metadata `169.254.169.254`) and CGNAT; redirects are re-checked; the system proxy is bypassed |
 | A database leak exposes credentials | Connector secret fields are AES-256-GCM encrypted with the connector ID as associated data (a ciphertext moved to another row will not decrypt); the API never returns secret values |
 | Unauthorized access to the console | Binds to localhost by default; `CUEFLOW_ADMIN_TOKEN` can require a Bearer token (compared in constant time) |
+| External agents driving the board over MCP | `/mcp` is off unless `CUEFLOW_MCP_TOKEN` is set; it can manage tasks but has no tool that approves or publishes posts |
 | An agent runs away creating tasks or spending money | Per-run caps on turns, subtasks, drafts and delegation depth; schedules fire at most every 5 minutes (see agentic-flow.md) |
 | A worker crash causes a duplicate post | Leases, see 5.3 |
 

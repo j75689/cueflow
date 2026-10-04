@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strings"
@@ -101,17 +102,27 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	t, err := s.Store.CreateTask(r.Context(), store.NewTask{
+	t, err := s.createTaskOp(r.Context(), store.NewTask{
 		Title: req.Title, Description: req.Description, AssigneeAgentID: req.AssigneeAgentID, Priority: req.Priority,
-		Labels: req.Labels, DueAt: req.DueAt, Status: req.Status, ParentID: req.ParentID, CreatedBy: "human",
+		Labels: req.Labels, DueAt: req.DueAt, Status: req.Status, ParentID: req.ParentID,
 	})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.Broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
-	s.Crew.TaskChanged(r.Context(), t)
 	writeJSON(w, http.StatusCreated, t)
+}
+
+// createTaskOp creates a task on behalf of the operator (dashboard or MCP) and wakes its agent.
+func (s *Server) createTaskOp(ctx context.Context, in store.NewTask) (*store.Task, error) {
+	in.CreatedBy = "human"
+	t, err := s.Store.CreateTask(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	s.Broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+	s.Crew.TaskChanged(ctx, t)
+	return t, nil
 }
 
 type updateTaskReq struct {
@@ -144,23 +155,32 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if req.DueAt.Set {
 		patch.DueAt = &req.DueAt.Value
 	}
-	before, after, err := s.Store.UpdateTask(r.Context(), id, patch)
+	after, err := s.updateTaskOp(r.Context(), id, patch)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, after)
+}
+
+// updateTaskOp applies an operator edit; moving or reassigning a running card stops its run.
+func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.TaskPatch) (*store.Task, error) {
+	before, after, err := s.Store.UpdateTask(ctx, id, patch)
+	if err != nil {
+		return nil, err
 	}
 	if before.Status != after.Status || !sameAgent(before.AssigneeAgentID, after.AssigneeAgentID) {
 		if before.Status == store.TaskInProgress {
 			s.Crew.Cancel(id) // a human moved or reassigned a running card
 		}
 		if before.Status != after.Status {
-			_, _ = s.Store.AddTaskMessage(r.Context(), id, "system", nil, "status",
+			_, _ = s.Store.AddTaskMessage(ctx, id, "system", nil, "status",
 				"Moved to "+string(after.Status)+" by a human.", nil)
 		}
-		s.Crew.TaskChanged(r.Context(), after)
+		s.Crew.TaskChanged(ctx, after)
 	}
 	s.Broker.Publish("task.updated", map[string]any{"id": after.ID, "status": after.Status})
-	writeJSON(w, http.StatusOK, after)
+	return after, nil
 }
 
 func sameAgent(a, b *uuid.UUID) bool {
@@ -220,16 +240,22 @@ func (s *Server) postTaskMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "content is required")
-		return
-	}
-	ctx := r.Context()
-	t, err := s.Store.GetTask(ctx, id)
+	msg, err := s.postTaskMessageOp(r.Context(), id, req.Content)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content string) (*store.TaskMessage, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, &store.ValidationError{Msg: "content is required"}
+	}
+	t, err := s.Store.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	if m := mentionRe.FindStringSubmatch(strings.ToLower(content)); m != nil {
 		if a, err := s.Store.GetAgentBySlug(ctx, m[1]); err == nil && !sameAgent(t.AssigneeAgentID, &a.ID) {
@@ -245,8 +271,7 @@ func (s *Server) postTaskMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := s.Store.AddTaskMessage(ctx, id, "human", nil, "message", content, nil)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	s.Broker.Publish("task.message", map[string]any{"task_id": id, "id": msg.ID})
 
@@ -264,7 +289,7 @@ func (s *Server) postTaskMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusCreated, msg)
+	return msg, nil
 }
 
 func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
@@ -273,28 +298,33 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	t, err := s.Store.GetTask(r.Context(), id)
+	t, err := s.runTaskOp(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) runTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, error) {
+	t, err := s.Store.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	if t.AssigneeAgentID == nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "assign the task to an agent first")
-		return
+		return nil, &store.ValidationError{Msg: "assign the task to an agent first"}
 	}
 	if t.Status == store.TaskInProgress {
-		writeJSON(w, http.StatusOK, t)
-		return
+		return t, nil
 	}
 	st := store.TaskTodo
-	_, after, err := s.Store.UpdateTask(r.Context(), id, store.TaskPatch{Status: &st})
+	_, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{Status: &st})
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, err
 	}
 	s.Broker.Publish("task.updated", map[string]any{"id": id, "status": after.Status})
-	s.Crew.TaskChanged(r.Context(), after)
-	writeJSON(w, http.StatusOK, after)
+	s.Crew.TaskChanged(ctx, after)
+	return after, nil
 }
 
 func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
@@ -303,22 +333,29 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	ok, err := s.Store.SetTaskStatusIf(r.Context(), id, []store.TaskStatus{store.TaskInProgress, store.TaskTodo}, store.TaskWaitingHuman, nil)
+	t, err := s.cancelTaskOp(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-	s.Crew.Cancel(id)
-	t, err := s.Store.GetTask(r.Context(), id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if ok {
-		_, _ = s.Store.AddTaskMessage(r.Context(), id, "system", nil, "status", "Stopped by a human.", nil)
-		s.Broker.Publish("task.updated", map[string]any{"id": id, "status": t.Status})
 	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) cancelTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, error) {
+	ok, err := s.Store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress, store.TaskTodo}, store.TaskWaitingHuman, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.Crew.Cancel(id)
+	t, err := s.Store.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		_, _ = s.Store.AddTaskMessage(ctx, id, "system", nil, "status", "Stopped by a human.", nil)
+		s.Broker.Publish("task.updated", map[string]any{"id": id, "status": t.Status})
+	}
+	return t, nil
 }
 
 func (s *Server) taskRuns(w http.ResponseWriter, r *http.Request) {

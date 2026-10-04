@@ -107,6 +107,19 @@ docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 
 建立一個 *Postiz (MCP)* connector，endpoint 填 `http://mock-postiz:4007/api/mcp`，API key 填 `dev-key`。收到的貼文會列在 <http://localhost:4008/posts>。
 
+### 讓其他 agent 操作 CueFlow（MCP）
+
+CueFlow 在 `/mcp` 提供 MCP 端點，讓外部 agent（Claude Code、Codex、Cursor⋯）幫你操作看板：查看 agent 與任務、
+建立並指派任務、留言（也就是回覆正在等你的 agent）、移動、啟動或停止任務，以及查看待審核的草稿。它不能核准或發布貼文，
+這一步仍然只在後台進行。
+
+在 `deploy/.env` 設定 `CUEFLOW_MCP_TOKEN`（`openssl rand -hex 32`），重啟後以 Claude Code 為例：
+
+```bash
+claude mcp add --transport http cueflow http://localhost:3000/mcp \
+  --header "Authorization: Bearer $CUEFLOW_MCP_TOKEN"
+```
+
 ### 遠端存取
 
 Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ssh -L 3000:localhost:3000 nas`）或 Tailscale 等 VPN，並設定 `CUEFLOW_ADMIN_TOKEN`。
@@ -120,6 +133,7 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號分隔 |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
+| `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |

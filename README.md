@@ -139,6 +139,20 @@ docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 Create a *Postiz (MCP)* connector with endpoint `http://mock-postiz:4007/api/mcp` and API key `dev-key`.
 Received posts are listed at <http://localhost:4008/posts>.
 
+### Control CueFlow from other agents (MCP)
+
+CueFlow serves an MCP endpoint at `/mcp` so an external agent (Claude Code, Codex, Cursor...) can run
+the board for you: list agents and tasks, create and assign tasks, comment (answering an agent that is
+waiting on you), move, start or stop tasks, and read the review queue. It cannot approve or publish posts;
+that stays in the dashboard.
+
+Set `CUEFLOW_MCP_TOKEN` in `deploy/.env` (`openssl rand -hex 32`), restart, then for example:
+
+```bash
+claude mcp add --transport http cueflow http://localhost:3000/mcp \
+  --header "Authorization: Bearer $CUEFLOW_MCP_TOKEN"
+```
+
 ### Remote access
 
 Ports are bound to localhost on purpose. To review from your phone, use an SSH tunnel
@@ -153,6 +167,7 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
+| `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
