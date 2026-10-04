@@ -46,12 +46,13 @@ services:
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       AWS_PROFILE: ${AWS_PROFILE:-}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
-      # Claude on Vertex AI: Application Default Credentials (mount the key file below).
+      # Claude/Gemini on Vertex AI: Application Default Credentials (mount gcloud config or a key file below).
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     # Optional credential files (the container runs as user "nonroot", HOME=/home/nonroot):
     # volumes:
     #   - ~/.config/anthropic:/home/nonroot/.config/anthropic:ro   # `ant auth login` profiles
     #   - ~/.aws:/home/nonroot/.aws:ro                              # AWS shared config/credentials
+    #   - ~/.config/gcloud:/home/nonroot/.config/gcloud:ro          # `gcloud auth application-default login` (Vertex)
     #   - ./gcp-sa.json:/secrets/gcp-sa.json:ro                     # then GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json
     ports:
       - "127.0.0.1:3000:3000"

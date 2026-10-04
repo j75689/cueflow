@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 
+	"golang.org/x/oauth2"
+
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/llm"
 )
@@ -57,6 +59,8 @@ type Client struct {
 	headers                                                   map[string]string
 	maxTokens                                                 int
 	http                                                      *http.Client
+	// tokens, when set, supplies short-lived OAuth access tokens (Vertex AI).
+	tokens oauth2.TokenSource
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -115,6 +119,9 @@ type wireToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	// ExtraContent carries provider extensions that must be echoed back, e.g. Gemini's
+	// thought signatures (extra_content.google.thought_signature).
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 type wireMessage struct {
@@ -131,6 +138,12 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		msgs = append(msgs, wireMessage{Role: "system", Content: &s})
 	}
 	for _, m := range req.Messages {
+		// Assistant turns produced by this connector are replayed exactly as the server sent them,
+		// so provider extensions (thought signatures) survive the tool loop.
+		if prev, ok := m.ProviderState.(wireMessage); ok && m.Role == llm.RoleAssistant {
+			msgs = append(msgs, prev)
+			continue
+		}
 		content := m.Content
 		wm := wireMessage{Role: string(m.Role), Content: &content, ToolCallID: m.ToolCallID}
 		for _, tc := range m.ToolCalls {
@@ -185,6 +198,13 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 			hreq.Header.Set("Authorization", "Bearer "+c.apiKey)
 		}
 	}
+	if c.tokens != nil {
+		tok, err := c.tokens.Token()
+		if err != nil {
+			return nil, fmt.Errorf("llm: access token: %w", err)
+		}
+		hreq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	}
 	for k, v := range c.headers {
 		hreq.Header.Set(k, v)
 	}
@@ -217,7 +237,9 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		return nil, fmt.Errorf("llm: empty response")
 	}
 	ch := out.Choices[0]
-	msg := llm.Message{Role: llm.RoleAssistant}
+	replay := ch.Message
+	replay.Role = "assistant"
+	msg := llm.Message{Role: llm.RoleAssistant, ProviderState: replay}
 	if ch.Message.Content != nil {
 		msg.Content = *ch.Message.Content
 	}
