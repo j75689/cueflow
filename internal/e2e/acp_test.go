@@ -199,7 +199,7 @@ func TestExternalACPAgentRun(t *testing.T) {
 	}
 	joined := strings.Join(thread, "\n")
 	for _, want := range []string{
-		"message:Reading the task.",           // streamed agent text
+		"message:Reading the task.",            // streamed agent text
 		`Refused \"Bash: rm -rf /\" (execute)`, // permission policy
 		`"tool":"create_post_draft"`,           // CueFlow tool call logged by the MCP server
 		"result:Done via ACP.",
