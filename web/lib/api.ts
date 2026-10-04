@@ -22,6 +22,7 @@ import type {
   TaskDetail,
   TaskMessage,
   TaskPatch,
+  Usage,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -201,6 +202,10 @@ export const api = {
   runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
   cancelTask: (id: string) => request<Task>("POST", `/tasks/${id}/cancel`),
   taskRuns: (id: string) => request<AgentRun[]>("GET", `/tasks/${id}/runs`),
+
+  // usage
+  usage: (q: { days: number; tz?: string }) =>
+    request<Usage>("GET", "/usage", undefined, { days: String(q.days), tz: q.tz }),
 
   listSchedules: () => request<Schedule[]>("GET", "/schedules"),
   createSchedule: (body: ScheduleInput) => request<Schedule>("POST", "/schedules", body),

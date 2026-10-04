@@ -124,6 +124,9 @@ func (r *Runner) run(ctx context.Context, st *runState) error {
 	}
 	defer hub.Close(model)
 	st.log("info", "using %s (%s)", llmConn.Name, model.Model())
+	if err := r.store.SetPipelineRunModel(ctx, st.runID, llmConn.ID, model.Model()); err != nil {
+		st.log("warn", "record model: %v", err)
+	}
 
 	// 1. Ingest (delta fetch) from each source.
 	since := time.Now().Add(-time.Duration(p.LookbackHours) * time.Hour)

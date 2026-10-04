@@ -268,6 +268,37 @@ A schedule creates a new task for an agent on a cron expression (agents with `pl
 
 ---
 
+## Usage
+
+### `GET /api/v1/usage?days=30&tz=Asia/Taipei`
+Token usage across agent runs and pipeline runs. `days` (1–365, default 30) is the look-back window ending
+now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
+```json
+{
+  "from":"...","to":"...","tz":"Asia/Taipei",
+  "totals":{"runs":42,"failed_runs":3,"input_tokens":812345,"output_tokens":90211,"tool_calls":310,
+            "unreported_runs":5},
+  "daily":[{"date":"2026-10-04","runs":7,"input_tokens":120000,"output_tokens":15000}],
+  "by_source":[{"source":"agent","runs":30,"input_tokens":700000,"output_tokens":80000},
+               {"source":"pipeline","runs":12,"input_tokens":112345,"output_tokens":10211}],
+  "by_agent":[{"agent_id":"uuid","name":"Writer","avatar":"✍️","slug":"writer","runs":12,
+               "input_tokens":300000,"output_tokens":40000}],
+  "by_model":[{"connector_id":"uuid|null","connector_name":"Gemini on Vertex · gemini-3.1-flash-lite",
+               "connector_type":"gemini_vertex","runtime":"builtin|acp","model":"google/gemini-3.1-flash-lite",
+               "runs":20,"input_tokens":400000,"output_tokens":50000}],
+  "top_tasks":[{"task_id":"uuid","number":12,"title":"...","runs":3,"input_tokens":90000,"output_tokens":9000}]
+}
+```
+- Every list is sorted by `input_tokens + output_tokens` descending (`daily` by date ascending, every day of
+  the window present, zero-filled). `top_tasks` has at most 10 rows.
+- `unreported_runs`: finished runs that reported no token usage (e.g. external ACP agents that don't report
+  usage), so totals may undercount.
+- `by_model.connector_name` is `""` when the connector was deleted; `runtime` is `acp` for external agents.
+
+`AgentRun` additionally carries `"connector_id":"uuid|null","model":"...","runtime":"builtin|acp"`.
+
+---
+
 ## Live updates
 
 ### `GET /api/v1/events` (Server-Sent Events)

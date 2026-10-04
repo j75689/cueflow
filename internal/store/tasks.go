@@ -529,26 +529,36 @@ type AgentRun struct {
 	InputTokens  int64      `json:"input_tokens"`
 	OutputTokens int64      `json:"output_tokens"`
 	Error        string     `json:"error"`
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at"`
+	// ConnectorID is the LLM connector (built-in runtime) or the ACP runtime connector used.
+	ConnectorID *uuid.UUID `json:"connector_id"`
+	Model       string     `json:"model"`
+	Runtime     string     `json:"runtime"` // builtin | acp
+	StartedAt   time.Time  `json:"started_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
 }
 
 func (s *Store) StartAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
-	r := &AgentRun{TaskID: taskID, AgentID: &agentID, Status: "RUNNING"}
+	r := &AgentRun{TaskID: taskID, AgentID: &agentID, Status: "RUNNING", Runtime: "builtin"}
 	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (task_id, agent_id) VALUES ($1,$2) RETURNING id, started_at`,
 		taskID, agentID).Scan(&r.ID, &r.StartedAt)
 	return r, err
 }
 
 func (s *Store) FinishAgentRun(ctx context.Context, r *AgentRun) error {
+	runtime := r.Runtime
+	if runtime == "" {
+		runtime = "builtin"
+	}
 	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET status=$2, turns=$3, tool_calls=$4, input_tokens=$5, output_tokens=$6,
-		error=$7, finished_at=NOW() WHERE id=$1`, r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error)
+		error=$7, connector_id=$8, model=$9, runtime=$10, finished_at=NOW() WHERE id=$1`,
+		r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error, r.ConnectorID, r.Model, runtime)
 	return err
 }
 
 func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRun, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
-		error, started_at, finished_at FROM agent_runs WHERE task_id=$1 ORDER BY started_at DESC LIMIT 50`, taskID)
+		error, connector_id, model, runtime, started_at, finished_at FROM agent_runs WHERE task_id=$1
+		ORDER BY started_at DESC LIMIT 50`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +567,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRu
 	for rows.Next() {
 		var r AgentRun
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens,
-			&r.OutputTokens, &r.Error, &r.StartedAt, &r.FinishedAt); err != nil {
+			&r.OutputTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &r)

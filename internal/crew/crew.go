@@ -195,17 +195,17 @@ func (c *Crew) schedulesChanged(ctx context.Context) {
 	}
 }
 
-func (c *Crew) llmFor(ctx context.Context, a *store.Agent) (connector.LLM, error) {
+func (c *Crew) llmFor(ctx context.Context, a *store.Agent) (connector.LLM, uuid.UUID, error) {
 	id := a.LLMConnectorID
 	if id == nil {
 		conn, err := c.store.FirstActiveConnector(ctx, connector.KindLLM)
 		if err != nil {
-			return nil, errors.New("no LLM connector configured (add one under Connectors)")
+			return nil, uuid.Nil, errors.New("no LLM connector configured (add one under Connectors)")
 		}
 		id = &conn.ID
 	}
 	m, _, err := c.hub.LLM(ctx, *id)
-	return m, err
+	return m, *id, err
 }
 
 // --- the agent loop ---
@@ -268,11 +268,12 @@ func (c *Crew) heartbeat(ctx context.Context, id uuid.UUID) func() {
 }
 
 func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun) *outcome {
-	model, err := c.llmFor(ctx, a)
+	model, connID, err := c.llmFor(ctx, a)
 	if err != nil {
 		return &outcome{kind: "error", text: err.Error()}
 	}
 	defer hub.Close(model)
+	run.ConnectorID, run.Model, run.Runtime = &connID, model.Model(), "builtin"
 
 	team, _ := c.store.ListAgents(ctx)
 	var memories []store.AgentMemory

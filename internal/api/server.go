@@ -106,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/tasks/{id}/cancel", s.cancelTask)
 		r.Get("/tasks/{id}/runs", s.taskRuns)
 
+		r.Get("/usage", s.usage)
+
 		r.Get("/schedules", s.listSchedules)
 		r.Post("/schedules", s.createSchedule)
 		r.Get("/schedules/{id}", s.getSchedule)

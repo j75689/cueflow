@@ -28,6 +28,7 @@ import {
   Icon,
   Input,
   Loading,
+  Pill,
   Select,
   Textarea,
   cx,
@@ -197,6 +198,12 @@ function TaskView() {
                       {(r.input_tokens + r.output_tokens).toLocaleString()}{" "}
                       tokens
                     </p>
+                    {(r.model || r.runtime === "acp") && (
+                      <p className="flex min-w-0 items-center gap-1.5 text-zinc-500">
+                        {r.runtime === "acp" && <Pill>ACP</Pill>}
+                        {r.model && <span className="truncate font-mono text-[11px]">{r.model}</span>}
+                      </p>
+                    )}
                     {r.error && (
                       <p className="break-words text-red-600 dark:text-red-400">
                         {r.error}

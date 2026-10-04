@@ -100,7 +100,9 @@ func init() {
 			{Key: "service_account_json", Label: "Service account key (JSON)", Type: connector.FieldText, Secret: true,
 				Help: "Blank uses Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS, gcloud, metadata server)"},
 		}, commonFields(defaultModel, "")...),
-		DefaultName: func(cfg connector.Config) string { return connector.WithDetail("Claude on Vertex", cfg.String("model")) },
+		DefaultName: func(cfg connector.Config) string {
+			return connector.WithDetail("Claude on Vertex", cfg.String("model"))
+		},
 	}, newVertex)
 }
 

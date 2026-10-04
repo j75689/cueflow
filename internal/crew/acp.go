@@ -87,6 +87,13 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	defer proc.Close(5 * time.Second)
 	fail := func(step string, err error) *outcome {
 		msg := fmt.Sprintf("%s: %v", step, err)
+		if strings.Contains(strings.ToLower(err.Error()), "auth") {
+			if h, ok := inst.(interface{ CredentialHint() string }); ok && h.CredentialHint() != "" {
+				msg += " — " + h.CredentialHint()
+			} else {
+				msg += " — check the credentials on the runtime connector"
+			}
+		}
 		if tail := proc.Stderr(); tail != "" {
 			msg += " — agent stderr: " + clip(tail, 600)
 		}
@@ -96,9 +103,13 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	runCtx, cancel := context.WithTimeout(ctx, launch.Timeout)
 	defer cancel()
 
+	run.ConnectorID, run.Runtime = a.RuntimeConnectorID, "acp"
 	init, err := acpx.Handshake(runCtx, proc.Conn)
 	if err != nil {
 		return fail("ACP initialize", err)
+	}
+	if init.AgentInfo != nil {
+		run.Model = strings.TrimSpace(init.AgentInfo.Name + " " + init.AgentInfo.Version)
 	}
 	if authMethod != "" {
 		if _, err := proc.Conn.Authenticate(runCtx, acp.AuthenticateRequest{MethodId: authMethod}); err != nil {

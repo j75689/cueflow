@@ -371,6 +371,7 @@ const icons: Record<string, ReactNode> = {
   inbox: <path d="M3 13h5l1.5 3h5L16 13h5M5 5h14l2 8v6H3v-6z" />,
   flow: <path d="M4 6h6v4H4zM14 14h6v4h-6zM7 10v4a2 2 0 0 0 2 2h5M17 14v-4a2 2 0 0 0-2-2h-5" />,
   history: <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2" />,
+  chart: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   plug: <path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5" />,
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,

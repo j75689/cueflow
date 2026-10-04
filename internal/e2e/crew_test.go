@@ -44,7 +44,7 @@ func (scriptLLM) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if len(msg.ToolCalls) > 0 {
 		stop = "tool_use"
 	}
-	return &llm.Response{Message: msg, StopReason: stop}, nil
+	return &llm.Response{Message: msg, StopReason: stop, Usage: llm.Usage{InputTokens: 100, OutputTokens: 10}}, nil
 }
 
 func init() {
@@ -230,6 +230,33 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
 	if len(runs) != 3 {
 		t.Fatalf("chief should have run 3 times (delegate, delegate, complete), got %d", len(runs))
+	}
+	if runs[0].Model != "script" || runs[0].Runtime != "builtin" || runs[0].ConnectorID == nil {
+		t.Fatalf("run provenance not recorded: %+v", runs[0])
+	}
+
+	// Usage: chief 3 turns, researcher 2, writer 2 = 7 LLM calls x (100 in, 10 out).
+	var usage store.Usage
+	if code := e.do("GET", "/usage?days=7&tz=Asia/Taipei", nil, &usage); code != 200 {
+		t.Fatalf("usage: %d", code)
+	}
+	if usage.Totals.Runs != 5 || usage.Totals.InputTokens != 700 || usage.Totals.OutputTokens != 70 || usage.Totals.UnreportedRuns != 0 {
+		t.Fatalf("totals: %+v", usage.Totals)
+	}
+	if len(usage.Daily) != 7 || usage.Daily[6].InputTokens != 700 {
+		t.Fatalf("daily should be 7 zero-filled days ending today: %+v", usage.Daily)
+	}
+	if len(usage.ByAgent) != 3 || usage.ByAgent[0].Slug != "chief" || usage.ByAgent[0].InputTokens != 300 {
+		t.Fatalf("by agent: %+v", usage.ByAgent)
+	}
+	if len(usage.ByModel) != 1 || usage.ByModel[0].ConnectorType != "script_llm" || usage.ByModel[0].Model != "script" {
+		t.Fatalf("by model: %+v", usage.ByModel)
+	}
+	if len(usage.TopTasks) == 0 || usage.TopTasks[0].TaskID != task.ID {
+		t.Fatalf("top tasks: %+v", usage.TopTasks)
+	}
+	if code := e.do("GET", "/usage?days=0", nil, nil); code != 400 {
+		t.Fatalf("days=0 should be rejected: %d", code)
 	}
 }
 

@@ -81,6 +81,38 @@ type Runtime struct {
 	launch     connector.RuntimeLaunch
 	authMethod string
 	allowWeb   bool
+	// credHint is non-empty when the preset needs credentials and none were found.
+	credHint string
+}
+
+// credentialHint explains how to authenticate a preset when neither the connector nor the server
+// environment provides credentials (e.g. CueFlow in Docker cannot see the host's Claude login).
+func credentialHint(name string, p preset, envs []string) string {
+	wanted := append(append([]string{}, p.tokenEnv...), p.keyEnv...)
+	if len(wanted) == 0 {
+		return ""
+	}
+	for _, e := range envs {
+		for _, w := range wanted {
+			if strings.HasPrefix(e, w+"=") {
+				return ""
+			}
+		}
+	}
+	for _, w := range wanted {
+		if os.Getenv(w) != "" {
+			return ""
+		}
+	}
+	switch name {
+	case "claude-code":
+		return "no credentials configured: run `claude setup-token` and paste the token into OAuth token (or set an API key). The host's Claude login is not visible to CueFlow in Docker"
+	case "codex":
+		return "no credentials configured: set an OpenAI API key"
+	case "gemini":
+		return "no credentials configured: set a Gemini API key (Google AI Studio)"
+	}
+	return "no credentials configured"
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -132,6 +164,7 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		},
 		authMethod: authMethod,
 		allowWeb:   cfg.Bool("allow_web"),
+		credHint:   credentialHint(name, p, envs),
 	}, nil
 }
 
@@ -139,6 +172,9 @@ func (r *Runtime) Launch() connector.RuntimeLaunch { return r.launch }
 
 // AuthMethod is the ACP authenticate method to call after initialize ("" = none).
 func (r *Runtime) AuthMethod() string { return r.authMethod }
+
+// CredentialHint is non-empty when no credentials were found for the preset.
+func (r *Runtime) CredentialHint() string { return r.credHint }
 
 // AllowWeb reports whether the agent may use its own fetch/search tools.
 func (r *Runtime) AllowWeb() bool { return r.allowWeb }
@@ -180,8 +216,14 @@ func (r *Runtime) Test(ctx context.Context) (*connector.TestResult, error) {
 	if resp.AgentCapabilities.McpCapabilities.Http {
 		mcp = "http"
 	}
+	msg := fmt.Sprintf("connected to %s (ACP v%d, MCP over %s)", agent, resp.ProtocolVersion, mcp)
+	if r.credHint != "" {
+		// The handshake needs no login, but every run would fail with "Authentication required".
+		return &connector.TestResult{OK: false, Message: msg + ", but " + r.credHint,
+			Details: map[string]any{"agent": agent, "auth_methods": auth}}, nil
+	}
 	return &connector.TestResult{OK: true,
-		Message: fmt.Sprintf("connected to %s (ACP v%d, MCP over %s)", agent, resp.ProtocolVersion, mcp),
+		Message: msg,
 		Details: map[string]any{"agent": agent, "auth_methods": auth, "mcp_http": resp.AgentCapabilities.McpCapabilities.Http}}, nil
 }
 

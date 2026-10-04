@@ -15,6 +15,7 @@ const NAV = [
   { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
   { href: "/pipelines/", label: "Pipelines", icon: "flow", match: (p: string) => p.startsWith("/pipelines") },
   { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
+  { href: "/usage/", label: "Usage", icon: "chart", match: (p: string) => p.startsWith("/usage") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },
 ];
 
