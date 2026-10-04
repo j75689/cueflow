@@ -36,11 +36,8 @@ var presets = map[string]preset{
 		keyEnv: []string{"OPENAI_API_KEY", "CODEX_API_KEY"}, authMethod: "api-key"},
 	"gemini":   {command: "npx -y @google/gemini-cli@0.62.0 --acp", keyEnv: []string{"GEMINI_API_KEY"}},
 	"opencode": {command: "opencode acp"},
-	// Google's Antigravity ACP server (cueflow:agents-full image). Authenticates with a Gemini API key;
-	// signing in with a personal Google account from a third-party client breaches Antigravity's terms.
-	"antigravity": {command: "agy-acp-server --uid=", binary: "agy-acp-server", keyEnv: []string{"GEMINI_API_KEY"}, authMethod: "gemini-api-key"},
-	"goose":       {command: "goose acp"},
-	"custom":      {},
+	"goose":    {command: "goose acp"},
+	"custom":   {},
 }
 
 func init() {
@@ -51,7 +48,7 @@ func init() {
 		Description: "Runs an agent's tasks in an external coding agent over the Agent Client Protocol (Claude Code, Codex, Gemini CLI, OpenCode, Goose...). The agent uses CueFlow's tools through MCP; drafts still go to human review. Requires the agent CLI (or Node.js for npx) on the CueFlow host.",
 		Fields: []connector.Field{
 			{Key: "preset", Label: "Agent", Type: connector.FieldSelect,
-				Options: []string{"claude-code", "codex", "gemini", "antigravity", "opencode", "goose", "custom"}, Default: "claude-code"},
+				Options: []string{"claude-code", "codex", "gemini", "opencode", "goose", "custom"}, Default: "claude-code"},
 			{Key: "command", Label: "Command", Type: connector.FieldString,
 				Help: "Override the launch command, e.g. `claude-agent-acp`. Blank uses the preset"},
 			{Key: "args", Label: "Extra arguments", Type: connector.FieldStringList},
@@ -77,7 +74,7 @@ func init() {
 
 var presetLabels = map[string]string{
 	"claude-code": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI",
-	"opencode": "OpenCode", "goose": "Goose", "custom": "Custom agent", "antigravity": "Antigravity",
+	"opencode": "OpenCode", "goose": "Goose", "custom": "Custom agent",
 }
 
 type Runtime struct {
@@ -112,7 +109,7 @@ func credentialHint(name string, p preset, envs []string) string {
 		return "no credentials configured: run `claude setup-token` and paste the token into OAuth token (or set an API key). The host's Claude login is not visible to CueFlow in Docker"
 	case "codex":
 		return "no credentials configured: set an OpenAI API key"
-	case "gemini", "antigravity":
+	case "gemini":
 		return "no credentials configured: set a Gemini API key (Google AI Studio)"
 	}
 	return "no credentials configured"

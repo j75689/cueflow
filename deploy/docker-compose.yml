@@ -19,7 +19,7 @@ x-postgres-health: &pg-health
 services:
   # ---------------------------------------------------------------- CueFlow
   cueflow:
-    # Image: slim (default) | agents (Claude Code/Codex ACP adapters) | agents-full (+ Antigravity).
+    # Image: slim (default) | agents (Claude Code/Codex ACP adapters).
     build:
       context: ..
       dockerfile: Dockerfile

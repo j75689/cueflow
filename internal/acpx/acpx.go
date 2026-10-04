@@ -51,7 +51,7 @@ func Start(launch connector.RuntimeLaunch, cwd string, client acp.Client) (*Proc
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("acp: %q not found on this host: external agents need Node.js/the agent CLI "+
-				"(in Docker use the cueflow:agents image, or cueflow:agents-full for Antigravity)", launch.Command)
+				"(in Docker use the cueflow:agents image)", launch.Command)
 		}
 		return nil, fmt.Errorf("acp: start %s: %w", launch.Command, err)
 	}

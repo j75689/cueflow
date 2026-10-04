@@ -126,7 +126,6 @@ Then:
 |---|---|
 | `slim` (default) | CueFlow only (distroless). Built-in agents and LLM connectors |
 | `agents` | + Node.js and the ACP adapters for Claude Code and Codex, for external agents |
-| `agents-full` | + Google's Antigravity ACP server (~1 GB more; proprietary, Gemini API key auth) |
 
 Set it in `deploy/.env`, then `docker compose up -d --build`.
 

@@ -95,7 +95,6 @@ docker compose up -d
 |---|---|
 | `slim`（預設） | 只有 CueFlow（distroless），內建 agent 與 LLM connector |
 | `agents` | 加上 Node.js 與 Claude Code、Codex 的 ACP 橋接器，可使用外部 agent |
-| `agents-full` | 再加上 Google 的 Antigravity ACP server（多約 1 GB；專有授權，用 Gemini API key 認證） |
 
 在 `deploy/.env` 設定後執行 `docker compose up -d --build`。
 
