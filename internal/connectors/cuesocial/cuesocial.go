@@ -1,11 +1,12 @@
 // Package cuesocial is the publisher connector for CueSocial, a self-hosted scheduler that posts
-// to several Threads and Instagram accounts. CueFlow calls CueSocial's MCP server; the reviewer
-// picks the accounts for each post (PublishRequest.Accounts).
+// to several Threads and Instagram accounts, including threads and multi-image posts. CueFlow calls
+// CueSocial's MCP server; the reviewer picks the accounts for each post (PublishRequest.Accounts).
 //
 // CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
 // service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
 //   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_post {text, accounts[], scheduled_at?, image_url? | image_base64?}
+//   - create_post {parts:[{text, image_urls?, images_base64?}], accounts[], scheduled_at?}
+//     (several parts make a Threads reply chain; on Instagram they become one caption and carousel)
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
 //
@@ -208,37 +209,99 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		platforms[a.Platform] = true
 	}
 
-	// CueSocial sends one text to every account; thread parts become paragraphs.
-	text := strings.Join(req.Parts, "\n\n")
-	if tags := domain.FormatHashtags(req.Hashtags); tags != "" {
-		text += "\n\n" + tags
+	parts, err := partsFor(ctx, req, platforms)
+	if err != nil {
+		return nil, err
 	}
-	for pl := range platforms {
-		if info, ok := domain.PlatformByID(pl); ok && utf8.RuneCountInString(text) > info.MaxChars {
-			return nil, fmt.Errorf("CueSocial posts the same text to every account and %s allows %d characters; this post has %d",
-				info.Name, info.MaxChars, utf8.RuneCountInString(text))
-		}
-	}
-	args := map[string]any{"text": text, "accounts": req.Accounts}
-	switch {
-	case len(req.Media) > 0 && req.Media[0].Stored:
-		// Uploaded or generated in CueFlow: send the bytes, since CueSocial cannot reach CueFlow.
-		data, _, err := req.Media[0].Load(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("load image: %w", err)
-		}
-		args["image_base64"] = base64.StdEncoding.EncodeToString(data)
-	case len(req.MediaURLs) > 0:
-		u := strings.TrimSpace(req.MediaURLs[0])
-		if !strings.HasPrefix(u, "https://") {
-			return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
-		}
-		args["image_url"] = u
-	}
+	args := map[string]any{"parts": parts, "accounts": req.Accounts}
 	if req.ScheduledAt != nil && req.ScheduledAt.After(p.now()) {
 		args["scheduled_at"] = req.ScheduledAt.UTC().Format(time.RFC3339)
 	}
 	return args, nil
+}
+
+// CueSocial's limits (see its MCP instructions).
+const (
+	maxParts            = 10
+	threadsMaxImages    = 20
+	instagramMaxImages  = 10
+	maxImageBytes       = 8 << 20
+	threadsMaxChars     = 500
+	instagramMaxCaption = 2200
+)
+
+// partsFor builds create_post's parts: CueFlow's thread parts in order, hashtags after the last
+// part, and every image on the first part (a carousel on Instagram, an album on Threads). Images
+// CueFlow stores are uploaded as base64; linked images are fetched by CueSocial.
+func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool) ([]map[string]any, error) {
+	texts := append([]string{}, req.Parts...)
+	if len(texts) == 0 {
+		texts = []string{""}
+	}
+	if len(texts) > maxParts {
+		return nil, fmt.Errorf("CueSocial threads have at most %d parts; this post has %d", maxParts, len(texts))
+	}
+	if tags := domain.FormatHashtags(req.Hashtags); tags != "" {
+		texts[len(texts)-1] = strings.TrimSpace(texts[len(texts)-1] + "\n\n" + tags)
+	}
+	if platforms["threads"] {
+		for i, t := range texts {
+			if n := utf8.RuneCountInString(t); n > threadsMaxChars {
+				return nil, fmt.Errorf("Threads allows %d characters per part; part %d has %d (split it into thread parts)", threadsMaxChars, i+1, n)
+			}
+		}
+	}
+	if platforms["instagram"] {
+		if n := utf8.RuneCountInString(strings.Join(texts, "\n\n")); n > instagramMaxCaption {
+			return nil, fmt.Errorf("Instagram captions allow %d characters; this post's parts add up to %d", instagramMaxCaption, n)
+		}
+	}
+
+	var urls, b64 []string
+	for i, u := range req.MediaURLs {
+		if i < len(req.Media) && req.Media[i].Stored {
+			data, mt, err := req.Media[i].Load(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("load image %d: %w", i+1, err)
+			}
+			if mt != "image/jpeg" && mt != "image/png" {
+				return nil, fmt.Errorf("image %d is %s; CueSocial accepts JPEG or PNG", i+1, mt)
+			}
+			if len(data) > maxImageBytes {
+				return nil, fmt.Errorf("image %d is larger than CueSocial's 8 MB limit", i+1)
+			}
+			b64 = append(b64, base64.StdEncoding.EncodeToString(data))
+			continue
+		}
+		u = strings.TrimSpace(u)
+		if !strings.HasPrefix(u, "https://") {
+			return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
+		}
+		urls = append(urls, u)
+	}
+	images := len(urls) + len(b64)
+	if platforms["instagram"] && images == 0 {
+		return nil, errors.New("Instagram needs at least one image: add one, or untick the Instagram accounts")
+	}
+	if platforms["instagram"] && images > instagramMaxImages {
+		return nil, fmt.Errorf("Instagram carousels take at most %d images; this post has %d", instagramMaxImages, images)
+	}
+	if platforms["threads"] && images > threadsMaxImages {
+		return nil, fmt.Errorf("Threads posts take at most %d images; this post has %d", threadsMaxImages, images)
+	}
+
+	parts := make([]map[string]any, len(texts))
+	for i, t := range texts {
+		parts[i] = map[string]any{"text": t}
+	}
+	// CueSocial puts a part's linked images before its uploaded ones.
+	if len(urls) > 0 {
+		parts[0]["image_urls"] = urls
+	}
+	if len(b64) > 0 {
+		parts[0]["images_base64"] = b64
+	}
+	return parts, nil
 }
 
 // sentErr classifies a failed call. A tool error means CueSocial rejected the request, so nothing

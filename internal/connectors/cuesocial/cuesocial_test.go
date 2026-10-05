@@ -137,7 +137,8 @@ func TestPublish(t *testing.T) {
 	if res.ExternalIDs[PostIDKey] != "post-1" || res.ExternalIDs["threads @brand"] != "https://threads.net/p/1" {
 		t.Fatalf("ids: %v", res.ExternalIDs)
 	}
-	if f.lastCreate["text"] != "Hello\n\n#mcp" || f.lastCreate["scheduled_at"] != nil {
+	parts := f.lastCreate["parts"].([]any)
+	if len(parts) != 1 || parts[0].(map[string]any)["text"] != "Hello\n\n#mcp" || f.lastCreate["scheduled_at"] != nil {
 		t.Fatalf("create args: %v", f.lastCreate)
 	}
 }
@@ -151,8 +152,25 @@ func TestPublishValidation(t *testing.T) {
 		"not one of this post's":       req("ig1"),
 	}
 	long := req("th1")
-	long.Parts = []string{strings.Repeat("字", 501)}
-	cases["allows 500 characters"] = long
+	long.Parts = []string{"ok", strings.Repeat("字", 501)}
+	cases["characters per part; part 2"] = long
+	tooMany := req("th1")
+	tooMany.Parts = make([]string, 11)
+	cases["at most 10 parts"] = tooMany
+	igNoImage := req("ig1")
+	igNoImage.Platforms = []string{"instagram"}
+	cases["needs at least one image"] = igNoImage
+	igMany := req("ig1")
+	igMany.Platforms = []string{"instagram"}
+	for i := 0; i < 11; i++ {
+		igMany.MediaURLs = append(igMany.MediaURLs, "https://cdn.example.com/x.png")
+	}
+	cases["at most 10 images"] = igMany
+	webp := req("th1")
+	webp.MediaURLs = []string{"/media/x"}
+	webp.Media = []connector.MediaFile{{URL: "/media/x", Stored: true,
+		Load: func(context.Context) ([]byte, string, error) { return []byte("RIFF"), "image/webp", nil }}}
+	cases["accepts JPEG or PNG"] = webp
 	img := req("th1")
 	img.MediaURLs = []string{"http://10.0.0.1/a.png"}
 	cases["public https URL"] = img
@@ -179,7 +197,8 @@ func TestScheduled(t *testing.T) {
 	if err != nil || res.Details["cuesocial_status"] != "scheduled" {
 		t.Fatalf("scheduled: %+v %v", res, err)
 	}
-	if f.lastCreate["scheduled_at"] != at.UTC().Format(time.RFC3339) || f.lastCreate["image_url"] != "https://cdn.example.com/a.png" {
+	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
+	if f.lastCreate["scheduled_at"] != at.UTC().Format(time.RFC3339) || part["image_urls"].([]any)[0] != "https://cdn.example.com/a.png" {
 		t.Fatalf("create args: %v", f.lastCreate)
 	}
 }
@@ -242,7 +261,33 @@ func TestStoredImageIsUploaded(t *testing.T) {
 	if _, err := p.Publish(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if f.lastCreate["image_base64"] != "UE5HREFUQQ==" || f.lastCreate["image_url"] != nil {
+	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
+	if part["images_base64"].([]any)[0] != "UE5HREFUQQ==" || part["image_urls"] != nil {
 		t.Fatalf("stored media should be sent as base64: %v", f.lastCreate)
+	}
+}
+
+func TestThreadWithImages(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	p := newPublisher(t, f)
+	r := req("th1", "ig1")
+	r.Platforms = []string{"threads", "instagram"}
+	r.Parts = []string{"one", "two", "three"}
+	r.MediaURLs = []string{"https://cdn.example.com/a.png", "http://cueflow:3000/media/b"}
+	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0]}, {URL: r.MediaURLs[1], Stored: true,
+		Load: func(context.Context) ([]byte, string, error) { return []byte("JPG"), "image/jpeg", nil }}}
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	parts := f.lastCreate["parts"].([]any)
+	if len(parts) != 3 {
+		t.Fatalf("parts: %v", parts)
+	}
+	first, last := parts[0].(map[string]any), parts[2].(map[string]any)
+	if first["text"] != "one" || last["text"] != "three\n\n#mcp" {
+		t.Fatalf("texts: %v", parts)
+	}
+	if len(first["image_urls"].([]any)) != 1 || len(first["images_base64"].([]any)) != 1 || parts[1].(map[string]any)["image_urls"] != nil {
+		t.Fatalf("all images belong on the first part: %v", parts)
 	}
 }
