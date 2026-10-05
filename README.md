@@ -71,7 +71,7 @@ sends them to Postiz.
 
 | Kind | Types |
 |---|---|
-| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio) · `cuesocial` - CueSocial over MCP, posting to the Threads/Instagram accounts picked per post |
+| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio), channels optionally picked per post · `cuesocial` - CueSocial over MCP, posting to the Threads/Instagram accounts picked per post |
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |

@@ -41,9 +41,14 @@ export function effectivePublisher(draft: PostDraft, publishers: Connector[]): C
   return publishers.filter((c) => c.is_active).sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 }
 
-/** Whether posts through this publisher need accounts chosen (e.g. CueSocial). */
-export function needsAccounts(c: Connector | undefined, types: ConnectorSpec[]): boolean {
-  return !!c && !!types.find((t) => t.type === c.type)?.accounts;
+/**
+ * How a publisher takes accounts: "required" (CueSocial: every post names its accounts),
+ * "optional" (Postiz: unpicked platforms use its channel mapping), or null.
+ */
+export function accountMode(c: Connector | undefined, types: ConnectorSpec[]): "required" | "optional" | null {
+  const spec = c && types.find((t) => t.type === c.type);
+  if (!spec?.accounts) return null;
+  return spec.accounts_required ? "required" : "optional";
 }
 
 // splitThread breaks text into parts under `limit` code points, preferring
@@ -114,7 +119,7 @@ export function PostEditor({
   const contentCount = charCount(draft.content);
   const usingThread = draft.thread_parts.length > 0;
   const publisher = effectivePublisher(draft, publishers);
-  const perAccount = needsAccounts(publisher, connectorTypes);
+  const accounts = accountMode(publisher, connectorTypes);
 
   const movePart = (i: number, d: -1 | 1) => {
     const j = i + d;
@@ -349,10 +354,11 @@ export function PostEditor({
               ))}
             </Select>
           </Field>
-          {perAccount && publisher && (
+          {accounts && publisher && (
             <div className="md:col-span-2">
               <AccountPicker
                 connector={publisher}
+                required={accounts === "required"}
                 platforms={platforms}
                 value={draft.accounts}
                 readOnly={readOnly}
@@ -374,12 +380,14 @@ export function PostEditor({
 
 function AccountPicker({
   connector,
+  required,
   platforms,
   value,
   readOnly,
   onChange,
 }: {
   connector: Connector;
+  required: boolean;
   platforms: Platform[];
   value: string[];
   readOnly?: boolean;
@@ -401,8 +409,12 @@ function AccountPicker({
   return (
     <Field
       label="Accounts"
-      required
-      help={`${connector.name} posts to the accounts you pick; the post's platforms follow your choice.`}
+      required={required}
+      help={
+        required
+          ? `${connector.name} posts to the accounts you pick; the post's platforms follow your choice.`
+          : `Optional. Platforms without a picked account use ${connector.name}'s channel mapping or first channel.`
+      }
     >
       {accounts.loading && !accounts.data ? (
         <p className="pt-1 text-xs text-zinc-500">Loading accounts…</p>

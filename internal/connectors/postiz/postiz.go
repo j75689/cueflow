@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,8 @@ func init() {
 		Type:        "postiz_mcp",
 		Kind:        connector.KindPublisher,
 		Name:        "Postiz (MCP)",
-		Description: "Publishes approved posts to Threads, Instagram, X, LinkedIn... through a self-hosted Postiz MCP server.",
+		Description: "Publishes approved posts to Threads, Instagram, X, LinkedIn... through a self-hosted Postiz MCP server. Pick channels per post when you review it, or leave them to the channel mapping.",
+		Accounts:    true,
 		Fields: []connector.Field{
 			{Key: "endpoint_url", Label: "MCP endpoint", Type: connector.FieldString, Required: true,
 				Placeholder: "http://postiz:5000/api/mcp", Help: "Postiz backend URL + /mcp (e.g. http://localhost:4007/api/mcp)"},
@@ -40,7 +42,7 @@ func init() {
 			{Key: "command", Label: "Command (stdio only)", Type: connector.FieldString},
 			{Key: "args", Label: "Arguments (stdio only)", Type: connector.FieldStringList},
 			{Key: "integrations", Label: "Channel mapping", Type: connector.FieldKV,
-				Help: "Optional platform → Postiz integration ID (e.g. threads → clx...). Unmapped platforms use the first connected channel of that platform."},
+				Help: "Optional platform → Postiz integration ID (e.g. threads → clx...), used when a post has no channels picked. Unmapped platforms use the first connected channel of that platform."},
 			{Key: "post_mode", Label: "Mode", Type: connector.FieldSelect, Options: []string{"publish", "draft"}, Default: "publish",
 				Help: "draft = create the post as a Postiz draft instead of publishing"},
 			{Key: "upload_media", Label: "Re-upload media to Postiz", Type: connector.FieldBool, Default: true,
@@ -168,6 +170,38 @@ var platformAliases = map[string][]string{
 	"linkedin":  {"linkedin", "linkedin-page"},
 }
 
+// platformOf maps a Postiz channel to a CueFlow platform ID, or "" when CueFlow has no such platform.
+func platformOf(c channel) string {
+	for pl, aliases := range platformAliases {
+		for _, alias := range aliases {
+			if strings.EqualFold(c.Platform, alias) || strings.EqualFold(c.Identifier, alias) {
+				return pl
+			}
+		}
+	}
+	return ""
+}
+
+// ListAccounts offers Postiz's active channels for per-post selection.
+func (p *Publisher) ListAccounts(ctx context.Context) ([]connector.Account, error) {
+	cs, err := p.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cs.Close()
+	channels, err := p.channels(ctx, cs)
+	if err != nil {
+		return nil, err
+	}
+	out := []connector.Account{}
+	for _, c := range channels {
+		if pl := platformOf(c); pl != "" && !c.Disabled {
+			out = append(out, connector.Account{ID: c.ID, Platform: pl, Name: c.Name})
+		}
+	}
+	return out, nil
+}
+
 func matchChannel(channels []channel, platform string) (channel, bool) {
 	aliases := platformAliases[platform]
 	if aliases == nil {
@@ -213,41 +247,107 @@ func (p *Publisher) Publish(ctx context.Context, req connector.PublishRequest) (
 	}
 	defer cs.Close()
 
-	mapping := p.cfg.KV("integrations")
-	var listed []channel
-	integrationFor := map[string]string{} // platform -> integration id
-	for _, pl := range req.Platforms {
-		if id := mapping[pl]; id != "" {
-			integrationFor[pl] = id
-			continue
-		}
-		if listed == nil {
-			if listed, err = p.channels(ctx, cs); err != nil {
-				return nil, err
-			}
-		}
-		ch, ok := matchChannel(listed, pl)
-		if !ok {
-			return nil, fmt.Errorf("postiz: no active %s channel connected in Postiz (add one or set the channel mapping)", pl)
-		}
-		integrationFor[pl] = ch.ID
+	targets, err := p.targets(ctx, cs, req)
+	if err != nil {
+		return nil, err
 	}
-
 	media, err := p.uploadMedia(ctx, cs, req.MediaURLs)
 	if err != nil {
 		return nil, err
 	}
-	payload := p.BuildPayload(req, integrationFor, media)
+	payload := p.BuildPayload(req, targets, media)
 
 	raw, err := mcpx.CallJSON(ctx, cs, p.cfg.String("schedule_tool"), payload)
 	if err != nil {
 		return nil, err
 	}
-	return parseScheduleResult(raw, integrationFor)
+	return parseScheduleResult(raw, targets)
+}
+
+// target is one Postiz channel a post goes to.
+type target struct {
+	platform      string
+	integrationID string
+	key           string // ExternalIDs key: the platform, or "platform channel" when a platform has several
+}
+
+// targets resolves the channels for a post: the channels picked for it, then, for platforms with no
+// picked channel, the channel mapping or the first connected channel of that platform.
+func (p *Publisher) targets(ctx context.Context, cs *mcp.ClientSession, req connector.PublishRequest) ([]target, error) {
+	var listed []channel
+	list := func() ([]channel, error) {
+		if listed != nil {
+			return listed, nil
+		}
+		var err error
+		listed, err = p.channels(ctx, cs)
+		return listed, err
+	}
+	var out []target
+	names := map[string]string{} // integration id -> channel name
+	covered := map[string]bool{}
+	if len(req.Accounts) > 0 {
+		channels, err := list()
+		if err != nil {
+			return nil, err
+		}
+		byID := map[string]channel{}
+		for _, c := range channels {
+			byID[c.ID] = c
+		}
+		for _, id := range req.Accounts {
+			c, ok := byID[id]
+			if !ok || c.Disabled {
+				return nil, fmt.Errorf("postiz: channel %s is not connected or is disabled: pick the channels again", id)
+			}
+			pl := platformOf(c)
+			if !slices.Contains(req.Platforms, pl) {
+				return nil, fmt.Errorf("postiz: channel %q is on %s, which is not one of this post's platforms", c.Name, c.Platform)
+			}
+			out = append(out, target{platform: pl, integrationID: c.ID})
+			names[c.ID] = c.Name
+			covered[pl] = true
+		}
+	}
+	mapping := p.cfg.KV("integrations")
+	for _, pl := range req.Platforms {
+		if covered[pl] {
+			continue
+		}
+		if id := mapping[pl]; id != "" {
+			out = append(out, target{platform: pl, integrationID: id})
+			continue
+		}
+		channels, err := list()
+		if err != nil {
+			return nil, err
+		}
+		ch, ok := matchChannel(channels, pl)
+		if !ok {
+			return nil, fmt.Errorf("postiz: no active %s channel connected in Postiz (add one or set the channel mapping)", pl)
+		}
+		out = append(out, target{platform: pl, integrationID: ch.ID})
+		names[ch.ID] = ch.Name
+	}
+	perPlatform := map[string]int{}
+	for _, t := range out {
+		perPlatform[t.platform]++
+	}
+	for i := range out {
+		out[i].key = out[i].platform
+		if perPlatform[out[i].platform] > 1 {
+			name := names[out[i].integrationID]
+			if name == "" {
+				name = out[i].integrationID
+			}
+			out[i].key = out[i].platform + " " + name
+		}
+	}
+	return out, nil
 }
 
 // BuildPayload assembles the integrationSchedulePostTool arguments.
-func (p *Publisher) BuildPayload(req connector.PublishRequest, integrationFor map[string]string, media []string) map[string]any {
+func (p *Publisher) BuildPayload(req connector.PublishRequest, targets []target, media []string) map[string]any {
 	date := p.now().UTC()
 	typ := "now"
 	if req.ScheduledAt != nil && req.ScheduledAt.After(date) {
@@ -262,8 +362,9 @@ func (p *Publisher) BuildPayload(req connector.PublishRequest, integrationFor ma
 	}
 	tags := domain.FormatHashtags(req.Hashtags)
 
-	posts := make([]socialPost, 0, len(req.Platforms))
-	for _, pl := range req.Platforms {
+	posts := make([]socialPost, 0, len(targets))
+	for _, t := range targets {
+		pl := t.platform
 		info, _ := domain.PlatformByID(pl)
 		parts := req.Parts
 		if !info.SupportsThread && len(parts) > 1 {
@@ -286,7 +387,7 @@ func (p *Publisher) BuildPayload(req connector.PublishRequest, integrationFor ma
 			settings = append(settings, setting{Key: "post_type", Value: p.cfg.String("instagram_post_type")})
 		}
 		posts = append(posts, socialPost{
-			IntegrationID:    integrationFor[pl],
+			IntegrationID:    t.integrationID,
 			Date:             date.Format(time.RFC3339),
 			ShortLink:        p.cfg.Bool("shorten_links"),
 			Type:             typ,
@@ -335,7 +436,7 @@ func (p *Publisher) uploadMedia(ctx context.Context, cs *mcp.ClientSession, urls
 
 // parseScheduleResult maps Postiz's response back to platform post IDs. Postiz reports validation
 // failures as a successful tool call shaped {output:{errors:"..."}}, so that is checked explicitly.
-func parseScheduleResult(raw json.RawMessage, integrationFor map[string]string) (*connector.PublishResult, error) {
+func parseScheduleResult(raw json.RawMessage, targets []target) (*connector.PublishResult, error) {
 	var env struct {
 		Output json.RawMessage `json:"output"`
 		Errors any             `json:"errors"`
@@ -361,8 +462,8 @@ func parseScheduleResult(raw json.RawMessage, integrationFor map[string]string) 
 		return nil, fmt.Errorf("postiz: no post was created: %.300s", raw)
 	}
 	byIntegration := map[string]string{}
-	for pl, id := range integrationFor {
-		byIntegration[id] = pl
+	for _, t := range targets {
+		byIntegration[t.integrationID] = t.key
 	}
 	res := &connector.PublishResult{ExternalIDs: map[string]string{}, Details: map[string]any{}}
 	previews := map[string]string{}

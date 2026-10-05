@@ -123,8 +123,12 @@ against an in-process MCP server.
 
 A publisher that posts to individual accounts (several Threads or Instagram accounts, for example) sets
 `Spec.Accounts` and implements `connector.AccountLister`. The review editor then lists the accounts and
-stores the reviewer's choice on the post; `Publish` receives it as `PublishRequest.Accounts`. The CueSocial
-connector ([`internal/connectors/cuesocial`](../internal/connectors/cuesocial/cuesocial.go)) is the example.
+stores the reviewer's choice on the post; `Publish` receives it as `PublishRequest.Accounts`.
+
+Set `Spec.AccountsRequired` too when a post cannot go out without accounts: the editor then blocks approval
+until some are picked. Otherwise an empty `Accounts` means "use your defaults". The CueSocial connector
+([`internal/connectors/cuesocial`](../internal/connectors/cuesocial/cuesocial.go)) requires accounts; the
+Postiz connector treats picked channels as optional and falls back to its channel mapping.
 
 When a publish fails after something was created remotely, return a `*connector.PartialError` with the
 external IDs that exist. The dispatch worker keeps them on the failed post and passes them back as

@@ -160,3 +160,54 @@ func TestListToolsNeverAgentAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestListAccounts(t *testing.T) {
+	mock, pub := setup(t, nil)
+	mock.Channels = append(append([]postizmock.Channel{}, postizmock.DefaultChannels...),
+		postizmock.Channel{ID: "int-off", Name: "Off", Platform: "threads", Disabled: true},
+		postizmock.Channel{ID: "int-yt", Name: "Tube", Platform: "youtube"})
+	al, ok := pub.(connector.AccountLister)
+	if !ok {
+		t.Fatal("postiz publisher should list accounts through the guard")
+	}
+	accts, err := al.ListAccounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accts) != 4 || accts[1] != (connector.Account{ID: "int-instagram-1", Platform: "instagram", Name: "Demo Instagram"}) {
+		t.Fatalf("accounts (disabled and unsupported channels skipped): %+v", accts)
+	}
+}
+
+func TestPublishToPickedChannels(t *testing.T) {
+	mock, pub := setup(t, nil)
+	mock.Channels = append(append([]postizmock.Channel{}, postizmock.DefaultChannels...),
+		postizmock.Channel{ID: "int-threads-2", Name: "Second Threads", Platform: "threads"})
+	id := uuid.New()
+	ctx := guard.WithPublishGrant(context.Background(), id)
+	// Two Threads channels picked; Instagram has none picked, so it falls back to its first channel.
+	res, err := pub.Publish(ctx, connector.PublishRequest{
+		PostID: id, Platforms: []string{"threads", "instagram"}, Parts: []string{"hi"},
+		Accounts: []string{"int-threads-1", "int-threads-2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range mock.Posts() {
+		got = append(got, p.Post.IntegrationID)
+	}
+	if strings.Join(got, ",") != "int-threads-1,int-threads-2,int-instagram-1" {
+		t.Fatalf("integrations: %v", got)
+	}
+	if res.ExternalIDs["threads Demo Threads"] == "" || res.ExternalIDs["threads Second Threads"] == "" || res.ExternalIDs["instagram"] == "" {
+		t.Fatalf("external ids must not collide: %v", res.ExternalIDs)
+	}
+
+	for _, bad := range [][]string{{"int-nope"}, {"int-x-1"}} {
+		_, err := pub.Publish(ctx, connector.PublishRequest{PostID: id, Platforms: []string{"threads"}, Parts: []string{"hi"}, Accounts: bad})
+		if err == nil {
+			t.Errorf("accounts %v should be refused", bad)
+		}
+	}
+}

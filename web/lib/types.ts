@@ -40,8 +40,10 @@ export interface ConnectorSpec {
   name: string;
   description: string;
   fields: FieldSpec[];
-  /** Publisher that posts to individual accounts chosen per post (e.g. CueSocial). */
+  /** Publisher that can post to individual accounts chosen per post (CueSocial, Postiz). */
   accounts?: boolean;
+  /** Posts through this publisher must name their accounts (CueSocial). */
+  accounts_required?: boolean;
 }
 
 /** An account a per-account publisher can post to. */

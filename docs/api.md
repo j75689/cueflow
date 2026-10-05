@@ -125,7 +125,7 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 | DELETE | `/connectors/{id}` | | |
 | POST | `/connectors/{id}/test` | | → `{"ok":true,"message":"Connected, 4 tools","details":{...}}` |
 | GET | `/connectors/{id}/tools` | | MCP-backed connectors only → `[{"name","description","agent_allowed":false,"reason":"publishing tool"}]` |
-| GET | `/connectors/{id}/accounts` | | Per-account publishers only (connector type with `"accounts":true` in `/meta`) → `[{"id","platform","name"}]`; `400` for other connectors, `502` if the service is unreachable |
+| GET | `/connectors/{id}/accounts` | | Per-account publishers only (connector type with `"accounts":true` in `/meta`; `"accounts_required":true` when every post must name its accounts) → `[{"id","platform","name"}]`; `400` for other connectors, `502` if the service is unreachable |
 | POST | `/connectors/{id}/fetch` | | `source` kind only, pulls now → `{"new_items":3}` |
 | GET | `/connectors/{id}/items?limit=50` | | `source` kind only → `[SourceItem]` |
 

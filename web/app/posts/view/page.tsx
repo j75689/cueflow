@@ -9,7 +9,7 @@ import {
   PostEditor,
   PostPreviews,
   effectivePublisher,
-  needsAccounts,
+  accountMode,
 } from "@/components/post-editor";
 import { AuditTimeline, RejectDialog, Warnings } from "@/components/post";
 import { useDialog } from "@/components/dialog";
@@ -170,10 +170,10 @@ function PostView() {
 
   const approve = async () => {
     if (
-      needsAccounts(
+      accountMode(
         effectivePublisher(draft, publishers.data ?? []),
         meta.connector_types,
-      ) &&
+      ) === "required" &&
       draft.accounts.length === 0
     ) {
       toast.error("Choose at least one account to publish to.");

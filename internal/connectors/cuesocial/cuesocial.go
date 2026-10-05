@@ -38,11 +38,12 @@ const PostIDKey = "cuesocial"
 
 func init() {
 	connector.Register(connector.Spec{
-		Type:        "cuesocial",
-		Kind:        connector.KindPublisher,
-		Name:        "CueSocial",
-		Description: "Publishes approved posts to your Threads and Instagram accounts through a CueSocial server. Choose the accounts for each post when you review it.",
-		Accounts:    true,
+		Type:             "cuesocial",
+		Kind:             connector.KindPublisher,
+		Name:             "CueSocial",
+		Description:      "Publishes approved posts to your Threads and Instagram accounts through a CueSocial server. Choose the accounts for each post when you review it.",
+		Accounts:         true,
+		AccountsRequired: true,
 		Fields: []connector.Field{
 			{Key: "endpoint_url", Label: "MCP endpoint", Type: connector.FieldString, Required: true,
 				Placeholder: "https://social.example.com/mcp", Help: "Your CueSocial URL + /mcp"},
