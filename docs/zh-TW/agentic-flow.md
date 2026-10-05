@@ -47,7 +47,7 @@ flowchart LR
 |---|---|---|---|
 | 🧭 Chief（總管） | `chief` | planning, delegation, memory, research | 對外窗口：理解需求、拆解、委派、設定排程、彙整回報；回合上限 16 |
 | 🔎 Researcher（研究員） | `researcher` | research, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
-| ✍️ Writer（文案） | `writer` | drafting, research, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
+| ✍️ Writer（文案） | `writer` | drafting, imaging, research, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
 | 🧐 Editor（編輯） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
 
 預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設英文 `en`）；想讓 agent 用繁體中文工作，把該角色的 Language 改成 `zh-TW` 即可。
@@ -66,6 +66,7 @@ flowchart LR
 | drafting | `create_post_draft` | 為單一平台建立草稿，直接進 `PENDING_REVIEW` |
 | | `list_posts` | 列出貼文與審核狀態 |
 | | `revise_draft` | 修改仍在 `DRAFT` / `PENDING_REVIEW` 的草稿（稽核紀錄記為 agent） |
+| imaging | `generate_image` | 用第一個啟用中的圖片生成 connector 生圖，並附到還能編輯的草稿上（預設用草稿的 `image_prompt`）。生圖要花錢，每次執行最多 2 張 |
 | delegation | `create_subtask` | 建立子任務並指派給隊友（立即開始） |
 | | `list_agents` | 列出可委派的隊友 |
 | | `wait_for_subtasks` | 暫停，等所有子任務完成後被喚醒（終止本次執行） |

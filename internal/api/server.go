@@ -22,6 +22,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/store"
@@ -111,6 +112,9 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/usage", s.usage)
 
+		r.Post("/media", s.uploadMedia)
+		r.Post("/media/generate", s.generateMedia)
+
 		r.Get("/schedules", s.listSchedules)
 		r.Post("/schedules", s.createSchedule)
 		r.Get("/schedules/{id}", s.getSchedule)
@@ -127,6 +131,8 @@ func (s *Server) Handler() http.Handler {
 	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler())
 	// Operator MCP endpoint for external agents, authenticated by CUEFLOW_MCP_TOKEN.
 	r.Handle(MCPPath, s.mcpHandler())
+	// Stored images, public by unguessable id so publishers can fetch them.
+	r.Get(media.PathPrefix+"{file}", s.serveMedia)
 	r.Handle("/*", webui.Handler())
 	return r
 }

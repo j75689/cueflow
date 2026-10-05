@@ -86,6 +86,7 @@ export const KIND_LABEL: Record<string, string> = {
   llm: "LLM providers",
   notifier: "Notifiers",
   runtime: "Agent runtimes",
+  image: "Image generation",
 };
 
-export const KIND_ORDER = ["llm", "runtime", "source", "search", "publisher", "notifier"];
+export const KIND_ORDER = ["llm", "runtime", "image", "source", "search", "publisher", "notifier"];

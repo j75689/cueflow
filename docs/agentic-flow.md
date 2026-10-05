@@ -48,7 +48,7 @@ On first start, when no agents exist, the system creates these four roles (`inte
 |---|---|---|---|
 | 🧭 Chief | `chief` | planning, delegation, memory, research | The front desk: understands requests, breaks them down, delegates, sets up schedules, reports back; turn limit 16 |
 | 🔎 Researcher | `researcher` | research, memory | Gathers and verifies information, produces summaries with sources |
-| ✍️ Writer | `writer` | drafting, research, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
+| ✍️ Writer | `writer` | drafting, imaging, research, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
 | 🧐 Editor | `editor` | drafting, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
 
 The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `en`).
@@ -67,6 +67,7 @@ The default names and instructions are in English; the language agents write in 
 | drafting | `create_post_draft` | Create a draft for one platform; it goes straight to `PENDING_REVIEW` |
 | | `list_posts` | List posts and their review status |
 | | `revise_draft` | Revise a draft still in `DRAFT` / `PENDING_REVIEW` (audited as the agent) |
+| imaging | `generate_image` | Generate an image with the first active image connector and attach it to an editable draft (default prompt: the draft's `image_prompt`). At most 2 per run, since each image costs money |
 | delegation | `create_subtask` | Create a subtask assigned to a teammate (starts immediately) |
 | | `list_agents` | List teammates available for delegation |
 | | `wait_for_subtasks` | Pause until all subtasks finish, then be resumed (ends the run) |

@@ -26,6 +26,9 @@ type Config struct {
 	MCPToken           string
 	// PublicURL is used to build links in notification emails.
 	PublicURL string
+	// MediaBaseURL prefixes stored images ("/media/{id}") when handing them to publishers; it must
+	// be reachable from the publishing service (e.g. http://cueflow:3000 for Postiz in compose).
+	MediaBaseURL string
 	// DigestCron, when set, sends a "pending review" summary via every active notifier.
 	DigestCron       string
 	DispatchEvery    time.Duration
@@ -55,6 +58,7 @@ func Load() (*Config, error) {
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
+	c.MediaBaseURL = env("CUEFLOW_MEDIA_BASE_URL", c.PublicURL)
 	key, err := ParseSecretKey(os.Getenv("CUEFLOW_SECRET_KEY"))
 	if err != nil {
 		return nil, err

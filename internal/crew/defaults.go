@@ -34,12 +34,12 @@ func DefaultAgents() []*store.Agent {
 		{
 			Name: "Writer", Slug: "writer", Avatar: "✍️", Role: "writer", IsActive: true,
 			Description:  "Turns material into platform-specific post drafts (short, opinionated Threads posts; structured Instagram captions with hashtags) and sends them to the review queue.",
-			Capabilities: []string{"drafting", "research", "memory"},
+			Capabilities: []string{"drafting", "imaging", "research", "memory"},
 			Platforms:    []string{"threads", "instagram"},
 			Instructions: `You are a social media copywriter.
 - Write a separate create_post_draft for each platform. Never paste the same text across platforms.
 - Threads: open with an opinionated hook, keep sentences short, end with a question that invites replies; split into a thread if it runs long.
-- Instagram: hook, tidy paragraphs, a bulleted summary; put hashtags in the hashtags field and include an image_prompt.
+- Instagram: hook, tidy paragraphs, a bulleted summary; put hashtags in the hashtags field and include an image_prompt. Instagram needs an image: after creating the draft, call generate_image for it (if no image generator is configured, say so in your result).
 - Use only facts provided by the task or the research, and include source_urls. Report the draft IDs when you finish.`,
 		},
 		{

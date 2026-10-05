@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { charCount, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
 import type { Connector, ConnectorSpec, Platform } from "@/lib/types";
 import { StringListInput, TagInput } from "./inputs";
+import { useToast } from "./providers";
 import { GenericPreview, InstagramPreview, ThreadsPreview } from "./post";
-import { Button, Card, CardHeader, Checkbox, DateTimePicker, Field, Icon, Input, Select, Textarea, cx } from "./ui";
+import { Button, Card, CardHeader, Checkbox, DateTimePicker, Field, Icon, Input, Modal, Select, Textarea, cx } from "./ui";
 
 export interface PostDraft {
   title: string;
@@ -298,7 +299,7 @@ export function PostEditor({
             />
           </Field>
           <div className="md:col-span-2">
-            <Field label="Media URLs">
+            <Field label="Media URLs" help="Uploaded and generated images are stored in CueFlow (/media/…).">
               <StringListInput
                 value={draft.media_urls}
                 disabled={readOnly}
@@ -306,6 +307,12 @@ export function PostEditor({
                 onChange={(v) => set("media_urls", v)}
               />
             </Field>
+            {!readOnly && (
+              <MediaActions
+                draft={draft}
+                onAdd={(url) => set("media_urls", [...draft.media_urls.filter((u) => u.trim()), url])}
+              />
+            )}
             {draft.media_urls.some((u) => u.trim()) && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {draft.media_urls
@@ -374,6 +381,103 @@ export function PostEditor({
           )}
         </div>
       </Card>
+    </div>
+  );
+}
+
+const ASPECTS = ["1:1", "4:5", "3:4", "9:16", "16:9", "4:3"];
+
+/** Upload an image or generate one with an image connector; both end up as /media/… URLs. */
+function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string) => void }) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [aspect, setAspect] = useState("1:1");
+  const [generating, setGenerating] = useState(false);
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const m = await api.uploadMedia(file);
+      onAdd(m.url);
+      toast.success("Image uploaded");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const openGenerate = () => {
+    setPrompt(draft.image_prompt);
+    setAspect(draft.platforms.includes("instagram") ? "4:5" : "1:1");
+    setOpen(true);
+  };
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const m = await api.generateMedia({ prompt, aspect });
+      onAdd(m.url);
+      toast.success("Image generated");
+      setOpen(false);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => void upload(e.target.files?.[0])}
+      />
+      <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading}>
+        <Icon name="plus" className="h-3.5 w-3.5" /> Upload image
+      </Button>
+      <Button size="sm" onClick={openGenerate}>
+        <Icon name="sparkle" className="h-3.5 w-3.5" /> Generate image
+      </Button>
+      <Modal
+        open={open}
+        onClose={() => !generating && setOpen(false)}
+        title="Generate image"
+        footer={
+          <>
+            <Button onClick={() => setOpen(false)} disabled={generating}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={generate} loading={generating} disabled={!prompt.trim()}>
+              Generate
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Prompt" required help="Describe the subject, style and composition. Image models handle English best.">
+            <Textarea rows={5} value={prompt} data-autofocus onChange={(e) => setPrompt(e.target.value)} />
+          </Field>
+          <Field label="Aspect ratio" help="Uses your first active image generation connector. Each image costs money.">
+            <Select value={aspect} onChange={(e) => setAspect(e.target.value)}>
+              {ASPECTS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {generating && <p className="text-xs text-zinc-500">Generating… this can take up to a minute.</p>}
+        </div>
+      </Modal>
     </div>
   );
 }

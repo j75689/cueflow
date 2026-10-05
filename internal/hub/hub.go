@@ -103,6 +103,18 @@ func (h *Hub) LLM(ctx context.Context, id uuid.UUID) (connector.LLM, *store.Conn
 	return l, c, nil
 }
 
+func (h *Hub) ImageGenerator(ctx context.Context, id uuid.UUID) (connector.ImageGenerator, *store.Connector, error) {
+	inst, c, err := h.Instance(ctx, id, false)
+	if err != nil {
+		return nil, c, err
+	}
+	g, ok := inst.(connector.ImageGenerator)
+	if !ok {
+		return nil, c, fmt.Errorf("connector %q does not generate images", c.Name)
+	}
+	return g, c, nil
+}
+
 func (h *Hub) Notifier(ctx context.Context, id uuid.UUID) (connector.Notifier, *store.Connector, error) {
 	inst, c, err := h.Instance(ctx, id, false)
 	if err != nil {

@@ -146,6 +146,7 @@ func serve() error {
 	h := hub.New(st, logger)
 	runner := pipeline.NewRunner(ctx, st, h, broker, logger, cfg.PublicURL)
 	worker := dispatch.NewWorker(st, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
+	worker.MediaBaseURL = cfg.MediaBaseURL
 	sched := scheduler.New(st, runner, h, logger, cfg.DigestCron, cfg.PublicURL)
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)

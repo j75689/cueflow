@@ -18,6 +18,8 @@ implements `Test(ctx) (*TestResult, error)`, which backs the **Test** button.
 | `search` | `Search(ctx, query, limit) ([]SearchResult, error)` | the agent's `web_search` tool |
 | `llm` | `Chat(ctx, llm.Request) (*llm.Response, error)`, `Model()` | the agent loop |
 | `notifier` | `Notify(ctx, Notification) error` | pipeline runs and the review digest |
+| `runtime` | `Launch() RuntimeLaunch` | the crew runner, for agents that run in an external ACP agent |
+| `image` | `GenerateImage(ctx, ImageRequest) ([]Image, error)` | the **Generate image** button and the agent's `generate_image` tool |
 
 Optional extras:
 
@@ -118,6 +120,18 @@ SSE or stdio, with auth headers), `ListTools`, `CallJSON` (tool errors become Go
 connector ([`internal/connectors/postiz`](../internal/connectors/postiz/postiz.go)) is the reference
 implementation, and [`internal/postizmock`](../internal/postizmock/postizmock.go) shows how to test one
 against an in-process MCP server.
+
+## Images and media
+
+Images a reviewer uploads or an image connector generates are stored by CueFlow (table `media`) and
+referenced from posts as `/media/{id}`. Publishers receive `PublishRequest.MediaURLs` as absolute URLs
+(`CUEFLOW_MEDIA_BASE_URL` + path) and `PublishRequest.Media`, where stored images carry a `Load` func
+for their bytes. Use the bytes when your service cannot reach CueFlow (CueSocial uploads them as base64);
+use the URL when it can (Postiz fetches it).
+
+An image connector returns raw bytes; CueFlow checks the type (PNG, JPEG, WebP or GIF, at most 10 MB)
+and stores the first image. Map `ImageRequest.Aspect` (one of `connector.Aspects`) to your provider's
+nearest size. Built-in: `openai_image`, `gemini_image` (AI Studio), `vertex_image`, `comfyui`.
 
 ## Per-account publishers
 

@@ -5,7 +5,7 @@
 // CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
 // service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
 //   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_post {text, accounts[], scheduled_at?, image_url?}
+//   - create_post {text, accounts[], scheduled_at?, image_url? | image_base64?}
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
 //
@@ -17,6 +17,7 @@ package cuesocial
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -219,10 +220,18 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		}
 	}
 	args := map[string]any{"text": text, "accounts": req.Accounts}
-	if len(req.MediaURLs) > 0 {
+	switch {
+	case len(req.Media) > 0 && req.Media[0].Stored:
+		// Uploaded or generated in CueFlow: send the bytes, since CueSocial cannot reach CueFlow.
+		data, _, err := req.Media[0].Load(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load image: %w", err)
+		}
+		args["image_base64"] = base64.StdEncoding.EncodeToString(data)
+	case len(req.MediaURLs) > 0:
 		u := strings.TrimSpace(req.MediaURLs[0])
 		if !strings.HasPrefix(u, "https://") {
-			return nil, fmt.Errorf("CueSocial fetches images itself and needs a public https URL, got %q", u)
+			return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
 		}
 		args["image_url"] = u
 	}

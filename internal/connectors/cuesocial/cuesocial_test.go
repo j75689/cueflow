@@ -231,3 +231,18 @@ func TestTimeoutWarnsItMayHaveGoneOut(t *testing.T) {
 		t.Fatalf("timeout: %v", err)
 	}
 }
+
+func TestStoredImageIsUploaded(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	p := newPublisher(t, f)
+	r := req("th1")
+	r.MediaURLs = []string{"http://cueflow:3000/media/abc"}
+	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0], Stored: true,
+		Load: func(context.Context) ([]byte, string, error) { return []byte("PNGDATA"), "image/png", nil }}}
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastCreate["image_base64"] != "UE5HREFUQQ==" || f.lastCreate["image_url"] != nil {
+		t.Fatalf("stored media should be sent as base64: %v", f.lastCreate)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -28,6 +30,8 @@ type Worker struct {
 	lease   time.Duration
 	timeout time.Duration
 	wake    chan struct{}
+	// MediaBaseURL turns stored media ("/media/{id}") into URLs publishers can fetch.
+	MediaBaseURL string
 }
 
 func NewWorker(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, every, lease, timeout time.Duration) *Worker {
@@ -156,13 +160,15 @@ func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.Publ
 	pctx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
 	pctx = guard.WithPublishGrant(pctx, p.ID)
+	urls, files := w.mediaFor(p)
 	res, err := pub.Publish(pctx, connector.PublishRequest{
 		PostID:      p.ID,
 		Title:       p.Title,
 		Platforms:   p.Platforms,
 		Parts:       p.Parts(),
 		Hashtags:    p.Hashtags,
-		MediaURLs:   p.MediaURLs,
+		MediaURLs:   urls,
+		Media:       files,
 		ScheduledAt: p.ScheduledAt,
 		Accounts:    p.Accounts,
 		Previous:    p.ExternalPostIDs,
@@ -191,4 +197,27 @@ func (w *Worker) resolvePublisher(ctx context.Context, p *domain.Post) (uuid.UUI
 		return uuid.Nil, err
 	}
 	return c.ID, nil
+}
+
+// mediaFor resolves a post's media for publishers: absolute URLs, and loaders for stored images.
+func (w *Worker) mediaFor(p *domain.Post) ([]string, []connector.MediaFile) {
+	urls := make([]string, 0, len(p.MediaURLs))
+	files := make([]connector.MediaFile, 0, len(p.MediaURLs))
+	for _, raw := range p.MediaURLs {
+		abs := media.Absolute(raw, w.MediaBaseURL)
+		f := connector.MediaFile{URL: abs}
+		if id, ok := media.IDFromURL(raw); ok && strings.HasPrefix(raw, media.PathPrefix) {
+			f.Stored = true
+			f.Load = func(ctx context.Context) ([]byte, string, error) {
+				m, err := w.store.GetMedia(ctx, id)
+				if err != nil {
+					return nil, "", err
+				}
+				return m.Data, m.MimeType, nil
+			}
+		}
+		urls = append(urls, abs)
+		files = append(files, f)
+	}
+	return urls, files
 }

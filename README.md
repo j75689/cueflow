@@ -76,6 +76,7 @@ sends them to Postiz.
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
 | Notifier | `smtp` (review reminders and digests) |
+| Image generation | `openai_image` (OpenAI / Azure / compatible) · `gemini_image` (AI Studio key) · `vertex_image` (Vertex AI, ADC) · `comfyui` (self-hosted) |
 
 ### LLM authentication
 
@@ -177,6 +178,7 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
+| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |

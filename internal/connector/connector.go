@@ -30,11 +30,13 @@ const (
 	// KindRuntime describes how to launch an external agent (spoken to over ACP) that can work
 	// tasks instead of the built-in LLM loop.
 	KindRuntime Kind = "runtime"
+	// KindImage generates images from text prompts.
+	KindImage Kind = "image"
 )
 
 func (k Kind) Valid() bool {
 	switch k {
-	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime:
+	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime, KindImage:
 		return true
 	}
 	return false
@@ -61,12 +63,14 @@ type Publisher interface {
 }
 
 type PublishRequest struct {
-	PostID      uuid.UUID
-	Title       string
-	Platforms   []string
-	Parts       []string // ordered thread parts; a single element for a plain post
-	Hashtags    []string
-	MediaURLs   []string
+	PostID    uuid.UUID
+	Title     string
+	Platforms []string
+	Parts     []string // ordered thread parts; a single element for a plain post
+	Hashtags  []string
+	MediaURLs []string // absolute URLs
+	// Media describes MediaURLs one to one, with the bytes of images CueFlow stores itself.
+	Media       []MediaFile
 	ScheduledAt *time.Time // nil = publish now
 	// Accounts are the account IDs chosen for this post, for publishers whose Spec has Accounts.
 	Accounts []string
@@ -78,6 +82,15 @@ type PublishRequest struct {
 type PublishResult struct {
 	ExternalIDs map[string]string `json:"external_ids"` // platform -> post id
 	Details     map[string]any    `json:"details,omitempty"`
+}
+
+// MediaFile is one attached image. Stored images (uploads and generated images) can be loaded
+// directly, for publishers whose service cannot fetch CueFlow's URLs.
+type MediaFile struct {
+	URL    string
+	Stored bool
+	// Load returns the image bytes and MIME type; it is nil unless Stored.
+	Load func(ctx context.Context) ([]byte, string, error)
 }
 
 // PartialError reports a publish that failed after something was created remotely (e.g. a post
@@ -170,6 +183,30 @@ type RuntimeLaunch struct {
 	// Model, when set, is requested from the agent (if it supports choosing one).
 	Model string
 }
+
+// ImageGenerator turns a text prompt into images.
+type ImageGenerator interface {
+	Instance
+	GenerateImage(ctx context.Context, req ImageRequest) ([]Image, error)
+}
+
+type ImageRequest struct {
+	Prompt string
+	// Aspect is one of Aspects; providers map it to their nearest supported size.
+	Aspect string
+	// N is how many images to make (at least 1).
+	N int
+}
+
+type Image struct {
+	Data     []byte
+	MimeType string
+	// RevisedPrompt is the prompt the provider actually used, when it rewrites prompts.
+	RevisedPrompt string
+}
+
+// Aspects are the aspect ratios CueFlow asks for, portrait-first for social feeds.
+var Aspects = []string{"1:1", "4:5", "3:4", "9:16", "16:9", "4:3"}
 
 // ToolLister is implemented by MCP-backed connectors so the UI can show their tools.
 type ToolLister interface {
@@ -295,6 +332,8 @@ func checkKind(k Kind, inst Instance) error {
 		_, ok = inst.(Notifier)
 	case KindRuntime:
 		_, ok = inst.(Runtime)
+	case KindImage:
+		_, ok = inst.(ImageGenerator)
 	}
 	if !ok {
 		return fmt.Errorf("instance does not implement the %s interface", k)

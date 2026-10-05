@@ -9,7 +9,7 @@ export type PostStatus =
   | "PUBLISHED"
   | "FAILED";
 
-export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime";
+export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image";
 
 export type FieldType =
   | "string"
@@ -44,6 +44,16 @@ export interface ConnectorSpec {
   accounts?: boolean;
   /** Posts through this publisher must name their accounts (CueSocial). */
   accounts_required?: boolean;
+}
+
+/** An image CueFlow stores (uploaded or generated); `url` is "/media/{id}". */
+export interface MediaItem {
+  id: string;
+  url: string;
+  mime_type: string;
+  size_bytes: number;
+  source: "upload" | "generated";
+  prompt: string;
 }
 
 /** An account a per-account publisher can post to. */

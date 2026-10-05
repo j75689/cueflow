@@ -24,6 +24,7 @@ import type {
   TaskPatch,
   Usage,
   ConnectorAccount,
+  MediaItem,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -77,14 +78,15 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const form = body instanceof FormData;
+  if (body !== undefined && !form) headers["Content-Type"] = "application/json";
 
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}${buildQuery(query)}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     });
   } catch (e) {
     throw new ApiError(0, "network", e instanceof Error ? e.message : "network error");
@@ -172,6 +174,14 @@ export const api = {
   testConnector: (id: string) => request<ConnectorTestResult>("POST", `/connectors/${id}/test`),
   connectorTools: (id: string) => request<ConnectorTool[]>("GET", `/connectors/${id}/tools`),
   connectorAccounts: (id: string) => request<ConnectorAccount[]>("GET", `/connectors/${id}/accounts`),
+
+  uploadMedia: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<MediaItem>("POST", "/media", fd);
+  },
+  generateMedia: (body: { prompt: string; aspect?: string; connector_id?: string | null }) =>
+    request<MediaItem>("POST", "/media/generate", body),
   fetchConnector: (id: string) => request<{ new_items: number }>("POST", `/connectors/${id}/fetch`),
   connectorItems: (id: string, limit = 50) =>
     request<SourceItem[]>("GET", `/connectors/${id}/items`, undefined, { limit }),
