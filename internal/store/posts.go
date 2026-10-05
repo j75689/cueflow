@@ -15,7 +15,7 @@ import (
 )
 
 const postColumns = `id, group_id, pipeline_id, run_id, task_id, publisher_connector_id, title, content, thread_parts,
-	hashtags, image_prompt, platforms, media_urls, accounts, status, review_note, source_context, error_message,
+	hashtags, image_prompt, platforms, media_urls, accounts, topic, link_url, status, review_note, source_context, error_message,
 	external_post_ids, attempts, version, scheduled_at, published_at, created_at, updated_at`
 
 func scanPost(row pgx.Row) (*domain.Post, error) {
@@ -23,7 +23,7 @@ func scanPost(row pgx.Row) (*domain.Post, error) {
 	var status string
 	var ext []byte
 	if err := row.Scan(&p.ID, &p.GroupID, &p.PipelineID, &p.RunID, &p.TaskID, &p.PublisherConnectorID, &p.Title, &p.Content,
-		&p.ThreadParts, &p.Hashtags, &p.ImagePrompt, &p.Platforms, &p.MediaURLs, &p.Accounts, &status, &p.ReviewNote,
+		&p.ThreadParts, &p.Hashtags, &p.ImagePrompt, &p.Platforms, &p.MediaURLs, &p.Accounts, &p.Topic, &p.LinkURL, &status, &p.ReviewNote,
 		&p.SourceContext, &p.ErrorMessage, &ext, &p.Attempts, &p.Version, &p.ScheduledAt, &p.PublishedAt,
 		&p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
@@ -138,6 +138,8 @@ type NewPost struct {
 	Platforms            []string
 	MediaURLs            []string
 	Accounts             []string
+	Topic                string
+	LinkURL              string
 	SourceContext        any
 	ScheduledAt          *time.Time
 }
@@ -161,11 +163,11 @@ func (s *Store) CreatePost(ctx context.Context, in NewPost, actor domain.Actor, 
 	var out *domain.Post
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		p, err := scanPost(tx.QueryRow(ctx, `INSERT INTO posts (group_id, pipeline_id, run_id, publisher_connector_id,
-			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at, task_id, accounts)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+postColumns,
+			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at, task_id, accounts, topic, link_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING `+postColumns,
 			in.GroupID, in.PipelineID, in.RunID, in.PublisherConnectorID, truncate(in.Title, 255), in.Content,
 			nonNil(in.ThreadParts), cleanTags(in.Hashtags), in.ImagePrompt, in.Platforms, nonNil(in.MediaURLs), srcCtx, in.ScheduledAt, in.TaskID,
-			nonNil(in.Accounts)))
+			nonNil(in.Accounts), strings.TrimSpace(in.Topic), strings.TrimSpace(in.LinkURL)))
 		if err != nil {
 			return err
 		}
@@ -195,6 +197,8 @@ type PostPatch struct {
 	Hashtags             *[]string
 	MediaURLs            *[]string
 	Accounts             *[]string
+	Topic                *string
+	LinkURL              *string
 	ImagePrompt          *string
 	Platforms            *[]string
 	ScheduledAt          **time.Time
@@ -237,6 +241,8 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 		setStr("title", &next.Title, patch.Title)
 		setStr("content", &next.Content, patch.Content)
 		setStr("image_prompt", &next.ImagePrompt, patch.ImagePrompt)
+		setStr("topic", &next.Topic, trimmed(patch.Topic))
+		setStr("link_url", &next.LinkURL, trimmed(patch.LinkURL))
 		setList("thread_parts", &next.ThreadParts, patch.ThreadParts)
 		if patch.Hashtags != nil {
 			h := cleanTags(*patch.Hashtags)
@@ -267,9 +273,9 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 		}
 		out, err = scanPost(tx.QueryRow(ctx, `UPDATE posts SET title=$2, content=$3, thread_parts=$4, hashtags=$5,
 			media_urls=$6, image_prompt=$7, platforms=$8, scheduled_at=$9, publisher_connector_id=$10, accounts=$11,
-			version=version+1, updated_at=NOW() WHERE id=$1 RETURNING `+postColumns,
+			topic=$12, link_url=$13, version=version+1, updated_at=NOW() WHERE id=$1 RETURNING `+postColumns,
 			id, truncate(next.Title, 255), next.Content, next.ThreadParts, next.Hashtags, next.MediaURLs,
-			next.ImagePrompt, next.Platforms, next.ScheduledAt, next.PublisherConnectorID, next.Accounts))
+			next.ImagePrompt, next.Platforms, next.ScheduledAt, next.PublisherConnectorID, next.Accounts, next.Topic, next.LinkURL))
 		if err != nil {
 			return err
 		}
@@ -565,4 +571,12 @@ func (s *Store) AddAudit(ctx context.Context, postID uuid.UUID, action domain.Ac
 		return notFound(err)
 	}
 	return insertAudit(ctx, s.pool, postID, action, actor, domain.Status(st), domain.Status(st), note, nil)
+}
+
+func trimmed(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*s)
+	return &t
 }

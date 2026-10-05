@@ -33,6 +33,8 @@ export default function NewPostPage() {
         scheduled_at: draft.scheduled_at,
         publisher_connector_id: draft.publisher_connector_id,
         accounts: draft.accounts,
+        topic: draft.topic,
+        link_url: draft.link_url,
         submit,
       });
       toast.success(submit ? "Created and sent to review" : "Draft saved");

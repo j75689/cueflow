@@ -129,6 +129,8 @@ type Post struct {
 	Platforms            []string          `json:"platforms"`
 	MediaURLs            []string          `json:"media_urls"`
 	Accounts             []string          `json:"accounts"`
+	Topic                string            `json:"topic"`    // Threads topic tag
+	LinkURL              string            `json:"link_url"` // shown as a link preview card
 	Status               Status            `json:"status"`
 	ReviewNote           string            `json:"review_note"`
 	SourceContext        json.RawMessage   `json:"source_context"`

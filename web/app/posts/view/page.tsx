@@ -38,6 +38,8 @@ function toDraft(p: Post): PostDraft {
     image_prompt: p.image_prompt ?? "",
     platforms: p.platforms ?? [],
     accounts: p.accounts ?? [],
+    topic: p.topic ?? "",
+    link_url: p.link_url ?? "",
     scheduled_at: p.scheduled_at,
     publisher_connector_id: p.publisher_connector_id,
   };

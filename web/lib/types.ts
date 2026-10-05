@@ -61,6 +61,8 @@ export interface ConnectorAccount {
   id: string;
   platform: string;
   name: string;
+  /** The service's label, e.g. brand, personal or test. */
+  tag?: string;
 }
 
 export interface Platform {
@@ -120,6 +122,10 @@ export interface Post {
   platforms: string[];
   media_urls: string[];
   accounts: string[];
+  /** Threads topic tag. */
+  topic: string;
+  /** URL shown as a link preview card. */
+  link_url: string;
   status: PostStatus;
   review_note: string;
   source_context: SourceContext | null;

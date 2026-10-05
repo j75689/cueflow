@@ -5,7 +5,7 @@
 // CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
 // service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
 //   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_post {parts:[{text, image_urls?, images_base64?}], accounts[], scheduled_at?}
+//   - create_post {parts:[{text, image_urls?, images_base64?}], accounts[], scheduled_at?, topic?, link?}
 //     (several parts make a Threads reply chain; on Instagram they become one caption and carousel)
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
@@ -80,6 +80,7 @@ type account struct {
 	ID       string `json:"id"`
 	Platform string `json:"platform"`
 	Username string `json:"username"`
+	Tag      string `json:"tag"` // brand, personal or test
 }
 
 func (a account) label() string { return a.Platform + " @" + a.Username }
@@ -152,7 +153,7 @@ func (p *Publisher) ListAccounts(ctx context.Context) ([]connector.Account, erro
 	}
 	accounts := make([]connector.Account, 0, len(out.Accounts))
 	for _, a := range out.Accounts {
-		accounts = append(accounts, connector.Account{ID: a.ID, Platform: a.Platform, Name: "@" + a.Username})
+		accounts = append(accounts, connector.Account{ID: a.ID, Platform: a.Platform, Name: "@" + a.Username, Tag: a.Tag})
 	}
 	return accounts, nil
 }
@@ -214,6 +215,16 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		return nil, err
 	}
 	args := map[string]any{"parts": parts, "accounts": req.Accounts}
+	topic, link, err := extras(req, parts)
+	if err != nil {
+		return nil, err
+	}
+	if topic != "" {
+		args["topic"] = topic
+	}
+	if link != "" {
+		args["link"] = link
+	}
 	if req.ScheduledAt != nil && req.ScheduledAt.After(p.now()) {
 		args["scheduled_at"] = req.ScheduledAt.UTC().Format(time.RFC3339)
 	}
@@ -302,6 +313,39 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 		parts[0]["images_base64"] = b64
 	}
 	return parts, nil
+}
+
+const threadsMaxTopic = 50
+
+// extras checks the Threads topic tag and link card. CueSocial puts the topic on the first part and
+// the link card on the last part without images; Instagram ignores both.
+func extras(req connector.PublishRequest, parts []map[string]any) (string, string, error) {
+	topic := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(req.Topic), "#"))
+	if topic != "" {
+		if n := utf8.RuneCountInString(topic); n > threadsMaxTopic {
+			return "", "", fmt.Errorf("a Threads topic is at most %d characters; %q has %d", threadsMaxTopic, topic, n)
+		}
+		if strings.ContainsAny(topic, ".&") {
+			return "", "", fmt.Errorf("a Threads topic can't contain . or &: %q", topic)
+		}
+	}
+	link := strings.TrimSpace(req.Link)
+	if link != "" {
+		u, err := url.Parse(link)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "", "", fmt.Errorf("the link card needs a full http(s) URL, got %q", link)
+		}
+		textOnly := false
+		for _, p := range parts {
+			if p["image_urls"] == nil && p["images_base64"] == nil {
+				textOnly = true
+			}
+		}
+		if !textOnly {
+			return "", "", errors.New("a link card needs a part without images: add a text-only thread part for it")
+		}
+	}
+	return topic, link, nil
 }
 
 // sentErr classifies a failed call. A tool error means CueSocial rejected the request, so nothing

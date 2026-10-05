@@ -72,6 +72,10 @@ type PublishRequest struct {
 	Platforms []string
 	Parts     []string // ordered thread parts; a single element for a plain post
 	Hashtags  []string
+	// Topic is a Threads topic tag and Link a URL shown as a link preview card; publishers
+	// that have no such thing ignore them.
+	Topic     string
+	Link      string
 	MediaURLs []string // absolute URLs
 	// Media describes MediaURLs one to one, with the bytes of images CueFlow stores itself.
 	Media       []MediaFile
@@ -118,6 +122,8 @@ type Account struct {
 	ID       string `json:"id"`
 	Platform string `json:"platform"`
 	Name     string `json:"name"`
+	// Tag is the service's label for the account, e.g. brand, personal or test.
+	Tag string `json:"tag,omitempty"`
 }
 
 // Source produces raw material for the agent.

@@ -167,6 +167,8 @@ func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.Publ
 		Platforms:   p.Platforms,
 		Parts:       p.Parts(),
 		Hashtags:    p.Hashtags,
+		Topic:       p.Topic,
+		Link:        p.LinkURL,
 		MediaURLs:   urls,
 		Media:       files,
 		ScheduledAt: p.ScheduledAt,

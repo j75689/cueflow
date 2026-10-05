@@ -57,7 +57,10 @@ func TestPerAccountPublishAndPartialRetry(t *testing.T) {
 
 	var post domain.Post
 	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "accounts": []string{"a1"},
-		"publisher_connector_id": pub.ID, "submit": true}, &post)
+		"topic": " AI 新聞 ", "link_url": "https://example.com/a", "publisher_connector_id": pub.ID, "submit": true}, &post)
+	if post.Topic != "AI 新聞" || post.LinkURL != "https://example.com/a" {
+		t.Fatalf("topic/link not stored: %q %q", post.Topic, post.LinkURL)
+	}
 	if code := e.do("PATCH", "/posts/"+post.ID.String(), map[string]any{"version": post.Version, "accounts": []string{"a1", "a2"}}, &post); code != 200 {
 		t.Fatalf("update accounts: %d", code)
 	}
@@ -80,7 +83,8 @@ func TestPerAccountPublishAndPartialRetry(t *testing.T) {
 	}
 	accountsMu.Lock()
 	defer accountsMu.Unlock()
-	if len(accountsReqs) != 2 || len(accountsReqs[0].Accounts) != 2 || accountsReqs[1].Previous["remote"] != "r1" {
+	if len(accountsReqs) != 2 || len(accountsReqs[0].Accounts) != 2 || accountsReqs[1].Previous["remote"] != "r1" ||
+		accountsReqs[0].Topic != "AI 新聞" || accountsReqs[0].Link != "https://example.com/a" {
 		t.Fatalf("requests: %+v", accountsReqs)
 	}
 }

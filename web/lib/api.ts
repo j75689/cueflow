@@ -126,6 +126,8 @@ export type PostPatch = Partial<
     | "hashtags"
     | "media_urls"
     | "accounts"
+    | "topic"
+    | "link_url"
     | "image_prompt"
     | "scheduled_at"
     | "publisher_connector_id"
@@ -136,7 +138,15 @@ export type PostCreate = Pick<Post, "title" | "content" | "platforms"> &
   Partial<
     Pick<
       Post,
-      "thread_parts" | "hashtags" | "media_urls" | "accounts" | "image_prompt" | "scheduled_at" | "publisher_connector_id"
+      | "thread_parts"
+      | "hashtags"
+      | "media_urls"
+      | "accounts"
+      | "topic"
+      | "link_url"
+      | "image_prompt"
+      | "scheduled_at"
+      | "publisher_connector_id"
     >
   > & {
     submit?: boolean;

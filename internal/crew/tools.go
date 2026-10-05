@@ -120,6 +120,8 @@ func init() {
 				"thread_parts": strList("Ordered thread parts for thread-capable platforms (optional)"),
 				"hashtags":     strList("Hashtags without '#'"),
 				"image_prompt": str("Prompt for an accompanying image (Instagram)"),
+				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
+				"link":         str("Optional URL shown as a link preview card (Threads), e.g. the main source"),
 				"source_urls":  strList("URLs backing the claims in this post"),
 			}, "platform", "content"), run: toolCreateDraft},
 		{name: "list_posts", capability: "drafting", description: "List recent posts and drafts with their review status.",
@@ -128,7 +130,8 @@ func init() {
 			schema: obj(map[string]any{
 				"post_id": str("Post ID"), "title": str("New title"), "content": str("New body"),
 				"thread_parts": strList("New thread parts"), "hashtags": strList("New hashtags"),
-				"image_prompt": str("New image prompt"), "note": str("Why you changed it"),
+				"image_prompt": str("New image prompt"), "topic": str("New Threads topic tag (empty removes it)"),
+				"link": str("New link card URL (empty removes it)"), "note": str("Why you changed it"),
 			}, "post_id"), run: toolReviseDraft},
 
 		// --- imaging ---
@@ -391,6 +394,8 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		ThreadParts []string `json:"thread_parts"`
 		Hashtags    []string `json:"hashtags"`
 		ImagePrompt string   `json:"image_prompt"`
+		Topic       string   `json:"topic"`
+		Link        string   `json:"link"`
 		SourceURLs  []string `json:"source_urls"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
@@ -411,7 +416,7 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	taskID := e.task.ID
 	post, err := e.c.store.CreatePost(ctx, store.NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
-		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform},
+		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
 		SourceContext: map[string]any{"task": e.task.Number, "agent": e.agent.Name, "urls": a.SourceURLs},
 	}, domain.ActorAgent, true)
 	if err != nil {
@@ -471,6 +476,8 @@ func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		ThreadParts *[]string `json:"thread_parts"`
 		Hashtags    *[]string `json:"hashtags"`
 		ImagePrompt *string   `json:"image_prompt"`
+		Topic       *string   `json:"topic"`
+		Link        *string   `json:"link"`
 		Note        string    `json:"note"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
@@ -492,7 +499,8 @@ func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		note += ": " + a.Note
 	}
 	p, err := e.c.store.UpdatePostAs(ctx, id, cur.Version, store.PostPatch{Title: a.Title, Content: a.Content,
-		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt}, domain.ActorAgent, note)
+		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt, Topic: a.Topic, LinkURL: a.Link},
+		domain.ActorAgent, note)
 	if err != nil {
 		return "", err
 	}

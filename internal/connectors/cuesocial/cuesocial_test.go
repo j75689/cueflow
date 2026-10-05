@@ -44,7 +44,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("list_accounts")
 			return jsonResult(map[string]any{"accounts": []map[string]any{
-				{"id": "th1", "platform": "threads", "username": "brand"},
+				{"id": "th1", "platform": "threads", "username": "brand", "tag": "brand"},
 				{"id": "th2", "platform": "threads", "username": "me"},
 				{"id": "ig1", "platform": "instagram", "username": "brand.ig"},
 			}}), nil
@@ -289,5 +289,50 @@ func TestThreadWithImages(t *testing.T) {
 	}
 	if len(first["image_urls"].([]any)) != 1 || len(first["images_base64"].([]any)) != 1 || parts[1].(map[string]any)["image_urls"] != nil {
 		t.Fatalf("all images belong on the first part: %v", parts)
+	}
+}
+
+func TestTopicAndLink(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	p := newPublisher(t, f)
+	r := req("th1")
+	r.Topic, r.Link = "#日文學習", "https://futureindex.ai/blog/1"
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastCreate["topic"] != "日文學習" || f.lastCreate["link"] != "https://futureindex.ai/blog/1" {
+		t.Fatalf("extras: %v", f.lastCreate)
+	}
+	accts, _ := p.ListAccounts(context.Background())
+	if accts[0].Tag != "brand" {
+		t.Fatalf("account tag: %+v", accts[0])
+	}
+
+	bad := map[string]connector.PublishRequest{}
+	b := req("th1")
+	b.Topic = "a.b"
+	bad["can't contain"] = b
+	b = req("th1")
+	b.Topic = strings.Repeat("字", 51)
+	bad["at most 50"] = b
+	b = req("th1")
+	b.Link = "futureindex.ai"
+	bad["full http(s) URL"] = b
+	b = req("th1")
+	b.Link = "https://futureindex.ai"
+	b.MediaURLs = []string{"https://cdn.example.com/a.png"}
+	bad["part without images"] = b
+	for want, r := range bad {
+		if _, err := p.Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v", want, err)
+		}
+	}
+	// A text-only second part can carry the card while the first holds the image.
+	ok := req("th1")
+	ok.Parts = []string{"with image", "read more"}
+	ok.Link = "https://futureindex.ai"
+	ok.MediaURLs = []string{"https://cdn.example.com/a.png"}
+	if _, err := p.Publish(context.Background(), ok); err != nil {
+		t.Fatalf("link on a text-only part: %v", err)
 	}
 }

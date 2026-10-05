@@ -20,10 +20,14 @@ import (
 func notesServer(t *testing.T, created *atomic.Int32) *httptest.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "notes", Version: "test"}, nil)
 	ro, destructive := true, true
-	text := func(s string) *mcp.CallToolResult { return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}} }
+	text := func(s string) *mcp.CallToolResult {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
+	}
 	obj := map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string"}}}
 	srv.AddTool(&mcp.Tool{Name: "search_notes", InputSchema: obj, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: ro}},
-		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) { return text("note: launch is Friday"), nil })
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return text("note: launch is Friday"), nil
+		})
 	srv.AddTool(&mcp.Tool{Name: "create_page", InputSchema: obj},
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			created.Add(1)

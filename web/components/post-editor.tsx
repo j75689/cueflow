@@ -19,6 +19,8 @@ export interface PostDraft {
   image_prompt: string;
   platforms: string[];
   accounts: string[];
+  topic: string;
+  link_url: string;
   scheduled_at: string | null;
   publisher_connector_id: string | null;
 }
@@ -32,6 +34,8 @@ export const emptyDraft: PostDraft = {
   image_prompt: "",
   platforms: [],
   accounts: [],
+  topic: "",
+  link_url: "",
   scheduled_at: null,
   publisher_connector_id: null,
 };
@@ -290,6 +294,25 @@ export function PostEditor({
           <Field label="Hashtags" help="Without the #. Press Enter or comma to add.">
             <TagInput value={draft.hashtags} prefix="#" disabled={readOnly} onChange={(v) => set("hashtags", v)} />
           </Field>
+          <Field label="Topic" help="Threads topic tag: one, up to 50 characters, no . or &. Other platforms ignore it.">
+            <Input
+              value={draft.topic}
+              disabled={readOnly}
+              placeholder="e.g. AI 新聞"
+              onChange={(e) => set("topic", e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Link card"
+            help="Shown as a link preview on Threads, on the last part without images (CueSocial)."
+          >
+            <Input
+              value={draft.link_url}
+              disabled={readOnly}
+              placeholder="https://…"
+              onChange={(e) => set("link_url", e.target.value)}
+            />
+          </Field>
           <Field label="Image prompt" help="Suggested by the agent for image generation.">
             <Textarea
               rows={3}
@@ -541,7 +564,7 @@ function AccountPicker({
                 .map((a) => (
                   <Checkbox
                     key={a.id}
-                    label={a.name}
+                    label={a.tag ? `${a.name} · ${a.tag}` : a.name}
                     disabled={readOnly}
                     checked={value.includes(a.id)}
                     onChange={(on) => toggle(a.id, on)}
