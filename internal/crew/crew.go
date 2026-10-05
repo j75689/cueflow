@@ -281,7 +281,7 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		memories, _ = c.store.Memories(ctx, a.ID, "", 30)
 	}
 	system := buildSystemPrompt(a, task, team, memories)
-	available := toolsFor(a)
+	available := c.agentTools(ctx, a)
 	byName := map[string]tool{}
 	llmTools := make([]llm.Tool, 0, len(available))
 	for _, t := range available {
@@ -325,6 +325,12 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		}
 		for _, call := range resp.Message.ToolCalls {
 			run.ToolCalls++
+			if env.outcome != nil && env.outcome.kind == "approval" {
+				// The run is pausing for a human decision; don't act on later calls in this turn.
+				msgs = append(msgs, llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, IsError: true,
+					Content: "Not run: this task is waiting for the human to approve an earlier call."})
+				continue
+			}
 			result, isErr := c.execTool(agentCtx, env, byName, call)
 			msgs = append(msgs, llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Content: result, IsError: isErr})
 		}
@@ -385,6 +391,8 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		}
 	case "ask":
 		c.say(ctx, task.ID, a, "question", out.text, nil)
+	case "approval":
+		// The approval request is already in the thread; wait for the human's decision.
 	case "wait":
 		c.system(ctx, task.ID, out.text)
 		next = store.TaskBlocked

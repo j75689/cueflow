@@ -29,23 +29,27 @@ type Connector struct {
 	LastStatus    *string        `json:"last_status"`
 	LastError     string         `json:"last_error"`
 	LastCheckedAt *time.Time     `json:"last_checked_at"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// ToolPermissions maps tool name -> allow|ask|deny for tool servers (kind "tools").
+	ToolPermissions map[string]string `json:"tool_permissions"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 
 	secrets []byte
 }
 
 const connectorColumns = `id, name, kind, type, is_active, config, secrets, last_status, COALESCE(last_error,''),
-	last_checked_at, created_at, updated_at`
+	last_checked_at, created_at, updated_at, tool_permissions`
 
 func (s *Store) scanConnector(row pgx.Row) (*Connector, error) {
 	var c Connector
 	var kind string
-	var cfg []byte
+	var cfg, perms []byte
 	if err := row.Scan(&c.ID, &c.Name, &kind, &c.Type, &c.IsActive, &cfg, &c.secrets, &c.LastStatus,
-		&c.LastError, &c.LastCheckedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&c.LastError, &c.LastCheckedAt, &c.CreatedAt, &c.UpdatedAt, &perms); err != nil {
 		return nil, err
 	}
+	c.ToolPermissions = map[string]string{}
+	_ = json.Unmarshal(perms, &c.ToolPermissions)
 	c.Kind = connector.Kind(kind)
 	c.Config = map[string]any{}
 	_ = json.Unmarshal(cfg, &c.Config)
@@ -355,3 +359,19 @@ func (s *Store) ReencryptConnectorSecrets(ctx context.Context, dryRun bool) (*Ro
 }
 
 var errUndecryptable = errors.New("undecryptable connector secrets")
+
+// SetToolPermissions replaces a tool server's per-tool permissions.
+func (s *Store) SetToolPermissions(ctx context.Context, id uuid.UUID, perms map[string]string) error {
+	raw, err := json.Marshal(perms)
+	if err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE connectors SET tool_permissions=$2, updated_at=NOW() WHERE id=$1`, id, raw)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}

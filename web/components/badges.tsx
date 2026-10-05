@@ -87,6 +87,7 @@ export const KIND_LABEL: Record<string, string> = {
   notifier: "Notifiers",
   runtime: "Agent runtimes",
   image: "Image generation",
+  tools: "MCP tool servers",
 };
 
-export const KIND_ORDER = ["llm", "runtime", "image", "source", "search", "publisher", "notifier"];
+export const KIND_ORDER = ["llm", "runtime", "image", "tools", "source", "search", "publisher", "notifier"];

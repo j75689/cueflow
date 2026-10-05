@@ -65,7 +65,7 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	}
 
 	env := &runEnv{c: c, task: task, agent: a}
-	token, mrun, unregister := c.registerMCPRun(env)
+	token, mrun, unregister := c.registerMCPRun(ctx, env)
 	defer unregister()
 	defer func() {
 		if env.searcher != nil {

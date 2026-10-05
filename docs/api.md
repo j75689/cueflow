@@ -125,6 +125,8 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 | DELETE | `/connectors/{id}` | | |
 | POST | `/connectors/{id}/test` | | → `{"ok":true,"message":"Connected, 4 tools","details":{...}}` |
 | GET | `/connectors/{id}/tools` | | MCP-backed connectors only → `[{"name","description","agent_allowed":false,"reason":"publishing tool"}]` |
+| GET | `/connectors/{id}/tool-permissions` | | MCP tool servers only → `{"tools":[{"name","description","input_schema","read_only","destructive","risky","default","permission"}]}` (`permission` is the stored value or the default) |
+| PUT | `/connectors/{id}/tool-permissions` | `{permissions:{"tool":"allow|ask|deny"}}` | replaces the stored permissions; tools left out use the default |
 | GET | `/connectors/{id}/accounts` | | Per-account publishers only (connector type with `"accounts":true` in `/meta`; `"accounts_required":true` when every post must name its accounts) → `[{"id","platform","name"}]`; `400` for other connectors, `502` if the service is unreachable |
 | POST | `/connectors/{id}/fetch` | | `source` kind only, pulls now → `{"new_items":3}` |
 | GET | `/connectors/{id}/items?limit=50` | | `source` kind only → `[SourceItem]` |
@@ -181,6 +183,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
   "search_connector_id":"uuid|null",       // null = first active search connector
   "runtime_connector_id":"uuid|null",      // external ACP agent runtime; null = built-in LLM loop
   "source_connector_ids":["uuid"],         // sources this agent may read/fetch
+  "tool_connector_ids":["uuid"],           // MCP tool servers this agent may use (kind "tools")
   "language":"en","platforms":["threads","instagram"],
   "max_turns":12,"is_active":true,
   "stats":{"open_tasks":2,"running":1},
@@ -243,6 +246,8 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 | POST | `/tasks/{id}/run` | | start now (→ `TODO`) |
 | POST | `/tasks/{id}/cancel` | | stop the running agent (→ `WAITING_HUMAN`) |
 | GET | `/tasks/{id}/runs` | | → `[AgentRun]` newest first |
+| GET | `/tasks/{id}/approvals` | | → `[ToolApproval]` oldest first: `{"id","task_id","agent_id","connector_id","server_name","tool","arguments":{},"status":"pending|approved|rejected","result","is_error","note","created_at","decided_at"}` |
+| POST | `/tasks/{id}/approvals/{approvalId}` | `{decision:"approve"|"reject", note?}` | approve runs the tool now and posts its result to the thread; either way the agent resumes once nothing is pending. `400` if already decided |
 
 `TaskMessage`: `{"id","task_id","seq","author_type":"human|agent|system|tool","agent_id":"uuid|null",
 "agent":{"name","avatar","slug"}|null,"kind":"message|tool_call|tool_result|status|question|result","content":"...",

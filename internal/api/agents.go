@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -45,6 +48,7 @@ type agentBody struct {
 	SearchConnectorID  nullableID   `json:"search_connector_id"`
 	RuntimeConnectorID nullableID   `json:"runtime_connector_id"`
 	SourceConnectorIDs *[]uuid.UUID `json:"source_connector_ids"`
+	ToolConnectorIDs   *[]uuid.UUID `json:"tool_connector_ids"`
 	Language           *string      `json:"language"`
 	Platforms          *[]string    `json:"platforms"`
 	MaxTurns           *int         `json:"max_turns"`
@@ -66,6 +70,9 @@ func (b *agentBody) apply(a *store.Agent) {
 	}
 	if b.SourceConnectorIDs != nil {
 		a.SourceConnectorIDs = *b.SourceConnectorIDs
+	}
+	if b.ToolConnectorIDs != nil {
+		a.ToolConnectorIDs = *b.ToolConnectorIDs
 	}
 	if b.Platforms != nil {
 		a.Platforms = *b.Platforms
@@ -95,6 +102,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	a := &store.Agent{IsActive: true, Language: "en", MaxTurns: 12}
 	body.apply(a)
+	if err := s.checkToolServers(r.Context(), a.ToolConnectorIDs); err != nil {
+		s.fail(w, err)
+		return
+	}
 	out, err := s.Store.CreateAgent(r.Context(), a)
 	if err != nil {
 		s.fail(w, err)
@@ -121,6 +132,10 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.apply(a)
+	if err := s.checkToolServers(r.Context(), a.ToolConnectorIDs); err != nil {
+		s.fail(w, err)
+		return
+	}
 	out, err := s.Store.UpdateAgent(r.Context(), a)
 	if err != nil {
 		s.fail(w, err)
@@ -202,4 +217,15 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkToolServers ensures every id names an MCP tool server connector.
+func (s *Server) checkToolServers(ctx context.Context, ids []uuid.UUID) error {
+	for _, id := range ids {
+		c, err := s.Store.GetConnector(ctx, id)
+		if err != nil || c.Kind != connector.KindTools {
+			return &store.ValidationError{Msg: fmt.Sprintf("connector %s is not an MCP tool server", id)}
+		}
+	}
+	return nil
 }

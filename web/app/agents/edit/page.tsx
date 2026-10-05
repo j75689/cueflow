@@ -62,6 +62,7 @@ const blank = (): AgentInput => ({
   runtime_connector_id: null,
   search_connector_id: null,
   source_connector_ids: [],
+  tool_connector_ids: [],
   language: "en",
   platforms: ["threads"],
   max_turns: 12,
@@ -110,6 +111,7 @@ function AgentEditor() {
       runtime_connector_id: a.runtime_connector_id ?? null,
       search_connector_id: a.search_connector_id,
       source_connector_ids: a.source_connector_ids ?? [],
+      tool_connector_ids: a.tool_connector_ids ?? [],
       language: a.language,
       platforms: a.platforms ?? [],
       max_turns: a.max_turns,
@@ -416,7 +418,11 @@ function AgentEditor() {
               </Field>
               <Field
                 label="LLM"
-                help={form.runtime_connector_id ? "Not used while an external runtime is selected." : undefined}
+                help={
+                  form.runtime_connector_id
+                    ? "Not used while an external runtime is selected."
+                    : undefined
+                }
               >
                 <Select
                   disabled={!!form.runtime_connector_id}
@@ -473,6 +479,31 @@ function AgentEditor() {
                         )
                       }
                       label={c.name}
+                    />
+                  ))}
+                </div>
+              </Field>
+              <Field
+                label="MCP tool servers"
+                help="External tools this agent may use. Set what each tool may do on the server's connector page (allow, ask you first, or deny)."
+              >
+                <div className="space-y-1.5">
+                  {byKind("tools").length === 0 && (
+                    <p className="text-xs text-zinc-500">
+                      No MCP servers yet. Add one under Connectors.
+                    </p>
+                  )}
+                  {byKind("tools").map((c) => (
+                    <Checkbox
+                      key={c.id}
+                      checked={form.tool_connector_ids.includes(c.id)}
+                      onChange={(v) =>
+                        set(
+                          "tool_connector_ids",
+                          toggleIn(form.tool_connector_ids, c.id, v),
+                        )
+                      }
+                      label={`${c.name}${!c.is_active ? " (inactive)" : ""}`}
                     />
                   ))}
                 </div>

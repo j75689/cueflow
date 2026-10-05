@@ -114,6 +114,28 @@ func CallJSON(ctx context.Context, cs *mcp.ClientSession, name string, args any)
 	return json.Marshal(text)
 }
 
+// CallText invokes a tool and returns its text content. A tool-level failure (isError) is not
+// a Go error: the caller passes the text on, flagged.
+func CallText(ctx context.Context, cs *mcp.ClientSession, name string, args json.RawMessage) (string, bool, error) {
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`)
+	}
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return "", false, fmt.Errorf("mcp: tools/call %s: %w", name, err)
+	}
+	text := textOf(res)
+	if text == "" && res.StructuredContent != nil {
+		if b, err := json.Marshal(res.StructuredContent); err == nil {
+			text = string(b)
+		}
+	}
+	if text == "" && !res.IsError {
+		text = "(no output)"
+	}
+	return text, res.IsError, nil
+}
+
 func textOf(res *mcp.CallToolResult) string {
 	var parts []string
 	for _, c := range res.Content {

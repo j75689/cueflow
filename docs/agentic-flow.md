@@ -297,6 +297,26 @@ sequenceDiagram
   last message, `max_turn_requests`/`max_tokens` → turn limit, `refusal` → failed, timeout → failed.
 - **Tokens.** Usage is recorded when the agent reports it in the prompt result.
 
+## 11b. External tools (MCP servers)
+
+An operator can add an **MCP server** connector (kind `tools`: Streamable HTTP, SSE or stdio) and
+attach it to agents (`tool_connector_ids`). Its tools appear to those agents as `<server>__<tool>`,
+next to the built-in tools, for both the built-in loop and ACP runtimes.
+
+Each tool has a permission, set on the connector page:
+
+| Permission | Effect |
+|---|---|
+| `allow` | the agent calls it directly |
+| `ask` | the call is recorded (`tool_approvals`), shown in the task thread as an approval card, and the run ends with the task in `WAITING_HUMAN`. **Approve & run** executes the call server-side and posts the result to the thread; **Reject** posts the refusal (with an optional note). Once no approval is pending, the task goes back to `TODO` and the agent resumes with the outcome in its brief |
+| `deny` | the agent never sees it |
+
+Tools without a stored permission use the default: `allow` when the server marks them read-only (or the
+name reads like a lookup: get, list, search...), otherwise `ask`. Tools that look like they publish,
+message people, delete data or move money are flagged *risky*; allowing one asks for confirmation. A
+server that adds tools later gets the defaults for them, so no new tool runs unattended unless it is
+read-only. Permissions are the operator's call: an allowed tool runs outside CueFlow's review.
+
 ## 12. End-to-end example
 
 In Command, the user types: "Every morning at 8, summarize AI news and draft a Threads post".

@@ -25,6 +25,9 @@ import type {
   Usage,
   ConnectorAccount,
   MediaItem,
+  ToolApproval,
+  ToolPermission,
+  ToolPermissionValue,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -174,6 +177,14 @@ export const api = {
   testConnector: (id: string) => request<ConnectorTestResult>("POST", `/connectors/${id}/test`),
   connectorTools: (id: string) => request<ConnectorTool[]>("GET", `/connectors/${id}/tools`),
   connectorAccounts: (id: string) => request<ConnectorAccount[]>("GET", `/connectors/${id}/accounts`),
+  toolPermissions: (id: string) => request<{ tools: ToolPermission[] }>("GET", `/connectors/${id}/tool-permissions`),
+  setToolPermissions: (id: string, permissions: Record<string, ToolPermissionValue>) =>
+    request<{ permissions: Record<string, ToolPermissionValue> }>("PUT", `/connectors/${id}/tool-permissions`, {
+      permissions,
+    }),
+  taskApprovals: (id: string) => request<ToolApproval[]>("GET", `/tasks/${id}/approvals`),
+  decideApproval: (taskId: string, approvalId: string, decision: "approve" | "reject", note?: string) =>
+    request<ToolApproval>("POST", `/tasks/${taskId}/approvals/${approvalId}`, { decision, note }),
 
   uploadMedia: (file: File) => {
     const fd = new FormData();

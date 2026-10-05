@@ -9,7 +9,7 @@ export type PostStatus =
   | "PUBLISHED"
   | "FAILED";
 
-export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image";
+export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image" | "tools";
 
 export type FieldType =
   | "string"
@@ -266,6 +266,8 @@ export interface Agent {
   /** External ACP agent runtime; null = built-in LLM loop. */
   runtime_connector_id: string | null;
   source_connector_ids: string[];
+  /** MCP tool servers this agent may use (per-tool permissions live on the connector). */
+  tool_connector_ids: string[];
   language: string;
   platforms: string[];
   max_turns: number;
@@ -358,7 +360,35 @@ export type TaskPatch = Partial<
   Pick<Task, "title" | "description" | "status" | "priority" | "labels" | "assignee_agent_id" | "due_at" | "position">
 >;
 
-export type TaskMessageKind = "message" | "tool_call" | "tool_result" | "status" | "question" | "result";
+export type TaskMessageKind = "message" | "tool_call" | "tool_result" | "status" | "question" | "result" | "approval";
+
+export type ToolPermissionValue = "allow" | "ask" | "deny";
+
+/** A tool of an MCP tool server with its effective permission. */
+export interface ToolPermission {
+  name: string;
+  description: string;
+  read_only: boolean;
+  destructive: boolean;
+  risky: boolean;
+  default: ToolPermissionValue;
+  permission: ToolPermissionValue;
+}
+
+/** An agent's call to an "ask" tool. */
+export interface ToolApproval {
+  id: string;
+  task_id: string;
+  server_name: string;
+  tool: string;
+  arguments: unknown;
+  status: "pending" | "approved" | "rejected";
+  result: string;
+  is_error: boolean;
+  note: string;
+  created_at: string;
+  decided_at: string | null;
+}
 
 export interface TaskMessage {
   id: string;

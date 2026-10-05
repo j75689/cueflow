@@ -285,6 +285,23 @@ sequenceDiagram
 - **結果對應**：有呼叫終止型工具就以它為準；否則 `end_turn` → 完成（以 agent 最後一則訊息為結果），`max_turn_requests`／`max_tokens` → 回合用盡，`refusal` → 失敗，逾時 → 失敗。
 - **Token 用量**：agent 在 prompt 結果中回報時才會記錄。
 
+## 11b. 外部工具（MCP server）
+
+操作者可以新增 **MCP server** connector（類型 `tools`，支援 Streamable HTTP、SSE、stdio），並指定給 agent 使用
+（`tool_connector_ids`）。它的工具會以 `<server>__<tool>` 的名稱出現在這些 agent 的工具清單裡，內建 loop 與 ACP runtime 都適用。
+
+每個工具在 connector 頁面設定權限：
+
+| 權限 | 效果 |
+|---|---|
+| `allow` | agent 直接呼叫 |
+| `ask` | 呼叫會先記錄（`tool_approvals`），在任務對話顯示核准卡片，本次執行結束、任務停在 `WAITING_HUMAN`。按 **Approve & run** 由伺服器端執行並把結果寫回對話；按 **Reject** 寫回拒絕（可附說明）。沒有待核准的呼叫後，任務回到 `TODO`，agent 帶著結果繼續 |
+| `deny` | agent 看不到這個工具 |
+
+沒有設定過的工具用預設值：server 標示唯讀（或名稱像查詢：get、list、search…）就是 `allow`，其他是 `ask`。
+看起來會發文、傳訊息、刪資料或動到金流的工具會標成 *risky*，要改成允許時會再確認一次。server 之後新增的工具也套用預設值，
+所以除非是唯讀，新工具不會在沒人看的情況下執行。權限由操作者自行決定：允許的工具會在 CueFlow 審核流程之外執行。
+
 ## 12. 端到端範例
 
 使用者在 Command 輸入：「每天早上 8 點整理 AI 新聞並寫成 Threads 草稿」。

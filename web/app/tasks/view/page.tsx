@@ -52,6 +52,7 @@ import type {
   Agent,
   TaskDetail,
   TaskMessage,
+  ToolApproval,
   TaskPatch,
   TaskPriority,
   TaskStatus,
@@ -407,6 +408,18 @@ function Thread({
     pinned.current = true; // your own message always scrolls into view
     onSent();
   };
+  // Tool calls waiting for (or decided by) the human; refreshed as the thread grows.
+  const hasApprovals = messages.some((m) => m.kind === "approval");
+  const approvals = useAsync(
+    () =>
+      hasApprovals
+        ? api.taskApprovals(task.id)
+        : Promise.resolve([] as ToolApproval[]),
+    [task.id, hasApprovals, messages.length],
+  );
+  const approvalById = Object.fromEntries(
+    (approvals.data ?? []).map((a) => [a.id, a]),
+  );
 
   return (
     <Card>
@@ -430,9 +443,21 @@ function Thread({
               : "Assign an agent to get started."}
           </p>
         )}
-        {messages.map((m) => (
-          <MessageRow key={m.id} m={m} />
-        ))}
+        {messages.map((m) =>
+          m.kind === "approval" ? (
+            <ApprovalCard
+              key={m.id}
+              m={m}
+              approval={approvalById[String(m.data?.approval_id ?? "")]}
+              onDecided={() => {
+                void approvals.reload();
+                handleSent();
+              }}
+            />
+          ) : (
+            <MessageRow key={m.id} m={m} />
+          ),
+        )}
         {task.running && (
           <div className="flex items-center gap-2 text-sm text-zinc-500">
             <AgentAvatar agent={task.assignee} size="sm" />
@@ -472,6 +497,139 @@ function argSummary(args: unknown): string {
     : s;
 }
 
+/** An agent's request to run an "ask" tool, with Approve / Reject while pending. */
+function ApprovalCard({
+  m,
+  approval,
+  onDecided,
+}: {
+  m: TaskMessage;
+  approval: ToolApproval | undefined;
+  onDecided: () => void;
+}) {
+  const toast = useToast();
+  const dialog = useDialog();
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [showResult, setShowResult] = useState(false);
+  const tool = String(m.data?.tool ?? approval?.tool ?? "tool");
+  const server = String(m.data?.server ?? approval?.server_name ?? "");
+  const args = JSON.stringify(
+    m.data?.arguments ?? approval?.arguments ?? {},
+    null,
+    2,
+  );
+  const status = approval?.status;
+
+  const decide = async (decision: "approve" | "reject") => {
+    if (!approval) return;
+    let note: string | undefined;
+    if (decision === "reject") {
+      const v = await dialog.prompt({
+        title: `Reject ${tool}?`,
+        message:
+          "The agent is told not to retry it. Optionally say why or what to do instead.",
+        label: "Note for the agent",
+        multiline: true,
+        confirmLabel: "Reject",
+        tone: "danger",
+      });
+      if (v === null) return;
+      note = v;
+    }
+    setBusy(decision);
+    try {
+      await api.decideApproval(m.task_id, approval.id, decision, note);
+      toast.success(decision === "approve" ? `${tool} ran` : "Rejected");
+      onDecided();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-2">
+      <AgentAvatar agent={m.agent} size="sm" className="mt-0.5" />
+      <div className="min-w-0 max-w-[85%] flex-1">
+        <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          {m.agent?.name ?? "Agent"}
+          <span className="text-amber-700 dark:text-amber-400">
+            asks to run a tool
+          </span>
+          <span
+            className="text-[11px] text-zinc-400"
+            title={fmtTime(m.created_at)}
+          >
+            {fmtRelative(m.created_at)}
+          </span>
+        </p>
+        <div
+          className={cx(
+            "rounded-2xl rounded-tl-sm border px-3.5 py-2.5 text-sm",
+            status === "pending" || !status
+              ? "border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/40"
+              : status === "approved"
+                ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30"
+                : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900",
+          )}
+        >
+          <p className="text-zinc-900 dark:text-zinc-100">
+            <span className="font-mono font-semibold">{tool}</span>
+            {server && <span className="text-zinc-500"> on {server}</span>}
+          </p>
+          <pre className="mt-1.5 max-h-48 overflow-auto rounded-md bg-white/70 p-2 font-mono text-[11px] leading-relaxed text-zinc-700 dark:bg-black/30 dark:text-zinc-300">
+            {args}
+          </pre>
+          {status === "pending" && (
+            <div className="mt-2 flex gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void decide("approve")}
+                loading={busy === "approve"}
+                disabled={!!busy}
+              >
+                Approve &amp; run
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void decide("reject")}
+                loading={busy === "reject"}
+                disabled={!!busy}
+              >
+                Reject
+              </Button>
+            </div>
+          )}
+          {status === "approved" && (
+            <div className="mt-2 text-xs">
+              <button
+                className="text-emerald-700 hover:underline dark:text-emerald-400"
+                onClick={() => setShowResult((v) => !v)}
+              >
+                {approval?.is_error ? "Approved · failed" : "Approved · ran"}{" "}
+                {showResult ? "▾" : "▸"}
+              </button>
+              {showResult && (
+                <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-white/70 p-2 font-mono text-[11px] whitespace-pre-wrap text-zinc-700 dark:bg-black/30 dark:text-zinc-300">
+                  {approval?.result}
+                </pre>
+              )}
+            </div>
+          )}
+          {status === "rejected" && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Rejected{approval?.note ? `: ${approval.note}` : ""}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MessageRow({ m }: { m: TaskMessage }) {
   const [open, setOpen] = useState(false);
   const time = (
@@ -481,13 +639,30 @@ function MessageRow({ m }: { m: TaskMessage }) {
   );
 
   if (m.kind === "status" || m.author_type === "system") {
+    // Long system notes (e.g. an approved tool's output) show their first line, expandable.
+    const [first, ...rest] = m.content.split("\n");
     return (
-      <div className="flex items-center gap-3 py-0.5 text-[11px] text-zinc-500">
-        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-        <span className="max-w-[80%] text-center">
-          {m.content} · {fmtRelative(m.created_at)}
-        </span>
-        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+      <div className="py-0.5 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-3">
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+          <span className="max-w-[80%] text-center">
+            {first} · {fmtRelative(m.created_at)}
+            {rest.length > 0 && (
+              <button
+                className="ml-1 text-zinc-600 hover:underline dark:text-zinc-400"
+                onClick={() => setOpen((v) => !v)}
+              >
+                {open ? "hide" : "details"}
+              </button>
+            )}
+          </span>
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+        </div>
+        {open && rest.length > 0 && (
+          <pre className="mx-auto mt-1 max-h-60 max-w-[80%] overflow-auto rounded-md bg-zinc-100 p-2 font-mono whitespace-pre-wrap dark:bg-zinc-900">
+            {rest.join("\n")}
+          </pre>
+        )}
       </div>
     );
   }

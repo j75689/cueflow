@@ -6,9 +6,11 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -32,11 +34,13 @@ const (
 	KindRuntime Kind = "runtime"
 	// KindImage generates images from text prompts.
 	KindImage Kind = "image"
+	// KindTools is an external tool server (MCP) whose tools agents may use, per tool permissions.
+	KindTools Kind = "tools"
 )
 
 func (k Kind) Valid() bool {
 	switch k {
-	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime, KindImage:
+	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime, KindImage, KindTools:
 		return true
 	}
 	return false
@@ -208,6 +212,54 @@ type Image struct {
 // Aspects are the aspect ratios CueFlow asks for, portrait-first for social feeds.
 var Aspects = []string{"1:1", "4:5", "3:4", "9:16", "16:9", "4:3"}
 
+// ToolProvider exposes an external server's tools to agents. Which tools an agent may call, and
+// whether a human approves each call first, is decided by the connector's tool permissions.
+type ToolProvider interface {
+	Instance
+	ExternalTools(ctx context.Context) ([]ExternalTool, error)
+	// CallTool runs a tool; isError reports a tool-level failure the agent should read.
+	CallTool(ctx context.Context, name string, args json.RawMessage) (text string, isError bool, err error)
+}
+
+type ExternalTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+	ReadOnly    bool           `json:"read_only"`   // the server says it changes nothing
+	Destructive bool           `json:"destructive"` // the server says it may delete or overwrite
+}
+
+// Tool permissions.
+const (
+	PermAllow = "allow" // agents call it directly
+	PermAsk   = "ask"   // each call waits for a human to approve it
+	PermDeny  = "deny"  // agents never see it
+)
+
+var (
+	readName  = regexp.MustCompile(`(?i)^(get|list|search|find|read|fetch|query|lookup|describe|count|view|show|retrieve|browse)([_-]|[A-Z]|$)`)
+	riskyName = regexp.MustCompile(`(?i)(post|publish|tweet|send|email|mail|message|delete|remove|drop|destroy|purge|pay|charge|transfer|refund|deploy|merge|invite|share)`)
+)
+
+// DefaultPermission is the permission a tool gets until the operator chooses one: read-only
+// tools are allowed, everything else asks first.
+func DefaultPermission(t ExternalTool) string {
+	if t.Destructive || riskyName.MatchString(t.Name) {
+		return PermAsk
+	}
+	if t.ReadOnly || readName.MatchString(t.Name) {
+		return PermAllow
+	}
+	return PermAsk
+}
+
+// RiskyTool flags tools that may publish, message people, delete data or move money; the UI
+// warns before allowing them without approval.
+func RiskyTool(t ExternalTool) bool { return t.Destructive || riskyName.MatchString(t.Name) }
+
+// ValidPermission reports whether p is allow, ask or deny.
+func ValidPermission(p string) bool { return p == PermAllow || p == PermAsk || p == PermDeny }
+
 // ToolLister is implemented by MCP-backed connectors so the UI can show their tools.
 type ToolLister interface {
 	ListTools(ctx context.Context) ([]ToolInfo, error)
@@ -334,6 +386,8 @@ func checkKind(k Kind, inst Instance) error {
 		_, ok = inst.(Runtime)
 	case KindImage:
 		_, ok = inst.(ImageGenerator)
+	case KindTools:
+		_, ok = inst.(ToolProvider)
 	}
 	if !ok {
 		return fmt.Errorf("instance does not implement the %s interface", k)

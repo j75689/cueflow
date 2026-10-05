@@ -143,6 +143,14 @@ func renderMessage(m *store.TaskMessage) string {
 		return fmt.Sprintf("[%s system] %s", ts, m.Content)
 	case "question":
 		return fmt.Sprintf("[%s %s asked the human] %s", ts, who, m.Content)
+	case "approval":
+		var d struct {
+			Server    string          `json:"server"`
+			Tool      string          `json:"tool"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		_ = json.Unmarshal(m.Data, &d)
+		return fmt.Sprintf("[%s %s asked the human to approve calling %s on %s %s]", ts, who, d.Tool, d.Server, clip(string(d.Arguments), 300))
 	case "result":
 		return fmt.Sprintf("[%s %s completed] %s", ts, who, clip(m.Content, 2000))
 	}

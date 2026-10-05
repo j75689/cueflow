@@ -20,6 +20,7 @@ implements `Test(ctx) (*TestResult, error)`, which backs the **Test** button.
 | `notifier` | `Notify(ctx, Notification) error` | pipeline runs and the review digest |
 | `runtime` | `Launch() RuntimeLaunch` | the crew runner, for agents that run in an external ACP agent |
 | `image` | `GenerateImage(ctx, ImageRequest) ([]Image, error)` | the **Generate image** button and the agent's `generate_image` tool |
+| `tools` | `ExternalTools(ctx)`, `CallTool(ctx, name, args)` | agents the server is attached to, per tool permission (allow / ask / deny); see agentic-flow §11b |
 
 Optional extras:
 

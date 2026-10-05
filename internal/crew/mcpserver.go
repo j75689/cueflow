@@ -43,7 +43,7 @@ func (r *mcpRegistry) get(token string) *mcpRun {
 
 // registerMCPRun exposes env's tools as an MCP server and returns its token. Call the returned
 // func when the run ends.
-func (c *Crew) registerMCPRun(env *runEnv) (string, *mcpRun, func()) {
+func (c *Crew) registerMCPRun(ctx context.Context, env *runEnv) (string, *mcpRun, func()) {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	token := hex.EncodeToString(b)
@@ -51,7 +51,7 @@ func (c *Crew) registerMCPRun(env *runEnv) (string, *mcpRun, func()) {
 	run := &mcpRun{env: env, done: make(chan struct{})}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: "0.1.0"}, nil)
 	byName := map[string]tool{}
-	for _, t := range toolsFor(env.agent) {
+	for _, t := range c.agentTools(ctx, env.agent) {
 		t := t
 		byName[t.name] = t
 		srv.AddTool(&mcp.Tool{Name: t.name, Description: t.description, InputSchema: t.schema},

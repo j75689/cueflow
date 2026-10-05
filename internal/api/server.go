@@ -78,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/connectors/{id}/test", s.testConnector)
 		r.Get("/connectors/{id}/tools", s.connectorTools)
 		r.Get("/connectors/{id}/accounts", s.connectorAccounts)
+		r.Get("/connectors/{id}/tool-permissions", s.toolPermissions)
+		r.Put("/connectors/{id}/tool-permissions", s.setToolPermissions)
 		r.Post("/connectors/{id}/fetch", s.fetchConnector)
 		r.Get("/connectors/{id}/items", s.connectorItems)
 
@@ -109,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/tasks/{id}/run", s.runTask)
 		r.Post("/tasks/{id}/cancel", s.cancelTask)
 		r.Get("/tasks/{id}/runs", s.taskRuns)
+		r.Get("/tasks/{id}/approvals", s.taskApprovals)
+		r.Post("/tasks/{id}/approvals/{approvalId}", s.decideApproval)
 
 		r.Get("/usage", s.usage)
 

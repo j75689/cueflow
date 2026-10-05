@@ -27,6 +27,7 @@ import {
   Toggle,
   cx,
 } from "@/components/ui";
+import { Select } from "@/components/select";
 import { api, errorMessage } from "@/lib/api";
 import { fmtRelative, fmtTime } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
@@ -35,6 +36,8 @@ import type {
   ConnectorTestResult,
   ConnectorTool,
   SourceItem,
+  ToolPermission,
+  ToolPermissionValue,
 } from "@/lib/types";
 
 function TypePicker({
@@ -171,6 +174,155 @@ function ToolsPanel({ id }: { id: string }) {
               )}
             </li>
           ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+const PERMISSION_LABEL: Record<ToolPermissionValue, string> = {
+  allow: "Allow",
+  ask: "Ask first",
+  deny: "Deny",
+};
+
+/** Per-tool permissions for an MCP tool server: allow, ask (approve each call) or deny. */
+function ToolPermissionsPanel({ id }: { id: string }) {
+  const toast = useToast();
+  const dialog = useDialog();
+  const data = useAsync(() => api.toolPermissions(id), [id]);
+  const [perms, setPerms] = useState<Record<string, ToolPermissionValue>>({});
+  const [saving, setSaving] = useState(false);
+  const tools: ToolPermission[] = data.data?.tools ?? [];
+
+  useEffect(() => {
+    if (data.data)
+      setPerms(
+        Object.fromEntries(data.data.tools.map((t) => [t.name, t.permission])),
+      );
+  }, [data.data]);
+
+  const dirty = tools.some(
+    (t) => perms[t.name] && perms[t.name] !== t.permission,
+  );
+
+  const change = async (t: ToolPermission, p: ToolPermissionValue) => {
+    if (p === "allow" && t.risky) {
+      const ok = await dialog.confirm({
+        title: `Allow ${t.name} without asking?`,
+        message:
+          "This tool may publish, message people, delete data or move money. Agents will call it on their own, outside CueFlow's review. You can keep it on “Ask first” to approve each call instead.",
+        confirmLabel: "Allow anyway",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    setPerms((cur) => ({ ...cur, [t.name]: p }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.setToolPermissions(id, perms);
+      toast.success("Tool permissions saved");
+      void data.reload();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Tool permissions"
+        subtitle="What agents may do with each tool. New tools start as Allow when read-only, otherwise Ask first."
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void data.reload()}
+              loading={data.loading}
+            >
+              Refresh
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={save}
+              loading={saving}
+              disabled={!dirty}
+            >
+              Save
+            </Button>
+          </>
+        }
+      />
+      {data.error && (
+        <div className="p-3">
+          <ErrorBox onRetry={data.reload}>{data.error}</ErrorBox>
+        </div>
+      )}
+      {data.loading && !data.data && <Loading />}
+      {data.data && tools.length === 0 && (
+        <p className="px-4 py-4 text-sm text-zinc-500">
+          The server exposes no tools.
+        </p>
+      )}
+      {tools.length > 0 && (
+        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {tools.map((t) => {
+            const p = perms[t.name] ?? t.permission;
+            return (
+              <li key={t.name} className="flex items-start gap-3 px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                      {t.name}
+                    </span>
+                    {t.read_only && (
+                      <Pill className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        read-only
+                      </Pill>
+                    )}
+                    {t.risky && (
+                      <Pill className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                        risky
+                      </Pill>
+                    )}
+                    {p === "allow" && t.risky && (
+                      <span className="text-[11px] text-red-600 dark:text-red-400">
+                        runs without your approval
+                      </span>
+                    )}
+                  </div>
+                  {t.description && (
+                    <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
+                      {t.description}
+                    </p>
+                  )}
+                </div>
+                <div className="w-44 shrink-0">
+                  <Select
+                    aria-label={`Permission for ${t.name}`}
+                    value={p}
+                    onChange={(e) =>
+                      void change(t, e.target.value as ToolPermissionValue)
+                    }
+                  >
+                    {(["allow", "ask", "deny"] as const).map((v) => (
+                      <option key={v} value={v}>
+                        {PERMISSION_LABEL[v]}
+                        {v === t.default ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Card>
@@ -479,7 +631,11 @@ function ConnectorEdit() {
                     <Input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder={isNew ? "Leave blank to name it from the settings" : undefined}
+                      placeholder={
+                        isNew
+                          ? "Leave blank to name it from the settings"
+                          : undefined
+                      }
                     />
                   </Field>
                   <div className="pb-1.5">
@@ -520,7 +676,10 @@ function ConnectorEdit() {
             )}
           </div>
           <div className="space-y-4">
-            {!isNew && isMCP && <ToolsPanel id={id} />}
+            {!isNew && isMCP && spec.kind !== "tools" && <ToolsPanel id={id} />}
+            {!isNew && spec.kind === "tools" && (
+              <ToolPermissionsPanel id={id} />
+            )}
             {!isNew && spec.kind === "source" && <ItemsPanel id={id} />}
             {isNew && (
               <Card>

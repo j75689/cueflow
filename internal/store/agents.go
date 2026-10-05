@@ -35,13 +35,15 @@ type Agent struct {
 	// RuntimeConnectorID selects an external ACP agent runtime; nil = built-in LLM loop.
 	RuntimeConnectorID *uuid.UUID  `json:"runtime_connector_id"`
 	SourceConnectorIDs []uuid.UUID `json:"source_connector_ids"`
-	Language           string      `json:"language"`
-	Platforms          []string    `json:"platforms"`
-	MaxTurns           int         `json:"max_turns"`
-	IsActive           bool        `json:"is_active"`
-	Stats              AgentStats  `json:"stats"`
-	CreatedAt          time.Time   `json:"created_at"`
-	UpdatedAt          time.Time   `json:"updated_at"`
+	// ToolConnectorIDs are the external tool servers (MCP) this agent may use.
+	ToolConnectorIDs []uuid.UUID `json:"tool_connector_ids"`
+	Language         string      `json:"language"`
+	Platforms        []string    `json:"platforms"`
+	MaxTurns         int         `json:"max_turns"`
+	IsActive         bool        `json:"is_active"`
+	Stats            AgentStats  `json:"stats"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 func (a *Agent) Has(capability string) bool {
@@ -55,7 +57,7 @@ func (a *Agent) Has(capability string) bool {
 
 const agentColumns = `a.id, a.name, a.slug, a.avatar, a.role, a.description, a.instructions, a.capabilities,
 	a.llm_connector_id, a.search_connector_id, a.source_connector_ids, a.language, a.platforms, a.max_turns,
-	a.is_active, a.created_at, a.updated_at, a.runtime_connector_id,
+	a.is_active, a.created_at, a.updated_at, a.runtime_connector_id, a.tool_connector_ids,
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status NOT IN ('DONE','CANCELED')),
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status='IN_PROGRESS')`
 
@@ -63,7 +65,7 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	var a Agent
 	if err := row.Scan(&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.Role, &a.Description, &a.Instructions, &a.Capabilities,
 		&a.LLMConnectorID, &a.SearchConnectorID, &a.SourceConnectorIDs, &a.Language, &a.Platforms, &a.MaxTurns,
-		&a.IsActive, &a.CreatedAt, &a.UpdatedAt, &a.RuntimeConnectorID, &a.Stats.OpenTasks, &a.Stats.Running); err != nil {
+		&a.IsActive, &a.CreatedAt, &a.UpdatedAt, &a.RuntimeConnectorID, &a.ToolConnectorIDs, &a.Stats.OpenTasks, &a.Stats.Running); err != nil {
 		return nil, err
 	}
 	if a.Capabilities == nil {
@@ -71,6 +73,9 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	}
 	if a.SourceConnectorIDs == nil {
 		a.SourceConnectorIDs = []uuid.UUID{}
+	}
+	if a.ToolConnectorIDs == nil {
+		a.ToolConnectorIDs = []uuid.UUID{}
 	}
 	if a.Platforms == nil {
 		a.Platforms = []string{}
@@ -219,11 +224,11 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `INSERT INTO agents (name, slug, avatar, role, description, instructions, capabilities,
 		llm_connector_id, search_connector_id, source_connector_ids, language, platforms, max_turns, is_active,
-		runtime_connector_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+		runtime_connector_id, tool_connector_ids)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
 		truncate(a.Name, 64), a.Slug, truncate(a.Avatar, 16), a.Role, a.Description, a.Instructions, a.Capabilities,
 		a.LLMConnectorID, a.SearchConnectorID, a.SourceConnectorIDs, a.Language, a.Platforms, a.MaxTurns, a.IsActive,
-		a.RuntimeConnectorID).Scan(&id)
+		a.RuntimeConnectorID, nonNilIDs(a.ToolConnectorIDs)).Scan(&id)
 	if err != nil {
 		return nil, dupSlug(err)
 	}
@@ -236,10 +241,10 @@ func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2, slug=$3, avatar=$4, role=$5, description=$6, instructions=$7,
 		capabilities=$8, llm_connector_id=$9, search_connector_id=$10, source_connector_ids=$11, language=$12,
-		platforms=$13, max_turns=$14, is_active=$15, runtime_connector_id=$16, updated_at=NOW() WHERE id=$1`,
+		platforms=$13, max_turns=$14, is_active=$15, runtime_connector_id=$16, tool_connector_ids=$17, updated_at=NOW() WHERE id=$1`,
 		a.ID, truncate(a.Name, 64), a.Slug, truncate(a.Avatar, 16), a.Role, a.Description, a.Instructions, a.Capabilities,
 		a.LLMConnectorID, a.SearchConnectorID, a.SourceConnectorIDs, a.Language, a.Platforms, a.MaxTurns, a.IsActive,
-		a.RuntimeConnectorID)
+		a.RuntimeConnectorID, nonNilIDs(a.ToolConnectorIDs))
 	if err != nil {
 		return nil, dupSlug(err)
 	}
@@ -316,4 +321,11 @@ func (s *Store) DeleteMemory(ctx context.Context, agentID, memoryID uuid.UUID) e
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+func nonNilIDs(ids []uuid.UUID) []uuid.UUID {
+	if ids == nil {
+		return []uuid.UUID{}
+	}
+	return ids
 }

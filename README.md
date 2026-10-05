@@ -76,6 +76,7 @@ sends them to Postiz.
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
 | Notifier | `smtp` (review reminders and digests) |
+| Agent tools | `mcp_server` - any MCP server (HTTP or stdio); each tool set to allow, ask (you approve each call) or deny |
 | Image generation | `openai_image` (OpenAI / Azure / compatible) · `gemini_image` (AI Studio key) · `vertex_image` (Vertex AI, ADC) · `comfyui` (self-hosted) |
 
 ### LLM authentication
