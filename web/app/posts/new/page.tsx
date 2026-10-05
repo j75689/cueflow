@@ -31,11 +31,10 @@ export default function NewPostPage() {
         media_urls: draft.media_urls.map((u) => u.trim()).filter(Boolean),
         image_prompt: draft.image_prompt,
         scheduled_at: draft.scheduled_at,
+        publisher_connector_id: draft.publisher_connector_id,
+        accounts: draft.accounts,
         submit,
       });
-      if (draft.publisher_connector_id) {
-        await api.updatePost(p.id, { publisher_connector_id: draft.publisher_connector_id, version: p.version });
-      }
       toast.success(submit ? "Created and sent to review" : "Draft saved");
       router.push(`/posts/view/?id=${p.id}`);
     } catch (e) {
@@ -68,7 +67,13 @@ export default function NewPostPage() {
         }
       />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <PostEditor draft={draft} onChange={setDraft} platforms={meta.platforms} publishers={publishers.data ?? []} />
+        <PostEditor
+          draft={draft}
+          onChange={setDraft}
+          platforms={meta.platforms}
+          publishers={publishers.data ?? []}
+          connectorTypes={meta.connector_types}
+        />
         <div>
           <Card className="lg:sticky lg:top-4">
             <CardHeader title="Preview" />

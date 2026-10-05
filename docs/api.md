@@ -71,6 +71,7 @@ Fields with `"secret": true` are write-only: the API never returns their value (
   "image_prompt":"string",
   "platforms":["threads"],
   "media_urls":["https://..."],
+  "accounts":["acc-id"],                  // per-account publishers (CueSocial): accounts to post to
   "status":"PENDING_REVIEW",
   "review_note":"string",                 // reject reason
   "source_context":{"topic":"...","items":[{"title":"...","url":"...","source":"Hacker News"}],"search":[{"title":"...","url":"..."}]},
@@ -86,8 +87,8 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 |---|---|---|---|
 | GET | `/posts?status=PENDING_REVIEW&status=FAILED&q=&pipeline_id=&run_id=&limit=50&offset=0` | | → `{"items":[Post],"total":n}`; newest first; `status` repeatable (or comma-separated) |
 | GET | `/posts/{id}` | | → `Post` |
-| POST | `/posts` | `{title,content,platforms,thread_parts?,hashtags?,media_urls?,image_prompt?,scheduled_at?,publisher_connector_id?,submit?:bool}` | manual draft; `submit:true` moves it straight to `PENDING_REVIEW` |
-| PATCH | `/posts/{id}` | any of `{title,content,platforms,thread_parts,hashtags,media_urls,image_prompt,scheduled_at,publisher_connector_id}` + required `version` | only in `DRAFT`/`PENDING_REVIEW`; `409 version_conflict` if stale; writes `EDITED` audit with diff |
+| POST | `/posts` | `{title,content,platforms,thread_parts?,hashtags?,media_urls?,accounts?,image_prompt?,scheduled_at?,publisher_connector_id?,submit?:bool}` | manual draft; `submit:true` moves it straight to `PENDING_REVIEW` |
+| PATCH | `/posts/{id}` | any of `{title,content,platforms,thread_parts,hashtags,media_urls,accounts,image_prompt,scheduled_at,publisher_connector_id}` + required `version` | only in `DRAFT`/`PENDING_REVIEW`; `409 version_conflict` if stale; writes `EDITED` audit with diff |
 | DELETE | `/posts/{id}` | | only `DRAFT`/`REJECTED` |
 | POST | `/posts/{id}/submit` | | `DRAFT → PENDING_REVIEW` |
 | POST | `/posts/{id}/approve` | `{scheduled_at?, publisher_connector_id?}` | `PENDING_REVIEW → APPROVED`; worker then moves it to `QUEUED → PUBLISHED/FAILED` |
@@ -124,6 +125,7 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 | DELETE | `/connectors/{id}` | | |
 | POST | `/connectors/{id}/test` | | → `{"ok":true,"message":"Connected, 4 tools","details":{...}}` |
 | GET | `/connectors/{id}/tools` | | MCP-backed connectors only → `[{"name","description","agent_allowed":false,"reason":"publishing tool"}]` |
+| GET | `/connectors/{id}/accounts` | | Per-account publishers only (connector type with `"accounts":true` in `/meta`) → `[{"id","platform","name"}]`; `400` for other connectors, `502` if the service is unreachable |
 | POST | `/connectors/{id}/fetch` | | `source` kind only, pulls now → `{"new_items":3}` |
 | GET | `/connectors/{id}/items?limit=50` | | `source` kind only → `[SourceItem]` |
 

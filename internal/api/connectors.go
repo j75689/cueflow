@@ -190,3 +190,32 @@ func (s *Server) connectorItems(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, items)
 }
+
+// connectorAccounts lists the accounts a per-account publisher (e.g. CueSocial) can post to.
+func (s *Server) connectorAccounts(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	inst, c, err := s.Hub.Instance(ctx, id, true)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer hub.Close(inst)
+	spec, _ := connector.Lookup(c.Type)
+	al, ok := inst.(connector.AccountLister)
+	if !ok || !spec.Accounts {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "this connector does not post to individual accounts")
+		return
+	}
+	accounts, err := al.ListAccounts(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, accounts)
+}

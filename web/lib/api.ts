@@ -23,6 +23,7 @@ import type {
   TaskMessage,
   TaskPatch,
   Usage,
+  ConnectorAccount,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -119,6 +120,7 @@ export type PostPatch = Partial<
     | "thread_parts"
     | "hashtags"
     | "media_urls"
+    | "accounts"
     | "image_prompt"
     | "scheduled_at"
     | "publisher_connector_id"
@@ -126,7 +128,12 @@ export type PostPatch = Partial<
 > & { version: number };
 
 export type PostCreate = Pick<Post, "title" | "content" | "platforms"> &
-  Partial<Pick<Post, "thread_parts" | "hashtags" | "media_urls" | "image_prompt" | "scheduled_at">> & {
+  Partial<
+    Pick<
+      Post,
+      "thread_parts" | "hashtags" | "media_urls" | "accounts" | "image_prompt" | "scheduled_at" | "publisher_connector_id"
+    >
+  > & {
     submit?: boolean;
   };
 
@@ -164,6 +171,7 @@ export const api = {
   deleteConnector: (id: string) => request<void>("DELETE", `/connectors/${id}`),
   testConnector: (id: string) => request<ConnectorTestResult>("POST", `/connectors/${id}/test`),
   connectorTools: (id: string) => request<ConnectorTool[]>("GET", `/connectors/${id}/tools`),
+  connectorAccounts: (id: string) => request<ConnectorAccount[]>("GET", `/connectors/${id}/accounts`),
   fetchConnector: (id: string) => request<{ new_items: number }>("POST", `/connectors/${id}/fetch`),
   connectorItems: (id: string, limit = 50) =>
     request<SourceItem[]>("GET", `/connectors/${id}/items`, undefined, { limit }),

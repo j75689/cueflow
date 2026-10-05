@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { api } from "@/lib/api";
 import { charCount, fromLocalInput, toLocalInput } from "@/lib/format";
-import type { Connector, Platform } from "@/lib/types";
+import { useAsync } from "@/lib/hooks";
+import type { Connector, ConnectorSpec, Platform } from "@/lib/types";
 import { StringListInput, TagInput } from "./inputs";
 import { GenericPreview, InstagramPreview, ThreadsPreview } from "./post";
 import { Button, Card, CardHeader, Checkbox, DateTimePicker, Field, Icon, Input, Select, Textarea, cx } from "./ui";
@@ -15,6 +17,7 @@ export interface PostDraft {
   media_urls: string[];
   image_prompt: string;
   platforms: string[];
+  accounts: string[];
   scheduled_at: string | null;
   publisher_connector_id: string | null;
 }
@@ -27,9 +30,21 @@ export const emptyDraft: PostDraft = {
   media_urls: [],
   image_prompt: "",
   platforms: [],
+  accounts: [],
   scheduled_at: null,
   publisher_connector_id: null,
 };
+
+/** The publisher a post will use: its own choice, else the first active one (as the server does). */
+export function effectivePublisher(draft: PostDraft, publishers: Connector[]): Connector | undefined {
+  if (draft.publisher_connector_id) return publishers.find((c) => c.id === draft.publisher_connector_id);
+  return publishers.filter((c) => c.is_active).sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+}
+
+/** Whether posts through this publisher need accounts chosen (e.g. CueSocial). */
+export function needsAccounts(c: Connector | undefined, types: ConnectorSpec[]): boolean {
+  return !!c && !!types.find((t) => t.type === c.type)?.accounts;
+}
 
 // splitThread breaks text into parts under `limit` code points, preferring
 // paragraph, then sentence, then word boundaries.
@@ -80,12 +95,14 @@ export function PostEditor({
   onChange,
   platforms,
   publishers,
+  connectorTypes = [],
   readOnly,
 }: {
   draft: PostDraft;
   onChange: (d: PostDraft) => void;
   platforms: Platform[];
   publishers: Connector[];
+  connectorTypes?: ConnectorSpec[];
   readOnly?: boolean;
 }) {
   const set = <K extends keyof PostDraft>(k: K, v: PostDraft[K]) => onChange({ ...draft, [k]: v });
@@ -96,6 +113,8 @@ export function PostEditor({
   const contentLimit = selected.length ? Math.min(...selected.map((p) => p.max_chars)) : 0;
   const contentCount = charCount(draft.content);
   const usingThread = draft.thread_parts.length > 0;
+  const publisher = effectivePublisher(draft, publishers);
+  const perAccount = needsAccounts(publisher, connectorTypes);
 
   const movePart = (i: number, d: -1 | 1) => {
     const j = i + d;
@@ -330,9 +349,98 @@ export function PostEditor({
               ))}
             </Select>
           </Field>
+          {perAccount && publisher && (
+            <div className="md:col-span-2">
+              <AccountPicker
+                connector={publisher}
+                platforms={platforms}
+                value={draft.accounts}
+                readOnly={readOnly}
+                onChange={(accounts, accountPlatforms) =>
+                  onChange({
+                    ...draft,
+                    accounts,
+                    platforms: accountPlatforms.length ? accountPlatforms : draft.platforms,
+                  })
+                }
+              />
+            </div>
+          )}
         </div>
       </Card>
     </div>
+  );
+}
+
+function AccountPicker({
+  connector,
+  platforms,
+  value,
+  readOnly,
+  onChange,
+}: {
+  connector: Connector;
+  platforms: Platform[];
+  value: string[];
+  readOnly?: boolean;
+  onChange: (accounts: string[], platforms: string[]) => void;
+}) {
+  const accounts = useAsync(() => api.connectorAccounts(connector.id), [connector.id]);
+  const list = accounts.data ?? [];
+  const known = new Set(list.map((a) => a.id));
+  const stale = value.filter((id) => accounts.data && !known.has(id));
+  const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
+  const groups = [...new Set(list.map((a) => a.platform))];
+
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...value, id] : value.filter((x) => x !== id);
+    const pls = [...new Set(list.filter((a) => next.includes(a.id)).map((a) => a.platform))];
+    onChange(next, pls);
+  };
+
+  return (
+    <Field
+      label="Accounts"
+      required
+      help={`${connector.name} posts to the accounts you pick; the post's platforms follow your choice.`}
+    >
+      {accounts.loading && !accounts.data ? (
+        <p className="pt-1 text-xs text-zinc-500">Loading accounts…</p>
+      ) : accounts.error ? (
+        <div className="flex items-center gap-2 pt-1 text-xs text-red-600 dark:text-red-400">
+          <span className="min-w-0 truncate">Could not load accounts: {accounts.error}</span>
+          <Button size="sm" variant="ghost" onClick={() => void accounts.reload()}>
+            Retry
+          </Button>
+        </div>
+      ) : list.length === 0 ? (
+        <p className="pt-1 text-xs text-zinc-500">No accounts are connected in {connector.name} yet.</p>
+      ) : (
+        <div className="space-y-2 pt-1">
+          {groups.map((g) => (
+            <div key={g} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="w-20 shrink-0 text-xs text-zinc-500">{platformName(g)}</span>
+              {list
+                .filter((a) => a.platform === g)
+                .map((a) => (
+                  <Checkbox
+                    key={a.id}
+                    label={a.name}
+                    disabled={readOnly}
+                    checked={value.includes(a.id)}
+                    onChange={(on) => toggle(a.id, on)}
+                  />
+                ))}
+            </div>
+          ))}
+          {stale.length > 0 && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              {stale.length} chosen account(s) are no longer connected and will fail; untick them or reconnect them.
+            </p>
+          )}
+        </div>
+      )}
+    </Field>
   );
 }
 

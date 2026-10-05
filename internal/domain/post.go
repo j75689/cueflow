@@ -128,6 +128,7 @@ type Post struct {
 	ImagePrompt          string            `json:"image_prompt"`
 	Platforms            []string          `json:"platforms"`
 	MediaURLs            []string          `json:"media_urls"`
+	Accounts             []string          `json:"accounts"`
 	Status               Status            `json:"status"`
 	ReviewNote           string            `json:"review_note"`
 	SourceContext        json.RawMessage   `json:"source_context"`

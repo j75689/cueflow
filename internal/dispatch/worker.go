@@ -116,8 +116,14 @@ func (w *Worker) publish(ctx context.Context, p *domain.Post) {
 	if err != nil {
 		msg := err.Error()
 		log.Warn("publish failed", "err", err)
+		opts := &store.TransitionOpts{ErrorMessage: &msg}
+		var partial *connector.PartialError
+		if errors.As(err, &partial) {
+			// Keep what did go out so a retry finishes this attempt instead of publishing again.
+			opts.ExternalIDs = partial.ExternalIDs
+		}
 		if _, terr := w.store.Transition(context.Background(), p.ID, domain.StatusFailed, domain.ActionFailed,
-			domain.ActorWorker, msg, &store.TransitionOpts{ErrorMessage: &msg}); terr != nil {
+			domain.ActorWorker, msg, opts); terr != nil {
 			log.Error("mark failed", "err", terr)
 		}
 		w.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": domain.StatusFailed})
@@ -158,6 +164,8 @@ func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.Publ
 		Hashtags:    p.Hashtags,
 		MediaURLs:   p.MediaURLs,
 		ScheduledAt: p.ScheduledAt,
+		Accounts:    p.Accounts,
+		Previous:    p.ExternalPostIDs,
 	})
 	if err != nil {
 		return nil, err

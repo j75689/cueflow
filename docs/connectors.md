@@ -118,3 +118,18 @@ SSE or stdio, with auth headers), `ListTools`, `CallJSON` (tool errors become Go
 connector ([`internal/connectors/postiz`](../internal/connectors/postiz/postiz.go)) is the reference
 implementation, and [`internal/postizmock`](../internal/postizmock/postizmock.go) shows how to test one
 against an in-process MCP server.
+
+## Per-account publishers
+
+A publisher that posts to individual accounts (several Threads or Instagram accounts, for example) sets
+`Spec.Accounts` and implements `connector.AccountLister`. The review editor then lists the accounts and
+stores the reviewer's choice on the post; `Publish` receives it as `PublishRequest.Accounts`. The CueSocial
+connector ([`internal/connectors/cuesocial`](../internal/connectors/cuesocial/cuesocial.go)) is the example.
+
+When a publish fails after something was created remotely, return a `*connector.PartialError` with the
+external IDs that exist. The dispatch worker keeps them on the failed post and passes them back as
+`PublishRequest.Previous` on retry, so the connector can finish that attempt (CueSocial calls
+`publish_post`, which only retries the accounts that failed) instead of publishing a second copy.
+
+If a call gets no reply, the outcome is unknown. Report a plain error that says so; don't guess. The
+reviewer checks the platform before pressing Retry.

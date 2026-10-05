@@ -41,6 +41,9 @@ type Spec struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Fields      []Field `json:"fields"`
+	// Accounts marks a publisher that posts to individual accounts chosen per post (it implements
+	// AccountLister and reads PublishRequest.Accounts).
+	Accounts bool `json:"accounts,omitempty"`
 	// DefaultName, when set, names a new connector whose name was left blank from its settings
 	// (e.g. "Claude Code (ACP)"), so several connectors of one type stay distinguishable.
 	DefaultName func(cfg Config) string `json:"-"`

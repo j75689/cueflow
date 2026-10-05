@@ -68,11 +68,39 @@ type PublishRequest struct {
 	Hashtags    []string
 	MediaURLs   []string
 	ScheduledAt *time.Time // nil = publish now
+	// Accounts are the account IDs chosen for this post, for publishers whose Spec has Accounts.
+	Accounts []string
+	// Previous holds the external IDs recorded by an earlier, partly successful attempt, so a
+	// retry can finish that attempt instead of publishing again.
+	Previous map[string]string
 }
 
 type PublishResult struct {
 	ExternalIDs map[string]string `json:"external_ids"` // platform -> post id
 	Details     map[string]any    `json:"details,omitempty"`
+}
+
+// PartialError reports a publish that failed after something was created remotely (e.g. a post
+// that reached some accounts but not all). The dispatch worker records ExternalIDs on the failed
+// post and passes them back as PublishRequest.Previous on retry.
+type PartialError struct {
+	ExternalIDs map[string]string
+	Err         error
+}
+
+func (e *PartialError) Error() string { return e.Err.Error() }
+func (e *PartialError) Unwrap() error { return e.Err }
+
+// AccountLister is implemented by publishers that post to individual accounts, so the review UI
+// can offer them.
+type AccountLister interface {
+	ListAccounts(ctx context.Context) ([]Account, error)
+}
+
+type Account struct {
+	ID       string `json:"id"`
+	Platform string `json:"platform"`
+	Name     string `json:"name"`
 }
 
 // Source produces raw material for the agent.
@@ -295,6 +323,15 @@ func (g *guardedPublisher) ListTools(ctx context.Context) ([]ToolInfo, error) {
 }
 
 // Close forwards to the wrapped publisher when it holds resources.
+// ListAccounts passes through to publishers that post to individual accounts. Listing accounts
+// publishes nothing, so it needs no grant.
+func (g *guardedPublisher) ListAccounts(ctx context.Context) ([]Account, error) {
+	if al, ok := g.Publisher.(AccountLister); ok {
+		return al.ListAccounts(ctx)
+	}
+	return nil, fmt.Errorf("connector does not post to individual accounts")
+}
+
 func (g *guardedPublisher) Close() error {
 	if c, ok := g.Publisher.(interface{ Close() error }); ok {
 		return c.Close()

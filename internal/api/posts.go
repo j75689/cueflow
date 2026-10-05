@@ -63,6 +63,7 @@ type createPostReq struct {
 	ThreadParts          []string   `json:"thread_parts"`
 	Hashtags             []string   `json:"hashtags"`
 	MediaURLs            []string   `json:"media_urls"`
+	Accounts             []string   `json:"accounts"`
 	ImagePrompt          string     `json:"image_prompt"`
 	ScheduledAt          *time.Time `json:"scheduled_at"`
 	PublisherConnectorID *uuid.UUID `json:"publisher_connector_id"`
@@ -77,9 +78,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.Store.CreatePost(r.Context(), store.NewPost{
 		Title: req.Title, Content: req.Content, Platforms: req.Platforms, ThreadParts: req.ThreadParts,
-		Hashtags: req.Hashtags, MediaURLs: req.MediaURLs, ImagePrompt: req.ImagePrompt, ScheduledAt: req.ScheduledAt,
-		PublisherConnectorID: req.PublisherConnectorID,
-		SourceContext:        map[string]any{"manual": true},
+		Hashtags: req.Hashtags, MediaURLs: req.MediaURLs, Accounts: req.Accounts, ImagePrompt: req.ImagePrompt,
+		ScheduledAt: req.ScheduledAt, PublisherConnectorID: req.PublisherConnectorID,
+		SourceContext: map[string]any{"manual": true},
 	}, domain.ActorReviewer, req.Submit)
 	if err != nil {
 		s.fail(w, err)
@@ -117,6 +118,7 @@ type updatePostReq struct {
 	ThreadParts          *[]string           `json:"thread_parts"`
 	Hashtags             *[]string           `json:"hashtags"`
 	MediaURLs            *[]string           `json:"media_urls"`
+	Accounts             *[]string           `json:"accounts"`
 	ImagePrompt          *string             `json:"image_prompt"`
 	ScheduledAt          optional[time.Time] `json:"scheduled_at"`
 	PublisherConnectorID optional[uuid.UUID] `json:"publisher_connector_id"`
@@ -138,7 +140,7 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := store.PostPatch{Title: req.Title, Content: req.Content, Platforms: req.Platforms, ThreadParts: req.ThreadParts,
-		Hashtags: req.Hashtags, MediaURLs: req.MediaURLs, ImagePrompt: req.ImagePrompt}
+		Hashtags: req.Hashtags, MediaURLs: req.MediaURLs, Accounts: req.Accounts, ImagePrompt: req.ImagePrompt}
 	if req.ScheduledAt.Set {
 		patch.ScheduledAt = &req.ScheduledAt.Value
 	}

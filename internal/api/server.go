@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 		r.Delete("/connectors/{id}", s.deleteConnector)
 		r.Post("/connectors/{id}/test", s.testConnector)
 		r.Get("/connectors/{id}/tools", s.connectorTools)
+		r.Get("/connectors/{id}/accounts", s.connectorAccounts)
 		r.Post("/connectors/{id}/fetch", s.fetchConnector)
 		r.Get("/connectors/{id}/items", s.connectorItems)
 

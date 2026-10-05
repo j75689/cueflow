@@ -40,6 +40,15 @@ export interface ConnectorSpec {
   name: string;
   description: string;
   fields: FieldSpec[];
+  /** Publisher that posts to individual accounts chosen per post (e.g. CueSocial). */
+  accounts?: boolean;
+}
+
+/** An account a per-account publisher can post to. */
+export interface ConnectorAccount {
+  id: string;
+  platform: string;
+  name: string;
 }
 
 export interface Platform {
@@ -98,6 +107,7 @@ export interface Post {
   image_prompt: string;
   platforms: string[];
   media_urls: string[];
+  accounts: string[];
   status: PostStatus;
   review_note: string;
   source_context: SourceContext | null;

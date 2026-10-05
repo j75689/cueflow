@@ -71,7 +71,7 @@ sends them to Postiz.
 
 | Kind | Types |
 |---|---|
-| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio) |
+| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio) · `cuesocial` - CueSocial over MCP, posting to the Threads/Instagram accounts picked per post |
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
@@ -110,6 +110,8 @@ Then:
    *Settings → Developers*.
 2. **CueFlow → Connectors**:
    - *Postiz (MCP)* - endpoint `http://postiz:5000/api/mcp`, paste the API key, press **Test**.
+     Or *CueSocial* - endpoint `https://<your CueSocial>/mcp` plus a Cloudflare Access service token; you then
+     pick the Threads/Instagram accounts for each post in the review editor.
    - an LLM - e.g. *Anthropic Claude* (model `claude-opus-5-5`) or *OpenAI-compatible* pointing at Ollama.
    - one or more sources - e.g. an RSS feed.
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
@@ -177,8 +179,8 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
-| `CUEFLOW_DISPATCH_LEASE` | `5m` | Max time a publish may take before it is considered crashed |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `2m` | Timeout of one publish call |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
@@ -222,7 +224,7 @@ cmd/cueflow            server binary (serve | migrate | genkey | healthcheck)
 cmd/mock-postiz-mcp    Postiz MCP stand-in for development
 internal/domain        post state machine, platform rules
 internal/connector     plugin registry, interfaces, config specs
-internal/connectors/*  built-in plugins (postiz, rss, imap, searxng, tavily, openai, anthropic, smtp)
+internal/connectors/*  built-in plugins (postiz, cuesocial, rss, imap, searxng, tavily, openai, anthropic, smtp)
 internal/agent         pipeline draft generator (LLM tool loop)
 internal/crew          agent team runner: task claiming, tools, delegation, default roles
 internal/pipeline      ingest -> generate -> store -> notify

@@ -8,6 +8,8 @@ import {
   type PostDraft,
   PostEditor,
   PostPreviews,
+  effectivePublisher,
+  needsAccounts,
 } from "@/components/post-editor";
 import { AuditTimeline, RejectDialog, Warnings } from "@/components/post";
 import { useDialog } from "@/components/dialog";
@@ -35,6 +37,7 @@ function toDraft(p: Post): PostDraft {
     media_urls: p.media_urls ?? [],
     image_prompt: p.image_prompt ?? "",
     platforms: p.platforms ?? [],
+    accounts: p.accounts ?? [],
     scheduled_at: p.scheduled_at,
     publisher_connector_id: p.publisher_connector_id,
   };
@@ -166,6 +169,16 @@ function PostView() {
   const pm = Object.fromEntries(meta.platforms.map((x) => [x.id, x]));
 
   const approve = async () => {
+    if (
+      needsAccounts(
+        effectivePublisher(draft, publishers.data ?? []),
+        meta.connector_types,
+      ) &&
+      draft.accounts.length === 0
+    ) {
+      toast.error("Choose at least one account to publish to.");
+      return;
+    }
     const saved = dirty ? await save() : p;
     if (!saved) return;
     await act(
@@ -371,6 +384,7 @@ function PostView() {
           onChange={setDraft}
           platforms={meta.platforms}
           publishers={publishers.data ?? []}
+          connectorTypes={meta.connector_types}
           readOnly={!editable}
         />
 

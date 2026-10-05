@@ -46,7 +46,7 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 
 | 類型 | 型別 |
 |---|---|
-| 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio） |
+| 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio）· `cuesocial`：透過 MCP 連 CueSocial，發到每篇貼文勾選的 Threads/Instagram 帳號 |
 | 資料來源 | `rss`（RSS/Atom，以 GUID 去重）· `imap`（信箱資料夾，唯讀） |
 | 搜尋 | `searxng`（自託管）· `tavily` |
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |
@@ -81,6 +81,7 @@ docker compose up -d
 1. **Postiz**：建立帳號，連結你的 Threads / Instagram / X 帳號，並到 *Settings → Developers* 複製 API key。
 2. **CueFlow → Connectors**：
    - *Postiz (MCP)*：endpoint 填 `http://postiz:5000/api/mcp`，貼上 API key，按 **Test**。
+     或 *CueSocial*：endpoint 填 `https://<你的 CueSocial>/mcp`，加上 Cloudflare Access service token；之後在審核頁為每篇貼文勾選要發的 Threads/Instagram 帳號。
    - 一個 LLM：例如 *Anthropic Claude*（model `claude-opus-5-5`），或指向 Ollama 的 *OpenAI-compatible*。
    - 一個以上的資料來源，例如 RSS feed。
    - 選用：SearXNG / Tavily 用於網路搜尋，SMTP 用於審核提醒。
@@ -142,8 +143,8 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
-| `CUEFLOW_DISPATCH_LEASE` | `5m` | 一次發布最長可以花多久，超過就視為當機 |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `2m` | 單次發布呼叫的逾時 |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
