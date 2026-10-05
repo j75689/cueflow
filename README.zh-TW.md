@@ -98,6 +98,11 @@ docker compose up -d
 
 在 `deploy/.env` 設定後執行 `docker compose up -d --build`。
 
+### 網頁搜尋
+
+compose 內含一個 SearXNG（請在 `deploy/.env` 設定 `SEARXNG_SECRET`）。在 CueFlow 新增 *SearXNG* connector，
+URL 填 `http://searxng:8080`；沒有指定搜尋 connector 的 agent 會使用第一個啟用中的。SearXNG 本身的頁面在 <http://localhost:8888>。
+
 ### 不接 Postiz 先試用
 
 ```bash

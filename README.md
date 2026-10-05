@@ -129,6 +129,12 @@ Then:
 
 Set it in `deploy/.env`, then `docker compose up -d --build`.
 
+### Web search
+
+The compose file includes a SearXNG instance (set `SEARXNG_SECRET` in `deploy/.env`). In CueFlow add a
+*SearXNG* connector with URL `http://searxng:8080`; agents without a search connector of their own use
+the first active one. Its own page is at <http://localhost:8888>.
+
 ### Try it without Postiz
 
 ```bash

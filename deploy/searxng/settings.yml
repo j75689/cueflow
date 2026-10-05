@@ -1,0 +1,19 @@
+# SearXNG for CueFlow's web search (connector type "searxng", URL http://searxng:8080).
+# Everything not set here uses SearXNG's defaults: https://docs.searxng.org/admin/settings/
+use_default_settings: true
+
+general:
+  instance_name: CueFlow search
+
+server:
+  # Overridden by the SEARXNG_SECRET environment variable (set it in deploy/.env).
+  secret_key: set-SEARXNG_SECRET-in-env
+  # Only CueFlow calls this instance, from inside the compose network: no bot limiter needed.
+  limiter: false
+  image_proxy: false
+
+search:
+  # CueFlow reads results as JSON.
+  formats:
+    - html
+    - json

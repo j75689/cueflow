@@ -8,6 +8,7 @@
 #
 # CueFlow:  http://localhost:3000
 # Postiz:   http://localhost:4007   (create an account, connect channels, Settings -> Developers -> API key)
+# SearXNG:  http://localhost:8888   (web search for agents; connector URL http://searxng:8080)
 
 name: cueflow
 
@@ -86,6 +87,18 @@ services:
       MOCK_POSTIZ_API_KEY: dev-key
     ports:
       - "127.0.0.1:4008:4007"
+
+  # Self-hosted web search for agents. In CueFlow add a "SearXNG" connector with URL http://searxng:8080.
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env (openssl rand -hex 32)}
+      SEARXNG_BASE_URL: http://localhost:8888/
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8888:8080"
 
   # ---------------------------------------------------------------- Postiz (social publishing engine)
   postiz:
