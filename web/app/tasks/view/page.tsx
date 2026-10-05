@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ALL_TASK_STATUSES,
   AgentAvatar,
@@ -94,6 +101,28 @@ function TaskView() {
     return <ErrorBox onRetry={task.reload}>{task.error}</ErrorBox>;
   const t = task.data!;
 
+  const deleteTask = async () => {
+    if (
+      !(await dialog.confirm({
+        title: `Delete task #${t.number}?`,
+        message:
+          (t.subtasks?.length ?? 0) > 0
+            ? `Its ${t.subtasks?.length} subtask(s) and the whole conversation are deleted too. A running agent is stopped.`
+            : "The conversation is deleted too. A running agent is stopped.",
+        confirmLabel: "Delete task",
+        tone: "danger",
+      }))
+    )
+      return;
+    try {
+      await api.deleteTask(id);
+      toast.success("Task deleted");
+      router.push("/board/");
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
@@ -117,6 +146,14 @@ function TaskView() {
         )}
         <span className="font-mono">#{t.number}</span>
         <TaskStatusBadge status={t.status} running={t.running} />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={deleteTask}
+          className="ml-auto text-red-600 dark:text-red-400"
+        >
+          <Icon name="trash" className="h-3.5 w-3.5" /> Delete task
+        </Button>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -152,27 +189,6 @@ function TaskView() {
               void task.reload();
               void runs.reload();
             }}
-            onDelete={async () => {
-              if (
-                !(await dialog.confirm({
-                  title: `Delete task #${t.number}?`,
-                  message:
-                    (t.subtasks?.length ?? 0) > 0
-                      ? `Its ${t.subtasks?.length} subtask(s) and the whole conversation are deleted too. A running agent is stopped.`
-                      : "The conversation is deleted too. A running agent is stopped.",
-                  confirmLabel: "Delete task",
-                  tone: "danger",
-                }))
-              )
-                return;
-              try {
-                await api.deleteTask(id);
-                toast.success("Task deleted");
-                router.push("/board/");
-              } catch (e) {
-                toast.error(e);
-              }
-            }}
           />
           <Card>
             <CardHeader title="Agent runs" />
@@ -201,7 +217,11 @@ function TaskView() {
                     {(r.model || r.runtime === "acp") && (
                       <p className="flex min-w-0 items-center gap-1.5 text-zinc-500">
                         {r.runtime === "acp" && <Pill>ACP</Pill>}
-                        {r.model && <span className="truncate font-mono text-[11px]">{r.model}</span>}
+                        {r.model && (
+                          <span className="truncate font-mono text-[11px]">
+                            {r.model}
+                          </span>
+                        )}
                       </p>
                     )}
                     {r.error && (
@@ -371,7 +391,8 @@ function Thread({
   const lastId = messages.length ? messages[messages.length - 1].id : "";
   const onScroll = () => {
     const el = scroller.current;
-    if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (el)
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -737,13 +758,11 @@ function Sidebar({
   agents,
   onPatch,
   onReload,
-  onDelete,
 }: {
   task: TaskDetail;
   agents: Agent[] | undefined;
   onPatch: (b: TaskPatch, ok?: string) => Promise<void>;
   onReload: () => void;
-  onDelete: () => void;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState<"run" | "stop" | null>(null);
@@ -982,17 +1001,6 @@ function Sidebar({
           </ul>
         )}
       </Card>
-
-      <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="text-red-600 dark:text-red-400"
-        >
-          <Icon name="trash" className="h-3.5 w-3.5" /> Delete task
-        </Button>
-      </div>
 
       <NewTaskModal
         open={subOpen}
