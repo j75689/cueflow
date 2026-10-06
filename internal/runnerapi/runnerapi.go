@@ -41,6 +41,8 @@ type Job struct {
 	// Preset names the agent CLI to launch ("claude-code", "codex", ...); the runner resolves it
 	// to a command on its own machine and may refuse it.
 	Preset string `json:"preset"`
+	// Model is the model to ask the agent for (id or name); blank keeps the agent's default.
+	Model  string `json:"model,omitempty"`
 	Prompt string `json:"prompt"`
 	// MCPPath is CueFlow's per-run tool server; the runner prefixes the URL it registered with.
 	MCPPath        string `json:"mcp_path"`

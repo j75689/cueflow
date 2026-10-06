@@ -101,7 +101,7 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	res := acpdrive.Run(ctx, acpdrive.Params{
 		Launch: launch, AuthMethod: authMethod, AllowWeb: allowWeb,
 		MCPURL: strings.TrimRight(c.MCPBaseURL, "/") + MCPPathPrefix + token,
-		Prompt: prompt, Ended: mrun.done, Sink: crewSink{c: c, task: task, agent: a}, CredentialHint: hint,
+		Model:  launch.Model, Prompt: prompt, Ended: mrun.done, Sink: crewSink{c: c, task: task, agent: a}, CredentialHint: hint,
 	})
 	return c.acpOutcome(ctx, run, env, res, launch.Timeout)
 }

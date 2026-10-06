@@ -25,6 +25,8 @@ func init() {
 			{Key: "preset", Label: "Agent", Type: connector.FieldSelect,
 				Options: []string{"claude-code", "codex", "gemini", "opencode", "goose", "custom"}, Default: "claude-code",
 				Help: "Which agent CLI the runner launches. \"custom\" runs whatever the runner maps to it in its own config. The runner's policy can still refuse it"},
+			{Key: "model", Label: "Model", Type: connector.FieldString,
+				Help: "Model id or name as the agent lists it (e.g. gemini-pro-agent, claude-sonnet-5-5). Blank uses the agent's default. A runner can pin its own"},
 			{Key: "timeout_minutes", Label: "Run timeout (minutes)", Type: connector.FieldNumber, Default: 20},
 			{Key: "queue_timeout_minutes", Label: "Wait for a runner (minutes)", Type: connector.FieldNumber, Default: 30,
 				Help: "Fail the task if no runner picks the work up in this time"},
@@ -39,6 +41,7 @@ func init() {
 type Pool struct {
 	labels       []string
 	preset       string
+	model        string
 	timeout      time.Duration
 	queueTimeout time.Duration
 	allowWeb     bool
@@ -48,6 +51,7 @@ func New(cfg connector.Config, _ connector.Env) (connector.Instance, error) {
 	p := &Pool{
 		labels:       cfg.StringList("labels"),
 		preset:       cfg.String("preset"),
+		model:        cfg.String("model"),
 		timeout:      time.Duration(cfg.Int("timeout_minutes", 20)) * time.Minute,
 		queueTimeout: time.Duration(cfg.Int("queue_timeout_minutes", 30)) * time.Minute,
 		allowWeb:     true,
@@ -62,6 +66,7 @@ func New(cfg connector.Config, _ connector.Env) (connector.Instance, error) {
 }
 
 func (p *Pool) Labels() []string                { return p.labels }
+func (p *Pool) Model() string                   { return p.model }
 func (p *Pool) Preset() string                  { return p.preset }
 func (p *Pool) RunTimeout() time.Duration       { return p.timeout }
 func (p *Pool) QueueTimeout() time.Duration     { return p.queueTimeout }

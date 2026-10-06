@@ -5,6 +5,7 @@ package runner
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,8 @@ type Config struct {
 	// AuthMethods names the ACP authenticate method to use per preset, for agents that require one
 	// (e.g. {"custom": "oauth-personal"} for Google's Antigravity ACP server).
 	AuthMethods map[string]string `json:"auth_methods,omitempty"`
+	// Models pins the model per preset; it wins over what the server asks for.
+	Models map[string]string `json:"models,omitempty"`
 	// Env is added to every agent process's environment (credentials can live here).
 	Env map[string]string `json:"env,omitempty"`
 	// DenyWeb refuses the agent's web fetch/search tools whatever the server asks for.
@@ -423,6 +426,7 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 	return acpdrive.Run(ctx, acpdrive.Params{
 		Launch: launch, AuthMethod: auth, AllowWeb: allowWeb,
 		MCPURL: r.cfg.URL + job.MCPPath, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
+		Model: cmp.Or(r.cfg.Models[job.Preset], job.Model),
 	})
 }
 

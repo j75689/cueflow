@@ -21,6 +21,7 @@ import (
 type runnerPool interface {
 	Labels() []string
 	Preset() string
+	Model() string
 	RunTimeout() time.Duration
 	QueueTimeout() time.Duration
 	AllowWeb() bool
@@ -55,7 +56,7 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 	job, err := c.store.CreateRunnerJob(ctx, store.NewRunnerJob{
 		OrgID: task.OrgID, TaskID: task.ID, AgentRunID: &run.ID, Labels: pool.Labels(),
 		Payload: runnerapi.Job{
-			TaskID: task.ID.String(), Title: task.Title, Preset: pool.Preset(), Prompt: prompt,
+			TaskID: task.ID.String(), Title: task.Title, Preset: pool.Preset(), Model: pool.Model(), Prompt: prompt,
 			MCPPath: MCPPathPrefix + token, TimeoutSeconds: int(timeout.Seconds()), AllowWeb: pool.AllowWeb(),
 		},
 	})

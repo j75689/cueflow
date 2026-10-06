@@ -43,6 +43,75 @@ type Params struct {
 	Sink  Sink
 	// CredentialHint is appended to authentication failures.
 	CredentialHint string
+	// Model, when set, is selected through the agent's "model" session option (by id or name,
+	// case-insensitive). The run fails, listing what is available, if the agent offers no such model.
+	Model string
+}
+
+// modelChoice is one selectable value of an agent's model option.
+type modelChoice struct{ value, name string }
+
+// modelOption finds the agent's model selector in a new session: the select option of category
+// "model" (or, failing that, one whose id is "model") and its values.
+func modelOption(opts []acp.SessionConfigOption) (id string, choices []modelChoice, ok bool) {
+	for _, o := range opts {
+		s := o.Select
+		if s == nil {
+			continue
+		}
+		isModel := (s.Category != nil && *s.Category == acp.SessionConfigOptionCategoryModel) || string(s.Id) == "model"
+		if !isModel {
+			continue
+		}
+		add := func(list []acp.SessionConfigSelectOption) {
+			for _, c := range list {
+				choices = append(choices, modelChoice{value: string(c.Value), name: c.Name})
+			}
+		}
+		if s.Options.Ungrouped != nil {
+			add(*s.Options.Ungrouped)
+		}
+		if s.Options.Grouped != nil {
+			for _, g := range *s.Options.Grouped {
+				add(g.Options)
+			}
+		}
+		return string(s.Id), choices, true
+	}
+	return "", nil, false
+}
+
+// pickModel resolves what the user typed to one of the agent's model values.
+func pickModel(choices []modelChoice, want string) (string, bool) {
+	for _, c := range choices {
+		if strings.EqualFold(c.value, want) {
+			return c.value, true
+		}
+	}
+	for _, c := range choices {
+		if strings.EqualFold(c.name, want) {
+			return c.value, true
+		}
+	}
+	return "", false
+}
+
+func selectModel(ctx context.Context, conn *acp.ClientSideConnection, sess acp.NewSessionResponse, want string) error {
+	id, choices, ok := modelOption(sess.ConfigOptions)
+	if !ok {
+		return fmt.Errorf("this agent does not let clients choose a model; leave Model blank")
+	}
+	value, found := pickModel(choices, want)
+	if !found {
+		names := make([]string, 0, len(choices))
+		for _, c := range choices {
+			names = append(names, c.value)
+		}
+		return fmt.Errorf("model %q is not offered by this agent; available: %s", want, strings.Join(names, ", "))
+	}
+	_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{
+		ConfigId: acp.SessionConfigId(id), SessionId: sess.SessionId, Value: acp.SessionConfigValueId(value)}})
+	return err
 }
 
 type Result struct {
@@ -126,6 +195,12 @@ func Run(ctx context.Context, p Params) Result {
 		return res
 	}
 	client.setSession(string(sess.SessionId))
+	if m := strings.TrimSpace(p.Model); m != "" {
+		if err := selectModel(runCtx, proc.Conn, sess, m); err != nil {
+			fail("select model", err)
+			return res
+		}
+	}
 
 	type result struct {
 		resp acp.PromptResponse
