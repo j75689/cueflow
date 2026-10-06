@@ -137,7 +137,10 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 
 ---
 
-## Pipelines (scheduled agent jobs)
+## Pipelines (simple schedules)
+
+The dashboard calls these *simple schedules* and lists them on the Schedules page; the API keeps the
+name `pipelines`.
 
 `Pipeline`:
 ```json

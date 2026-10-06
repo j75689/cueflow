@@ -13,7 +13,6 @@ const NAV = [
   { href: "/agents/", label: "Agents", icon: "users", match: (p: string) => p.startsWith("/agents") },
   { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts") },
   { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
-  { href: "/pipelines/", label: "Pipelines", icon: "flow", match: (p: string) => p.startsWith("/pipelines") },
   { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
   { href: "/usage/", label: "Usage", icon: "chart", match: (p: string) => p.startsWith("/usage") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },

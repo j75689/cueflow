@@ -21,7 +21,7 @@
 ```mermaid
 flowchart TB
     subgraph Browser["瀏覽器（localhost:3000）"]
-        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Pipelines · Runs · Connectors"]
+        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Runs · Usage · Connectors"]
     end
 
     subgraph Core["CueFlow（單一 Go 程序）"]
@@ -248,8 +248,9 @@ sequenceDiagram
 
 發布前先取得租約（`lease_until`）。如果 worker 在發布途中掛掉、租約過期，下次啟動時該貼文會被標成 `FAILED`，並註明「可能已發出，重試前請先確認平台」，**不會自動重發**。因為我們無法得知 Postiz 是否已經收到，自動重試可能造成重複貼文。
 
-### 5.4 Pipeline（排程內容管線）
+### 5.4 簡單排程（Pipeline）
 
+後台把 pipeline 顯示為 Schedules 頁上的**簡單排程**，和 agent 任務排程放在一起；API 與資料表仍沿用 `pipelines` 這個名稱。
 Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
 
 1. cron 觸發，以 `SELECT … FOR UPDATE` 加上「同一 pipeline 只能有一個 RUNNING」防止重疊執行。

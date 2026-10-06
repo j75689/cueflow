@@ -59,7 +59,7 @@ function RunView() {
             <span>Started {fmtTime(r.started_at)}</span>
             {r.finished_at && <span>Finished {fmtTime(r.finished_at)}</span>}
             <span>Trigger: {r.trigger}</span>
-            <Link href={`/pipelines/edit/?id=${r.pipeline_id}`} className="hover:underline">
+            <Link href={`/schedules/simple/?id=${r.pipeline_id}`} className="hover:underline">
               Pipeline settings
             </Link>
           </span>

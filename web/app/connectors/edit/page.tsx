@@ -351,7 +351,7 @@ function ItemsPanel({ id }: { id: string }) {
     <Card>
       <CardHeader
         title="Collected items"
-        subtitle="Newest first. Consumed items were already used by a pipeline run."
+        subtitle="Newest first. Consumed items were already used by a simple schedule run."
         actions={
           <Button size="sm" onClick={fetchNow} loading={busy}>
             <Icon name="refresh" className="h-3.5 w-3.5" /> Fetch now
@@ -528,7 +528,7 @@ function ConnectorEdit() {
       !(await dialog.confirm({
         title: "Delete connector?",
         message:
-          "Pipelines and agents using it will lose the reference. This cannot be undone.",
+          "Schedules and agents using it will lose the reference. This cannot be undone.",
         confirmLabel: "Delete connector",
         tone: "danger",
       }))

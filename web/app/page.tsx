@@ -201,10 +201,10 @@ export default function ReviewPage() {
             <div className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700">
               <EmptyState
                 title="Inbox zero"
-                hint="Nothing is waiting for review. Pipelines drop new drafts here on their schedule, or you can run one now."
+                hint="Nothing is waiting for review. Schedules drop new drafts here, or you can run one now."
                 action={
-                  <Link href="/pipelines/">
-                    <Button size="sm">Go to pipelines</Button>
+                  <Link href="/schedules/">
+                    <Button size="sm">Go to schedules</Button>
                   </Link>
                 }
               />

@@ -22,7 +22,7 @@
 ```mermaid
 flowchart TB
     subgraph Browser["Browser (localhost:3000)"]
-        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Pipelines · Runs · Connectors"]
+        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Runs · Usage · Connectors"]
     end
 
     subgraph Core["CueFlow (single Go process)"]
@@ -249,9 +249,11 @@ sequenceDiagram
 
 The worker takes a lease (`lease_until`) before publishing. If it dies mid-publish and the lease expires, the post is marked `FAILED` on the next start with a note that it "may have been published; check the platform before retrying". It is **never retried automatically**: we cannot know whether Postiz already received it, so an automatic retry could double-post.
 
-### 5.4 Pipelines (scheduled content)
+### 5.4 Simple schedules (pipelines)
 
-A pipeline is a simpler, more predictable automation than the agent team:
+The dashboard shows pipelines as **simple schedules** on the Schedules page, next to agent-task schedules;
+the API and tables keep the name `pipelines`. A pipeline is a simpler, more predictable automation than
+the agent team:
 
 1. cron triggers it; `SELECT … FOR UPDATE` plus "only one RUNNING run per pipeline" prevents overlapping runs.
 2. Each source connector is fetched incrementally into `source_items` (duplicates are skipped).

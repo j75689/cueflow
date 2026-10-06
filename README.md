@@ -119,8 +119,10 @@ Then:
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
 3. Either:
    - **Command**: tell the agent team what you want, or
-   - **Pipelines**: create a fixed content pipeline (cron such as `0 8 * * *`, timezone, topic, platforms,
-     instructions - see [docs/prompt-templates.md](docs/prompt-templates.md)) and press **Run now**.
+   - **Schedules**: run work on a timer. An *agent task* schedule opens a task for an agent each time
+     (it researches, reads originals and decides); a *simple schedule* is a fixed collect → one LLM call →
+     drafts flow (cron such as `0 8 * * *`, topic, platforms, instructions - see
+     [docs/prompt-templates.md](docs/prompt-templates.md)). Press **Run now** to try one.
 4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
    show the reason and a **Retry** button.
 

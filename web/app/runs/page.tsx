@@ -29,14 +29,14 @@ function RunsList() {
     <div>
       <PageHeader
         title="Runs"
-        subtitle="History of pipeline executions."
+        subtitle="History of simple schedule runs. Agent tasks keep their history on the board."
         actions={
           <Select
             className="w-56"
             value={pipelineId}
             onChange={(e) => router.replace(e.target.value ? `/runs/?pipeline_id=${e.target.value}` : "/runs/")}
           >
-            <option value="">All pipelines</option>
+            <option value="">All simple schedules</option>
             {(pipelines.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -50,13 +50,13 @@ function RunsList() {
       {runs.data && (
         <Card className="overflow-hidden">
           {runs.data.length === 0 ? (
-            <EmptyState title="No runs yet" hint="Runs appear here when a pipeline fires on schedule or you press Run now." />
+            <EmptyState title="No runs yet" hint="Runs appear here when a simple schedule fires or you press Run now." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-zinc-50 text-left text-xs text-zinc-500 dark:bg-zinc-900/60">
                   <tr>
-                    <th className="px-4 py-2 font-medium">Pipeline</th>
+                    <th className="px-4 py-2 font-medium">Schedule</th>
                     <th className="px-4 py-2 font-medium">Status</th>
                     <th className="px-4 py-2 font-medium">Trigger</th>
                     <th className="px-4 py-2 font-medium">Started</th>

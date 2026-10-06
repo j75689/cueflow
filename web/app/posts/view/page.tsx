@@ -223,7 +223,7 @@ function PostView() {
             {p.pipeline_id && (
               <Link
                 className="hover:underline"
-                href={`/pipelines/edit/?id=${p.pipeline_id}`}
+                href={`/schedules/simple/?id=${p.pipeline_id}`}
               >
                 Pipeline
               </Link>

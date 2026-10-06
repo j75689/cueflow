@@ -89,7 +89,7 @@ docker compose up -d
    - 選用：SearXNG / Tavily 用於網路搜尋，SMTP 用於審核提醒。
 3. 二選一：
    - **Command**：直接告訴 agent 團隊要做什麼。
-   - **Pipelines**：建立固定格式的內容管線（cron 例如 `0 8 * * *`、時區、主題、平台、instructions，見 [docs/zh-TW/prompt-templates.md](docs/zh-TW/prompt-templates.md)），按 **Run now**。
+   - **Schedules**：定時執行。*Agent 任務*排程每次開一張任務給 agent（它會搜尋、讀原文、自己判斷）；*簡單排程*是固定流程：收集素材 → 一次 LLM 呼叫 → 產生草稿（cron 例如 `0 8 * * *`、主題、平台、instructions，見 [docs/zh-TW/prompt-templates.md](docs/zh-TW/prompt-templates.md)）。按 **Run now** 試跑。
 4. **Review**：修改草稿，核准或退回。核准的貼文幾秒內就會交給 Postiz；失敗時會顯示原因並提供 **Retry** 按鈕。
 
 ### 映像版本
