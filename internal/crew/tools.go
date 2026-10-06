@@ -123,7 +123,7 @@ func init() {
 				"hashtags":     strList("Hashtags without '#'"),
 				"image_prompt": str("Prompt for an accompanying image (Instagram)"),
 				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
-				"link":         str("Optional URL shown as a link preview card (Threads), e.g. the main source"),
+				"link":         str("Optional URL shown as a link preview card (Threads); defaults to the first source_urls entry"),
 				"publish_at":   str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
 				"source_urls":  strList("URLs backing the claims in this post"),
 			}, "platform", "content"), run: toolCreateDraft},
@@ -407,6 +407,10 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	}
 	if e.drafts >= maxDraftsPerRun {
 		return "", fmt.Errorf("draft limit reached (%d per run)", maxDraftsPerRun)
+	}
+	if strings.TrimSpace(a.Link) == "" && len(a.SourceURLs) > 0 {
+		// No link card given: show the main source, so readers can always open it.
+		a.Link = strings.TrimSpace(a.SourceURLs[0])
 	}
 	var publishAt *time.Time
 	if s := strings.TrimSpace(a.PublishAt); s != "" {

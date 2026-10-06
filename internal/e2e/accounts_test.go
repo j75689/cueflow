@@ -116,7 +116,8 @@ func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
 			return calls("create_post_draft", map[string]any{"platform": "instagram", "content": "AI news of the day"})
 		case 1:
 			refused = res[0].Content
-			return calls("create_post_draft", map[string]any{"platform": "threads", "content": "AI news of the day"})
+			return calls("create_post_draft", map[string]any{"platform": "threads", "content": "AI news of the day",
+				"source_urls": []string{"https://example.com/story"}})
 		}
 		return calls("complete_task", map[string]any{"summary": "drafted"})
 	})
@@ -140,6 +141,9 @@ func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
 		t.Fatalf("posts: %+v", posts)
 	}
 	p, _ := e.store.GetPost(ctx, posts[0].ID)
+	if p.LinkURL != "https://example.com/story" {
+		t.Fatalf("link card should default to the first source URL: %q", p.LinkURL)
+	}
 	if p.PublisherConnectorID == nil || *p.PublisherConnectorID != pub.ID || strings.Join(p.Accounts, ",") != "a1" {
 		t.Fatalf("draft defaults (accounts filtered to the draft's platform): %v %v", p.PublisherConnectorID, p.Accounts)
 	}
