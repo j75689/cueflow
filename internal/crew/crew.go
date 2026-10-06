@@ -44,6 +44,8 @@ type Crew struct {
 	MCPBaseURL string
 
 	mcp mcpRegistry
+	// selfEnvs holds the per-task tool state of self-driven agents (see selfdriven.go).
+	selfEnvs sync.Map
 
 	mu      sync.Mutex
 	running map[uuid.UUID]context.CancelFunc
@@ -155,6 +157,9 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 		_, mine := c.running[id]
 		c.mu.Unlock()
 		if mine {
+			continue
+		}
+		if c.recoverSelfDriven(ctx, id) {
 			continue
 		}
 		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {

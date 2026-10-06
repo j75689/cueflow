@@ -458,7 +458,8 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit int) (
 		attempts = attempts + 1, started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
 		WHERE id IN (
 			SELECT t.id FROM tasks t JOIN agents a ON a.id=t.assignee_agent_id AND a.is_active
-			WHERE t.status='TODO'
+			LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id
+			WHERE t.status='TODO' AND COALESCE(rc.type,'') <> 'external'
 			ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.updated_at
 			LIMIT $2 FOR UPDATE OF t SKIP LOCKED)
 		RETURNING id`, lease.Seconds(), limit)
@@ -650,7 +651,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRu
 // FailStaleAgentRuns marks runs left RUNNING by a previous process.
 func (s *Store) FailStaleAgentRuns(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET status='FAILED', error='interrupted (server restarted)', finished_at=NOW()
-		WHERE status='RUNNING'`)
+		WHERE status='RUNNING' AND runtime <> 'external'`)
 	return err
 }
 

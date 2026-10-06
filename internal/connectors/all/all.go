@@ -9,6 +9,7 @@ import (
 	_ "github.com/j75689/cueflow/internal/connectors/anthropic"
 	_ "github.com/j75689/cueflow/internal/connectors/comfyui"
 	_ "github.com/j75689/cueflow/internal/connectors/cuesocial"
+	_ "github.com/j75689/cueflow/internal/connectors/external"
 	_ "github.com/j75689/cueflow/internal/connectors/googleimage"
 	_ "github.com/j75689/cueflow/internal/connectors/imap"
 	_ "github.com/j75689/cueflow/internal/connectors/mcptools"

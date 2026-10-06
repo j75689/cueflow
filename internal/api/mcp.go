@@ -30,15 +30,30 @@ var mcpMovableStatuses = []store.TaskStatus{store.TaskBacklog, store.TaskTodo, s
 const mcpThreadLimit = 30
 
 func (s *Server) mcpHandler() http.Handler {
-	srv := s.newMCPServer()
-	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
-		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	operator := s.newMCPServer()
+	type agentKey struct{}
+	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		if a, ok := r.Context().Value(agentKey{}).(*store.Agent); ok {
+			return s.Crew.AgentMCPServer(a)
+		}
+		return operator
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		// An agent token acts as that agent: it sees and works only that agent's tasks.
+		if strings.HasPrefix(tok, store.AgentTokenPrefix) {
+			a, err := s.Store.AgentByToken(r.Context(), tok)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or revoked agent token")
+				return
+			}
+			h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentKey{}, a)))
+			return
+		}
 		if s.MCPToken == "" {
 			writeError(w, http.StatusNotFound, "mcp_disabled", "set CUEFLOW_MCP_TOKEN to enable the MCP endpoint")
 			return
 		}
-		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.MCPToken)) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid MCP token")
 			return

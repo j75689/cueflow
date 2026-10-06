@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -238,4 +239,60 @@ func (s *Server) checkToolServers(ctx context.Context, ids []uuid.UUID) error {
 		}
 	}
 	return nil
+}
+
+// --- agent tokens (self-driven external agents) ---
+
+func (s *Server) listAgentTokens(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	tokens, err := s.Store.ListAgentTokens(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tokens)
+}
+
+func (s *Server) createAgentToken(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	t, plain, err := s.Store.CreateAgentToken(r.Context(), id, body.Name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"id": t.ID, "name": t.Name, "token": plain, "created_at": t.CreatedAt,
+		"mcp_url": strings.TrimRight(s.PublicURL, "/") + MCPPath})
+}
+
+func (s *Server) revokeAgentToken(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	tid, err := uuid.Parse(chi.URLParam(r, "tokenId"))
+	if err != nil {
+		s.fail(w, &store.ValidationError{Msg: "bad token id"})
+		return
+	}
+	if err := s.Store.RevokeAgentToken(r.Context(), id, tid); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

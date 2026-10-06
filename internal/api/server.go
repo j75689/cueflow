@@ -107,6 +107,9 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/agents/{id}/memories", s.listMemories)
 		r.Post("/agents/{id}/memories", s.addMemory)
 		r.Delete("/agents/{id}/memories/{memoryId}", s.deleteMemory)
+		r.Get("/agents/{id}/tokens", s.listAgentTokens)
+		r.Post("/agents/{id}/tokens", s.createAgentToken)
+		r.Delete("/agents/{id}/tokens/{tokenId}", s.revokeAgentToken)
 
 		r.Get("/tasks", s.listTasks)
 		r.Post("/tasks", s.createTask)
