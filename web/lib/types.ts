@@ -564,3 +564,55 @@ export type ScheduleInput = Pick<
   | "publisher_connector_id"
   | "publish_accounts"
 >;
+
+export interface Runner {
+  id: string;
+  name: string;
+  labels: string[];
+  /** Orgs this runner serves; empty = every org. */
+  org_ids: string[];
+  is_active: boolean;
+  max_concurrency: number;
+  version: string;
+  platform: string;
+  last_seen_at: string | null;
+  created_at: string;
+  online: boolean;
+  running_jobs: number;
+}
+
+export interface RunnerRegistration {
+  token: string;
+  expires_at: string;
+  url: string;
+  command: string;
+}
+
+export interface RunnerJob {
+  id: string;
+  task_id: string;
+  status: "queued" | "running" | "canceling" | "done" | "failed" | "canceled" | "expired";
+  labels: string[];
+  runner_id: string | null;
+  runner_name: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface AgentToken {
+  id: string;
+  agent_id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface NewAgentToken {
+  id: string;
+  name: string;
+  /** Shown once. */
+  token: string;
+  mcp_url: string;
+  created_at: string;
+}

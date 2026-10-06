@@ -128,6 +128,26 @@ claude mcp add --transport http cueflow http://localhost:3000/mcp \
   --header "Authorization: Bearer $CUEFLOW_MCP_TOKEN"
 ```
 
+### 在自己的機器上跑 agent（Runner）
+
+**Runner** 是你自己的機器，像 CI 的 self-hosted runner 一樣替 agent 執行任務。它只對外連線，在本機用*自己的*憑證執行
+agent CLI（Claude Code、Codex⋯），agent 仍然透過 CueFlow 的工具作業，所以草稿照樣進審核、不會自動發布。
+本機的 CueFlow 或別處的 CueFlow 都能用。
+
+1. 後台 **Runners → Add runner**，複製畫面上的指令。
+2. 在那台機器上（需要 `cueflow` 執行檔與 agent CLI）：
+   ```bash
+   cueflow runner register --url http://localhost:3000 --token cfreg_... --name mbp
+   cueflow runner run
+   ```
+3. 在 **Connectors** 新增 **Runner pool**（標籤 `claude-code`），再把它選為 agent 的 *Runtime*。
+
+本機政策優先：`~/.config/cueflow/runner.json` 可以限制 `allow_presets`、設定 `deny_web`、把 preset 對應到 `commands`
+路徑並用 `env` 提供憑證，伺服器無法放寬任何一項。`cueflow runner status` 可檢查連線；在後台撤銷 Runner 會立即讓它停止。
+
+Agent 也可以完全自己控制：把它的 Runtime 設為 **External (self-driven)**，在 agent 編輯頁建立 agent token，再用任何
+MCP client 帶著 token 連 `/mcp`。Agent 用 `claim_task` 領自己的任務，並使用同一套工具。詳見 [`docs/api.md`](docs/api.md#runners)。
+
 ### 遠端存取
 
 Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ssh -L 3000:localhost:3000 nas`）或 Tailscale 等 VPN，並設定 `CUEFLOW_ADMIN_TOKEN`。
@@ -144,6 +164,7 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
+| `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫，或 `file:///data/media`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
 | `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |

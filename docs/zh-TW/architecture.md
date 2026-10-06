@@ -88,7 +88,10 @@ flowchart TB
 | `internal/pipeline` | 排程內容管線：收集 → 產生 → 存成待審 → 通知 |
 | `internal/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
 | `internal/scheduler` | cron：觸發 pipeline、產生定時任務、寄送待審摘要 |
-| `internal/events` | 程序內 pub/sub，供 SSE 即時推播 |
+| `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |
+| `internal/acpdrive` | 在 CueFlow 的沙箱政策下，讓 ACP agent 執行一次 prompt；伺服器與 Runner 共用 |
+| `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status`（Runner 的機器端）與通訊協定 |
+| `internal/blob` | 把媒體位元組存到資料庫之外（`file://`）；每一列記錄存放在哪個後端 |
 | `internal/api` | REST + SSE、管理 token 驗證、提供內嵌前端 |
 | `internal/webui` | 內嵌 Next.js 靜態輸出（`web/out` → `internal/webui/dist`） |
 | `web/` | Next.js + Tailwind 前端（static export） |
@@ -105,6 +108,28 @@ flowchart TB
 | Crew（Agent Runner） | 每 2 秒，或有新任務時立即喚醒 | 認領 `TODO` 任務並讓 agent 執行，預設同時 3 個 |
 
 「喚醒」是非阻塞的 channel 通知，所以按下核准或指派任務後幾乎立刻開始處理；定時輪詢只是保險。
+
+### 2.3 Agent 的工作在哪裡執行
+
+Agent 的 runtime 決定誰來執行它的任務。不論哪一種，工具伺服器、對話串與結果處理都相同，所以審核、權限與「agent 不會發布」
+都不依賴 runtime。
+
+| Runtime | 誰決定做什麼 | 誰執行 |
+|---|---|---|
+| 內建（沒有 runtime connector） | CueFlow 的 agent loop | CueFlow，呼叫 LLM connector |
+| `acp_agent` | CueFlow | 在 CueFlow 主機上啟動的 ACP agent CLI |
+| `runner_pool` | CueFlow | 已註冊 **Runner** 上的 ACP agent CLI |
+| `external`（自主） | Agent 自己 | Agent 自己，用 agent token 透過 MCP |
+
+**Runner。** `runner_pool` 的 agent 照常由 crew 認領任務、註冊 per-run MCP 工具伺服器，並寫入一筆 `runner_jobs`（標籤、
+prompt、工具伺服器路徑）。Runner 對 `/api/runner/v1/jobs/claim` 做 long-poll；認領使用 `FOR UPDATE SKIP LOCKED`，並比對標籤
+（`job.labels <@ runner.labels`）與 org。Runner 在本機啟動 agent，agent 直接呼叫 CueFlow 的 MCP 工具，Runner 回傳對話事件並送心跳
+（2 分鐘 lease）。當終止型工具（`complete_task`、`ask_human`⋯）結束任務，伺服器把 job 改為 `canceling`；Runner 下一次心跳得知後
+停止 agent、回報最後的對話並完成 job。超過 `queue_timeout_minutes` 沒人認領，或 Runner 停止心跳，任務會失敗。
+Runner 與 agent token 只儲存 SHA-256。
+
+**自主 agent。** 認領迴圈會略過 runtime 為 `external` 的 agent。它們透過 agent-token 的 MCP 端點認領任務
+（`ClaimTaskForAgent`：`TODO → IN_PROGRESS`，30 分鐘 lease，每次呼叫都會延長）；沉默的任務由 crew 的 lease 回收退回 `TODO`。
 
 ## 3. Connector 插件模型
 
@@ -276,7 +301,7 @@ Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
 
 ## 7. 即時更新
 
-`internal/events` 是程序內的 pub/sub。所有狀態變動（貼文、任務、對話串、執行、connector、agent、排程）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
+`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（貼文、任務、對話串、執行、connector、agent、排程）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
 
 ## 8. 部署拓樸
 

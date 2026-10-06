@@ -22,6 +22,7 @@ const ORG_NAV = [
 const GLOBAL_NAV = [
   { href: "/usage/", label: "Usage", icon: "chart", match: (p: string) => p.startsWith("/usage") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },
+  { href: "/runners/", label: "Runners", icon: "server", match: (p: string) => p.startsWith("/runners") },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {

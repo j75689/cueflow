@@ -3,6 +3,11 @@ import type {
   AgentInput,
   AgentMemory,
   AgentRun,
+  AgentToken,
+  NewAgentToken,
+  Runner,
+  RunnerJob,
+  RunnerRegistration,
   AuditLog,
   Connector,
   ConnectorTestResult,
@@ -243,6 +248,20 @@ export const api = {
     request<AgentMemory>("POST", `/agents/${id}/memories`, { content }),
   deleteAgentMemory: (id: string, memoryId: string) =>
     request<void>("DELETE", `/agents/${id}/memories/${memoryId}`),
+
+  agentTokens: (id: string) => request<AgentToken[]>("GET", `/agents/${id}/tokens`),
+  createAgentToken: (id: string, name: string) => request<NewAgentToken>("POST", `/agents/${id}/tokens`, { name }),
+  revokeAgentToken: (id: string, tokenId: string) => request<void>("DELETE", `/agents/${id}/tokens/${tokenId}`),
+
+  listRunners: () => request<Runner[]>("GET", "/runners"),
+  createRunnerRegistration: (body: { labels: string[]; org_ids?: string[] }) =>
+    request<RunnerRegistration>("POST", "/runners/registrations", body),
+  updateRunner: (
+    id: string,
+    body: Partial<Pick<Runner, "name" | "labels" | "org_ids" | "is_active" | "max_concurrency">>,
+  ) => request<Runner>("PATCH", `/runners/${id}`, body),
+  deleteRunner: (id: string) => request<void>("DELETE", `/runners/${id}`),
+  taskRunnerJobs: (id: string) => request<RunnerJob[]>("GET", `/tasks/${id}/runner-jobs`),
 
   listTasks: (q: { status?: string[]; assignee?: string; parent_id?: string; q?: string; all?: boolean } = {}) =>
     request<{ items: Task[] }>("GET", "/tasks", undefined, { ...q, all: q.all ? "1" : undefined }),

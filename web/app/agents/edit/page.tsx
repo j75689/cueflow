@@ -26,7 +26,7 @@ import {
 import { api } from "@/lib/api";
 import { fmtRelative } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
-import type { AgentInput, AgentRole, Connector } from "@/lib/types";
+import type { AgentInput, AgentRole, AgentToken, Connector, NewAgentToken } from "@/lib/types";
 
 const AVATARS = [
   "🧭",
@@ -129,6 +129,9 @@ function AgentEditor() {
   const toggleIn = (list: string[], v: string, on: boolean) =>
     on ? [...new Set([...list, v])] : list.filter((x) => x !== v);
 
+  const selectedRuntimeType = byKind("runtime").find(
+    (c) => c.id === form.runtime_connector_id,
+  )?.type;
   const roles = meta?.agent_roles ?? FALLBACK_ROLES;
   const caps = meta?.agent_capabilities ?? [];
   const valid = form.name.trim() !== "" && form.max_turns > 0;
@@ -556,6 +559,8 @@ function AgentEditor() {
             </div>
           </Card>
 
+          {id && selectedRuntimeType === "external" && <TokenPanel agentId={id} />}
+
           {id && <MemoryPanel agentId={id} />}
 
           {id && (
@@ -583,6 +588,109 @@ function AgentEditor() {
         />
       )}
     </div>
+  );
+}
+
+// TokenPanel manages the credentials a self-driven (External runtime) agent connects with.
+function TokenPanel({ agentId }: { agentId: string }) {
+  const toast = useToast();
+  const dialog = useDialog();
+  const tokens = useAsync(() => api.agentTokens(agentId), [agentId]);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [fresh, setFresh] = useState<NewAgentToken | null>(null);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      setFresh(await api.createAgentToken(agentId, name.trim()));
+      setName("");
+      void tokens.reload();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (t: AgentToken) => {
+    const ok = await dialog.confirm({
+      title: `Revoke ${t.name}?`,
+      message: "Anything using this token loses access immediately.",
+      confirmLabel: "Revoke",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await api.revokeAgentToken(agentId, t.id);
+      void tokens.reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+  const snippet = fresh
+    ? `claude mcp add --transport http cueflow ${fresh.mcp_url} --header "Authorization: Bearer ${fresh.token}"`
+    : "";
+
+  return (
+    <Card>
+      <CardHeader
+        title="Agent tokens"
+        subtitle="Connect an outside agent (Claude Code, Codex, a script) to CueFlow's MCP endpoint as this agent. It claims its own tasks with claim_task."
+      />
+      <div className="space-y-3 p-4">
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Token name, e.g. laptop" />
+          <Button type="submit" variant="secondary" loading={busy} disabled={!name.trim()}>
+            Create token
+          </Button>
+        </form>
+        {fresh && (
+          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-500/40 dark:bg-amber-500/10">
+            <p className="font-medium">Copy it now: this token is not shown again.</p>
+            <pre className="overflow-x-auto break-all whitespace-pre-wrap">{snippet}</pre>
+            <Button
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard?.writeText(snippet);
+                toast.success("Copied");
+              }}
+            >
+              Copy command
+            </Button>
+          </div>
+        )}
+        {tokens.error && <ErrorBox onRetry={tokens.reload}>{tokens.error}</ErrorBox>}
+        {tokens.loading && !tokens.data ? (
+          <Loading />
+        ) : (tokens.data ?? []).length === 0 ? (
+          <p className="text-xs text-zinc-500">No tokens yet.</p>
+        ) : (
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {(tokens.data ?? []).map((t) => (
+              <li key={t.id} className="flex items-center gap-2 py-2 text-sm">
+                <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                <span className="shrink-0 text-[11px] text-zinc-400">
+                  {t.last_used_at ? `used ${fmtRelative(t.last_used_at)}` : "never used"}
+                </span>
+                <button
+                  onClick={() => void revoke(t)}
+                  className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
+                  aria-label="Revoke token"
+                >
+                  <Icon name="x" className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
   );
 }
 

@@ -165,6 +165,29 @@ claude mcp add --transport http cueflow http://localhost:3000/mcp \
   --header "Authorization: Bearer $CUEFLOW_MCP_TOKEN"
 ```
 
+### Run agents on your own machine (Runners)
+
+A **Runner** is a machine you own that works agents' tasks, like a CI self-hosted runner. It only makes
+outbound connections, runs the agent CLI (Claude Code, Codex...) locally with *its own* credentials, and the
+agent still uses CueFlow's tools, so drafts go to review and nothing is published. It works against a local
+CueFlow or one running elsewhere.
+
+1. Dashboard → **Runners → Add runner**; copy the command it shows.
+2. On the machine (it needs the `cueflow` binary and the agent CLI):
+   ```bash
+   cueflow runner register --url http://localhost:3000 --token cfreg_... --name mbp
+   cueflow runner run
+   ```
+3. Under **Connectors**, add a **Runner pool** (label `claude-code`) and select it as an agent's *Runtime*.
+
+Local policy wins: `~/.config/cueflow/runner.json` can restrict `allow_presets`, set `deny_web`, map a preset
+to a `commands` path and provide credentials in `env`; the server cannot widen any of it. `cueflow runner status`
+checks the connection; revoking a runner in the dashboard stops it at once.
+
+An agent can also drive itself: give it the **External (self-driven)** runtime, create an agent token on its
+edit page, and connect any MCP client to `/mcp` with it. The agent claims its own tasks (`claim_task`) and
+works them with the same tools. See [`docs/api.md`](docs/api.md#runners).
+
 ### Remote access
 
 Ports are bound to localhost on purpose. To review from your phone, use an SSH tunnel
@@ -182,6 +205,7 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
+| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, or `file:///data/media`. Move existing media with `cueflow media migrate --to file:///data/media` |
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |

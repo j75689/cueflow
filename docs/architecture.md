@@ -89,7 +89,10 @@ flowchart TB
 | `internal/pipeline` | Scheduled content pipeline: collect → generate → store for review → notify |
 | `internal/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
 | `internal/scheduler` | cron: triggers pipelines, spawns scheduled tasks, sends the review digest |
-| `internal/events` | In-process pub/sub for live SSE updates |
+| `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
+| `internal/acpdrive` | Drives one prompt through an ACP agent under CueFlow's sandbox policy; shared by the server and runners |
+| `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status` (the machine side of Runners) and the wire protocol |
+| `internal/blob` | Byte storage for media outside the database (`file://`); rows record which backend holds them |
 | `internal/api` | REST + SSE, admin token check, serves the embedded frontend |
 | `internal/webui` | Embedded Next.js static export (`web/out` → `internal/webui/dist`) |
 | `web/` | Next.js + Tailwind frontend (static export) |
@@ -106,6 +109,31 @@ A CueFlow process runs four kinds of background work, which communicate only thr
 | Crew (agent runner) | every 2 seconds, or woken immediately when there is a new task | Claims `TODO` tasks and lets agents work them, 3 at a time by default |
 
 "Waking" is a non-blocking channel notification, so work starts almost immediately after an approval or an assignment; the periodic polling is only a safety net.
+
+### 2.3 Where an agent's work runs
+
+An agent's runtime decides who executes its tasks. The tool server, thread and outcomes are the same in every case, so
+review, permissions and "agents never publish" do not depend on the runtime.
+
+| Runtime | Who decides what to do | Who executes |
+|---|---|---|
+| Built-in (no runtime connector) | CueFlow's agent loop | CueFlow, calling the LLM connector |
+| `acp_agent` | CueFlow | An ACP agent CLI launched on the CueFlow host |
+| `runner_pool` | CueFlow | An ACP agent CLI on a registered **Runner** |
+| `external` (self-driven) | The agent itself | The agent itself, over MCP with an agent token |
+
+**Runners.** For a `runner_pool` agent the crew claims the task as usual, registers the per-run MCP tool server, and
+inserts a `runner_jobs` row (labels, prompt, the tool server's path). A runner long-polls `/api/runner/v1/jobs/claim`;
+the claim is `FOR UPDATE SKIP LOCKED` and matches labels (`job.labels <@ runner.labels`) and org. The runner launches the
+agent locally, the agent calls CueFlow's MCP tools directly, and the runner streams thread events and heartbeats (a
+2-minute lease). When a terminal tool (`complete_task`, `ask_human`...) ends the task the server moves the job to
+`canceling`; the runner's next heartbeat tells it to stop, it reports the tail of the conversation and completes the job.
+A job nobody claims within `queue_timeout_minutes`, or whose runner stops heartbeating, fails the task.
+Runner and agent tokens are stored as SHA-256 only.
+
+**Self-driven agents.** The claim loop skips agents whose runtime is `external`. They claim tasks through the agent-token
+MCP endpoint (`ClaimTaskForAgent`: `TODO → IN_PROGRESS` with a 30-minute lease, extended by every call); the crew's
+lease recovery returns a quiet task to `TODO`.
 
 ## 3. Connector plugin model
 
@@ -278,7 +306,7 @@ Work that needs understanding, breakdown, delegation or follow-up questions goes
 
 ## 7. Live updates
 
-`internal/events` is an in-process pub/sub. Every state change (posts, tasks, threads, runs, connectors, agents, schedules) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
+`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (posts, tasks, threads, runs, connectors, agents, schedules) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
 
 ## 8. Deployment topology
 

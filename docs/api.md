@@ -234,6 +234,12 @@ An agent is a configured role (persona + capabilities + connectors) that works t
 | GET | `/agents/{id}/memories` | | → `[{"id","agent_id","content","created_at"}]` newest first |
 | POST | `/agents/{id}/memories` | `{content}` | add a note the agent will always see |
 | DELETE | `/agents/{id}/memories/{memoryId}` | | |
+| GET | `/agents/{id}/tokens` | | → `[{"id","agent_id","name","created_at","last_used_at"}]`; never includes the token itself |
+| POST | `/agents/{id}/tokens` | `{name}` | → `201 {"id","name","token":"cfa_...","mcp_url","created_at"}`. The token is shown once. See [Self-driven agents](#self-driven-agents-agent-tokens) |
+| DELETE | `/agents/{id}/tokens/{tokenId}` | | Revokes at once |
+
+`runtime_connector_id` may point at a connector of kind `runtime`: `acp_agent` (CueFlow launches the agent on its
+own host), `runner_pool` (a registered [Runner](#runners) launches it) or `external` (the agent drives itself).
 
 `/meta` additionally returns:
 ```json
@@ -310,9 +316,56 @@ A schedule creates a new task for an agent on a cron expression (agents with `pl
 
 ---
 
+## Runners
+
+A Runner is a machine you own that works agents' tasks: `cueflow runner run` long-polls CueFlow for jobs
+(outbound HTTP only), launches the agent CLI locally (Claude Code, Codex, ...) with that machine's own
+credentials, and reports back. Point an agent at runners with a `runner_pool` runtime connector
+(`labels`, `preset`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`); a runner takes a job only if it
+has every label the connector asks for and serves the job's org. The agent still works through CueFlow's
+per-run MCP tools, so review, permissions and "agents never publish" hold. Runners are global (not per org);
+a runner's `org_ids` can restrict it (empty = every org).
+
+`Runner`:
+```json
+{"id":"uuid","name":"mbp","labels":["claude-code","mac"],"org_ids":[],"is_active":true,"max_concurrency":1,
+ "version":"0.2.0","platform":"darwin/arm64","last_seen_at":"...","created_at":"...","online":true,"running_jobs":0}
+```
+`online` = polled within the last 90 s.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/runners` | | → `[Runner]` |
+| POST | `/runners/registrations` | `{labels?, org_ids?, ttl_minutes?}` | → `201 {"token":"cfreg_...","expires_at","url","command"}`. One-time token (default 1 h, max 24 h); `command` is the `cueflow runner register ...` line to run on the machine |
+| PATCH | `/runners/{id}` | `{name?, labels?, org_ids?, is_active?, max_concurrency?}` | |
+| DELETE | `/runners/{id}` | | Revokes: the token stops working and its running jobs are canceled |
+| GET | `/tasks/{id}/runner-jobs` | | → jobs of the task: `id`, `status` (`queued`, `running`, `canceling`, `done`, `failed`, `canceled`, `expired`), `labels`, `runner_name`, timestamps |
+
+### Runner protocol (`/api/runner/v1`, protocol 1)
+
+Authenticated by the runner's own token (`Authorization: Bearer cfr_...`), not by `CUEFLOW_ADMIN_TOKEN`; a
+reverse proxy that guards the admin API must let this path through. A runner speaking another protocol gets
+`426`. Tokens are stored as SHA-256 only.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/register` | `{token, name, version, platform, labels, concurrency, protocol}` trades a registration token for a runner token (`401` if used/expired). Labels set at registration win; the runner's own are used only when the registration has none |
+| POST | `/jobs/claim` | `{protocol}`; long-polls up to 25 s → `200 {id, task_id, title, preset, prompt, mcp_path, timeout_seconds, allow_web}` or `204`. `401` once the runner is revoked or disabled. The runner reaches the tool server at its registered URL + `mcp_path` |
+| POST | `/jobs/{id}/events` | `{events:[{kind: message\|tool_call\|tool_result\|system, content, data}]}` → thread messages; also extends the lease. → `{"cancel":bool}` |
+| POST | `/jobs/{id}/heartbeat` | Extends the 2-minute lease (send every 30 s) → `{"cancel":bool}`; `cancel` means stop the agent |
+| POST | `/jobs/{id}/complete` | `{stop_reason, final_text, agent_name, tool_calls, input_tokens, output_tokens, error, timed_out, canceled}` → `{"accepted":bool}` |
+
+Local policy always wins: the runner's own config (`allow_presets`, `deny_web`, `commands`) can only narrow what
+the server asks for, and shell/file tools are refused as for any external agent. If no runner takes a job within
+`queue_timeout_minutes`, or a runner stops heartbeating, the task fails with that reason.
+
+---
+
 ## Media
 
-Images stored by CueFlow. Posts reference them in `media_urls` as `/media/{id}`.
+Images stored by CueFlow. Posts reference them in `media_urls` as `/media/{id}`. Bytes live in the database by
+default; set `CUEFLOW_MEDIA_STORAGE=file:///data/media` to keep new media on disk, and move existing media with
+`cueflow media migrate --to file:///data/media` (or `--to db` to move it back). The URLs do not change.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
@@ -376,6 +429,24 @@ Every tool except `list_orgs` takes an optional `org` slug (default org when bla
 slugs are resolved within it. Tasks created here have `created_by: "human"`. No tool approves, schedules or publishes posts. Mistakes
 (unknown task or agent, a status owned by the runner) come back as tool errors (`isError: true`).
 
+### Self-driven agents (agent tokens)
+
+`/mcp` also accepts an **agent token** (`cfa_...`, from `POST /agents/{id}/tokens`), independent of
+`CUEFLOW_MCP_TOKEN`. The caller then *is* that agent and sees only its own tasks. Give the agent the
+`external` runtime connector ("External (self-driven)"): CueFlow never starts it, and its tasks wait in
+`TODO` until it claims them.
+
+| Tool | Does |
+|---|---|
+| `list_my_tasks` | Tasks assigned to the agent (default `TODO`, `IN_PROGRESS`, `WAITING_HUMAN`, `BLOCKED`) |
+| `claim_task` | Claims the most urgent `TODO` task (or `task`) → `IN_PROGRESS` for 30 min, opens an agent run, returns the agent's instructions and the task brief |
+| `get_task` | The claimed task's brief with the latest thread |
+| every tool the agent's capabilities give a built-in agent (`add_comment`, `ask_human`, `create_post_draft`, `revise_draft`, `complete_task`, ...) | Same behaviour and limits, scoped to the claimed task; takes an optional `task` (number or id; required when several are in progress) |
+
+Each call extends the claim. `complete_task` moves the task to Review, `ask_human` to Waiting for human, as for
+built-in agents; a claim that goes quiet for 30 minutes returns the task to `TODO` and fails its run.
+Revoking the token cuts access immediately. An agent token cannot reach the operator tools above.
+
 ---
 
 ## Live updates
@@ -392,4 +463,8 @@ Event names and `data` payloads:
 - `agent.updated` → `{"id":"uuid"}`
 - `org.updated` → `{"id":"uuid"}` (created, renamed or deleted)
 - `schedule.updated` → `{"id":"uuid"}`
+- `runner.updated` → `{"id":"uuid"}` (registered, edited or revoked)
+
+Events travel through PostgreSQL `LISTEN/NOTIFY` (channel `cueflow_events`), so several CueFlow instances on one
+database all deliver every event to their own clients.
 A `: ping` comment is sent every 20s.
