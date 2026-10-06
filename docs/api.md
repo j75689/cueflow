@@ -452,6 +452,22 @@ Revoking the token cuts access immediately. An agent token cannot reach the oper
 
 ---
 
+## Internal endpoints (cloud mode only)
+
+With `CUEFLOW_TICK=external` (and `CUEFLOW_QUEUE=cloudtasks`) the server also serves two endpoints for Google
+Cloud. They require `Authorization: Bearer <Google ID token>` whose audience is `CUEFLOW_INTERNAL_AUDIENCE` and whose
+email is one of `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` (`401` invalid or missing, `403` not allowed). They are not served
+at all in the local deployment, and are not covered by `CUEFLOW_ADMIN_TOKEN`.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/internal/tick` | Cloud Scheduler, every minute: fires due schedules, pipelines and the review digest once, closes abandoned work, and enqueues waiting work. `204` |
+| POST | `/internal/work/{kind}/{id}` | Cloud Tasks delivery; `kind` is `crew`, `dispatch`, `pipeline` or `schedule`. `204` when done (also when there was nothing to do); `500` makes Cloud Tasks retry; `404` unknown kind; `400` bad id |
+
+`GET /media/{id}` answers `302` to a short-lived signed URL when the media is stored in GCS.
+
+---
+
 ## Live updates
 
 ### `GET /api/v1/events` (Server-Sent Events)

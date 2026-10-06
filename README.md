@@ -207,13 +207,18 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
-| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, or `file:///data/media`. Move existing media with `cueflow media migrate --to file:///data/media` |
+| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
+| `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](deploy/cloudrun/README.md)) |
+| `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
+| `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
+| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
+| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
 

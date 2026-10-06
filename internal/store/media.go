@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -110,6 +111,26 @@ func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*Media, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+// MediaRedirect returns a short-lived direct URL for a media item when its bytes live in a backend
+// that can sign URLs (GCS), so large files are served by the storage service instead of this
+// process. ok is false for media kept in the database or on disk.
+func (s *Store) MediaRedirect(ctx context.Context, id uuid.UUID, ttl time.Duration) (url string, ok bool, err error) {
+	m, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return "", false, err
+	}
+	b, berr := s.blobFor(kind)
+	if berr != nil {
+		return "", false, nil
+	}
+	signer, isSigner := b.(blob.Signer)
+	if !isSigner {
+		return "", false, nil
+	}
+	url, err = signer.SignedURL(ctx, id.String(), ttl, m.MimeType)
+	return url, err == nil, err
 }
 
 // OpenMedia returns the image's metadata and a seekable stream of its bytes (for Range requests).

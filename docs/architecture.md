@@ -327,7 +327,34 @@ flowchart LR
 - `deploy/docker-compose.yml`: `cd deploy && docker compose up -d` brings up every service; all ports are bound to `127.0.0.1`. For remote access use an SSH tunnel or Tailscale.
 - The CueFlow image is distroless and non-root, with a built-in `healthcheck` subcommand.
 - For development or a trial run, `--profile mock` starts a mock Postiz MCP server.
-- The current design is **single-instance**. Task and publish claiming use database leases and `SKIP LOCKED`, so two instances will not process the same work twice, but cron fires once per instance, so horizontal scaling is not recommended.
+- The local deployment is **single-instance**: in-process loops, in-process cron. Task and publish claiming use database leases and `SKIP LOCKED`, so two instances would not process the same work twice, but cron would fire once per instance. For several instances use the cloud mode below.
+
+### 8.1 Cloud deployment (Cloud Run + Cloud Tasks + Cloud Scheduler)
+
+The same binary and image run in the cloud with `CUEFLOW_QUEUE=cloudtasks` and `CUEFLOW_TICK=external` (setup scripts and the full guide: `deploy/cloudrun/`). Nothing polls and nothing is scheduled in the process, so it scales to zero between requests and runs on several instances:
+
+```
+ Cloud Scheduler ── every minute ──► POST /internal/tick
+        claims due schedules/pipelines/digest (next_run_at), sweeps abandoned work, enqueues what is waiting
+
+ user / agent action ─► cueflow ── writes DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|dispatch|pipeline|schedule}/{id}
+                                                                          claim atomically, do the work, return
+ /api/runner/*, /mcp/run/{token}: served by any instance (credentials and outcomes live in the database)
+```
+
+| Concern | How it works |
+|---|---|
+| Work delivery | `jobs.Queue` (`internal/jobs`): `Wake()` on the crew and publish worker enqueues a delivery; `internal/jobs/cloudtasks` posts it to Cloud Tasks over REST. Delivery is at least once; every handler starts with an atomic claim, so duplicates find nothing to do. Handlers claim *whichever work is next* (the id is for naming and de-duplication), loop until none is left, and stop after 25 minutes, re-enqueueing if work remains |
+| The clock | `Scheduler.Tick` uses `next_run_at` on schedules and pipelines and a `clock` row for the digest. Due rows are claimed with `FOR UPDATE SKIP LOCKED` and moved forward in one transaction, so concurrent ticks fire an activation once. A row without `next_run_at` (new or edited) is only scheduled; an activation more than 15 minutes late is skipped |
+| Cleanup | The start-up "everything running is stale" cleanup is skipped in the cloud; `Store.FailAbandoned` on the tick closes work whose lease or age shows its owner is gone |
+| Per-run MCP | The run's token is a row in `run_tokens`; any instance rebuilds the tool server from it. A terminal tool call writes its outcome there and the waiting instance polls it, so the call may be served elsewhere |
+| Cancel | The running instance's heartbeat cancels the run when its task is no longer `IN_PROGRESS`, so a cancel on any instance takes effect within one lease interval |
+| Internal endpoints | `/internal/*` exists only in cloud mode and requires a Google-signed ID token with the configured audience from an allow-listed service account (`internal/internalauth`) |
+| Events | PostgreSQL `LISTEN/NOTIFY` (see §7): every instance pushes every event to its own browsers. Use a session pooler, not a transaction pooler, for the database |
+| Media | `gcs://bucket/prefix` (`internal/blob`): `/media/{id}` answers 302 to a short-lived signed URL (IAM-signed, no key file) |
+| Agents | Only runners and self-driven agents (`runner_pool`, `external`): the cloud has no agent CLI. Built-in LLM agents work as usual |
+
+Not covered by automated tests (they need a real project): the Cloud Tasks and Cloud Scheduler calls, IAM signing and real ID-token validation. These are tested against fakes.
 
 ## 9. Extension points
 

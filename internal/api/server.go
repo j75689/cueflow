@@ -22,6 +22,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/scheduler"
@@ -48,6 +49,12 @@ type Server struct {
 	MCPToken string
 	// PublicURL is how runners reach this server; it goes into registration commands.
 	PublicURL string
+
+	// Cloud deployment: when InternalAuth is set, /internal/tick and /internal/work/{kind}/{id}
+	// are served behind it (Cloud Scheduler and Cloud Tasks call them with Google ID tokens).
+	InternalAuth func(http.Handler) http.Handler
+	Handlers     jobs.Handlers
+	Tick         func(context.Context) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -147,6 +154,9 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
+	if s.InternalAuth != nil {
+		r.Route("/internal", s.internalRoutes)
+	}
 	// Runners authenticate with their own tokens, not the admin token.
 	r.Route("/api/runner/v1", s.runnerRoutes)
 	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run

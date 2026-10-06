@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/j75689/cueflow/internal/api"
@@ -35,6 +36,9 @@ import (
 	"github.com/j75689/cueflow/internal/dispatch"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/internalauth"
+	"github.com/j75689/cueflow/internal/jobs"
+	"github.com/j75689/cueflow/internal/jobs/cloudtasks"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/runner"
@@ -128,7 +132,7 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := connectWithRetry(ctx, cfg.DatabaseURL, logger)
+	pool, err := connectWithRetry(ctx, cfg.DatabaseURL, cfg.DBMaxConns, logger)
 	if err != nil {
 		return err
 	}
@@ -150,8 +154,12 @@ func serve() error {
 		return err
 	}
 	st.SetBlobs(blobs)
-	if err := st.FailStaleRuns(ctx); err != nil {
-		logger.Warn("clean stale runs", "err", err)
+	// "Everything running is stale" is only true when this is the one process. In the cloud, other
+	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
+	if !cfg.Cloud() {
+		if err := st.FailStaleRuns(ctx); err != nil {
+			logger.Warn("clean stale runs", "err", err)
+		}
 	}
 	broker := events.NewBroker()
 	broker.Attach(pool, logger)
@@ -171,11 +179,13 @@ func serve() error {
 		broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
 		team.Wake()
 	}
-	if err := st.FailStaleAgentRuns(ctx); err != nil {
-		logger.Warn("clean stale agent runs", "err", err)
-	}
-	if err := st.CancelOrphanRunnerJobs(ctx); err != nil {
-		logger.Warn("clean stale runner jobs", "err", err)
+	if !cfg.Cloud() {
+		if err := st.FailStaleAgentRuns(ctx); err != nil {
+			logger.Warn("clean stale agent runs", "err", err)
+		}
+		if err := st.CancelOrphanRunnerJobs(ctx); err != nil {
+			logger.Warn("clean stale runner jobs", "err", err)
+		}
 	}
 	if org, err := st.DefaultOrg(ctx); err != nil {
 		logger.Warn("seed default agents", "err", err)
@@ -184,20 +194,46 @@ func serve() error {
 	} else if n > 0 {
 		logger.Info("created the default agent team", "agents", n)
 	}
-	if !cfg.DisableScheduler {
-		if err := sched.Start(ctx); err != nil {
-			return err
-		}
+	apiSrv := &api.Server{
+		Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
+		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL,
 	}
-	go worker.Run(ctx)
-	go team.Run(ctx)
+	if cfg.Queue == "cloudtasks" {
+		q, err := cloudtasks.New(cloudtasks.Config{Queue: cfg.TasksQueue, TargetURL: cfg.TasksTargetURL,
+			ServiceAccount: cfg.TasksServiceAccount, Audience: cfg.InternalAudience})
+		if err != nil {
+			return fmt.Errorf("cloud tasks: %w", err)
+		}
+		team.Queue, worker.Queue, sched.Queue = q, q, q
+	}
+	if cfg.Tick == "external" {
+		// The clock and the queue live outside: Cloud Scheduler calls /internal/tick, Cloud Tasks
+		// calls /internal/work/*. Nothing is polled or scheduled in this process.
+		sched.External = true
+		apiSrv.InternalAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.InternalServiceAccounts))
+		apiSrv.Handlers = jobs.Handlers{
+			jobs.KindCrew:     func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
+			jobs.KindDispatch: func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
+			jobs.KindPipeline: sched.HandlePipeline,
+			jobs.KindSchedule: sched.HandleSchedule,
+		}
+		apiSrv.Tick = func(ctx context.Context) error {
+			return errors.Join(sched.Tick(ctx), team.Sweep(ctx), worker.Sweep(ctx))
+		}
+		logger.Info("external clock: waiting for /internal/tick and /internal/work deliveries", "queue", cfg.Queue)
+	} else {
+		if !cfg.DisableScheduler {
+			if err := sched.Start(ctx); err != nil {
+				return err
+			}
+		}
+		go worker.Run(ctx)
+		go team.Run(ctx)
+	}
 
 	srv := &http.Server{
-		Addr: cfg.Addr,
-		Handler: (&api.Server{
-			Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
-			Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL,
-		}).Handler(),
+		Addr:              cfg.Addr,
+		Handler:           apiSrv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
@@ -223,10 +259,10 @@ func serve() error {
 }
 
 // connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
-func connectWithRetry(ctx context.Context, url string, logger *slog.Logger) (*pgxpool.Pool, error) {
+func connectWithRetry(ctx context.Context, url string, maxConns int, logger *slog.Logger) (*pgxpool.Pool, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 30; attempt++ {
-		pool, err := db.Open(ctx, url)
+		pool, err := db.OpenWith(ctx, url, maxConns)
 		if err == nil {
 			return pool, nil
 		}

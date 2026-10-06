@@ -152,7 +152,7 @@ func (s *Store) UpdatePipeline(ctx context.Context, p *Pipeline, validate CronVa
 	out, err := scanPipeline(s.pool.QueryRow(ctx, `UPDATE pipelines SET name=$2, description=$3, is_active=$4,
 		cron_expr=$5, timezone=$6, topic=$7, instructions=$8, language=$9, platforms=$10, llm_connector_id=$11,
 		source_connector_ids=$12, search_connector_id=$13, search_queries=$14, publisher_connector_id=$15,
-		notifier_connector_id=$16, lookback_hours=$17, max_items=$18, updated_at=NOW()
+		notifier_connector_id=$16, lookback_hours=$17, max_items=$18, next_run_at=NULL, updated_at=NOW()
 		WHERE id=$1 RETURNING `+pipelineColumns,
 		p.ID, p.Name, p.Description, p.IsActive, p.CronExpr, p.Timezone, p.Topic, p.Instructions, p.Language,
 		p.Platforms, p.LLMConnectorID, p.SourceConnectorIDs, p.SearchConnectorID, p.SearchQueries,

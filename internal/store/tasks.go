@@ -478,10 +478,12 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit int) (
 	return ids, rows.Err()
 }
 
-func (s *Store) ExtendTaskLease(ctx context.Context, id uuid.UUID, lease time.Duration) error {
-	_, err := s.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() + make_interval(secs => $2)
+// ExtendTaskLease keeps a running task reserved. It reports false when the task is no longer
+// IN_PROGRESS (a human canceled or moved it, possibly through another instance): the worker must stop.
+func (s *Store) ExtendTaskLease(ctx context.Context, id uuid.UUID, lease time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() + make_interval(secs => $2)
 		WHERE id=$1 AND status='IN_PROGRESS'`, id, lease.Seconds())
-	return err
+	return tag.RowsAffected() == 1, err
 }
 
 // ExpiredTaskLeases returns IN_PROGRESS tasks whose runner died.
@@ -807,7 +809,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, sc *Schedule, validate CronV
 	}
 	out, err := scanSchedule(s.pool.QueryRow(ctx, `UPDATE schedules SET name=$2, cron_expr=$3, timezone=$4, is_active=$5,
 		assignee_agent_id=$6, task_title=$7, task_description=$8, priority=$9, publisher_connector_id=$10,
-		publish_accounts=$11, updated_at=NOW()
+		publish_accounts=$11, next_run_at=NULL, updated_at=NOW()
 		WHERE id=$1 RETURNING `+scheduleColumns, sc.ID, truncate(sc.Name, 128), sc.CronExpr, sc.Timezone, sc.IsActive,
 		sc.AssigneeAgentID, truncate(sc.TaskTitle, 255), sc.TaskDescription, sc.Priority, sc.PublisherConnectorID,
 		cleanList(sc.PublishAccounts)))

@@ -83,6 +83,14 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Backends that can sign URLs (GCS) serve the bytes themselves.
+	if u, ok, err := s.Store.MediaRedirect(r.Context(), id, 15*time.Minute); err != nil {
+		s.Logger.Warn("sign media url; serving through the app", "id", id, "err", err)
+	} else if ok {
+		w.Header().Set("Cache-Control", "private, max-age=600")
+		http.Redirect(w, r, u, http.StatusFound)
+		return
+	}
 	m, rc, err := s.Store.OpenMedia(r.Context(), id)
 	if err != nil {
 		http.NotFound(w, r)

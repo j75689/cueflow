@@ -11,12 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Kind tags where a media row's bytes live.
 const (
 	KindDB   = "db"
 	KindFile = "file"
+	KindGCS  = "gcs"
 )
 
 // Store keeps bytes by id.
@@ -28,10 +30,16 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// Signer is implemented by backends that can hand out a time-limited direct download URL, so large
+// media can bypass the server.
+type Signer interface {
+	SignedURL(ctx context.Context, id string, ttl time.Duration, mimeType string) (string, error)
+}
+
 // ErrNotFound means the backend has no bytes for that id.
 var ErrNotFound = errors.New("blob: not found")
 
-// Parse builds a backend from a location such as "file:///data/media". An empty location means the
+// Parse builds a backend from a location such as "file:///data/media" or "gcs://bucket/prefix". An empty location means the
 // database (nil).
 func Parse(loc string) (Store, error) {
 	if strings.TrimSpace(loc) == "" || loc == "db" {
@@ -48,8 +56,13 @@ func Parse(loc string) (Store, error) {
 			return nil, fmt.Errorf("media storage %q: missing directory", loc)
 		}
 		return NewFile(dir)
+	case "gcs":
+		if u.Host == "" {
+			return nil, fmt.Errorf("media storage %q: missing bucket", loc)
+		}
+		return NewGCS(context.Background(), u.Host, strings.Trim(u.Path, "/"))
 	default:
-		return nil, fmt.Errorf("media storage %q: unsupported scheme %q (use file://)", loc, u.Scheme)
+		return nil, fmt.Errorf("media storage %q: unsupported scheme %q (use file:// or gcs://)", loc, u.Scheme)
 	}
 }
 

@@ -166,13 +166,18 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
-| `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫，或 `file:///data/media`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
+| `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫、`file:///data/media` 或 `gcs://bucket/prefix`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
 | `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
+| `CUEFLOW_QUEUE` | `local` | `cloudtasks` 以 Cloud Tasks 派送背景工作（雲端模式，見 [`deploy/cloudrun`](deploy/cloudrun/README.md)） |
+| `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
+| `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
+| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |
+| `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序的資料庫連線上限（小型資料庫建議每個實例約 5） |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
 

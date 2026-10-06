@@ -85,6 +85,9 @@ func Load() (*Config, error) {
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
+	if os.Getenv("CUEFLOW_ADDR") == "" && os.Getenv("PORT") != "" {
+		c.Addr = "0.0.0.0:" + os.Getenv("PORT") // Cloud Run tells the container its port this way
+	}
 	c.MediaBaseURL = env("CUEFLOW_MEDIA_BASE_URL", c.PublicURL)
 	c.MediaStorage = env("CUEFLOW_MEDIA_STORAGE", "")
 	c.Queue = env("CUEFLOW_QUEUE", "local")
@@ -107,6 +110,12 @@ func Load() (*Config, error) {
 	}
 	if c.Queue == "cloudtasks" && (c.TasksQueue == "" || c.TasksServiceAccount == "") {
 		return nil, errors.New("CUEFLOW_QUEUE=cloudtasks needs CUEFLOW_TASKS_QUEUE and CUEFLOW_TASKS_SERVICE_ACCOUNT")
+	}
+	if c.Queue == "cloudtasks" && c.Tick != "external" {
+		return nil, errors.New("CUEFLOW_QUEUE=cloudtasks needs CUEFLOW_TICK=external (the /internal routes that receive the work are only served then)")
+	}
+	if c.Tick == "external" && c.Queue != "cloudtasks" {
+		return nil, errors.New("CUEFLOW_TICK=external needs CUEFLOW_QUEUE=cloudtasks (work is delivered by the queue)")
 	}
 	if c.Cloud() && len(c.InternalServiceAccounts) == 0 {
 		return nil, errors.New("cloud mode needs CUEFLOW_INTERNAL_SERVICE_ACCOUNTS (who may call /internal/*)")

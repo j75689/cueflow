@@ -150,7 +150,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 				return err.Error(), true
 			}
 			env := c.selfDrivenEnv(task, a)
-			_ = c.store.ExtendTaskLease(ctx, task.ID, selfDrivenLease)
+			_, _ = c.store.ExtendTaskLease(ctx, task.ID, selfDrivenLease)
 			out, isErr := c.execTool(guard.WithAgent(ctx), env, byName,
 				llm.ToolCall{ID: uuid.NewString(), Name: t.name, Arguments: stripTaskArg(args)})
 			if env.outcome != nil {

@@ -322,7 +322,34 @@ flowchart LR
 - `deploy/docker-compose.yml`：`cd deploy && docker compose up -d` 一次帶起全部服務，所有 port 都只綁 `127.0.0.1`。遠端存取建議用 SSH tunnel 或 Tailscale。
 - CueFlow 映像是 distroless、非 root，內建 `healthcheck` 子命令。
 - 開發或試用可用 `--profile mock` 啟動模擬的 Postiz MCP server。
-- 目前設計為**單實例**。任務與發布的認領都用資料庫租約與 `SKIP LOCKED`，跑兩個實例不會重複處理，但 cron 會在每個實例各觸發一次，因此不建議水平擴充。
+- 本機部署為**單實例**：程序內迴圈、程序內 cron。任務與發布的認領都用資料庫租約與 `SKIP LOCKED`，跑兩個實例不會重複處理，但 cron 會在每個實例各觸發一次。要跑多個實例請用下面的雲端模式。
+
+### 8.1 雲端部署（Cloud Run + Cloud Tasks + Cloud Scheduler）
+
+同一個執行檔與映像，加上 `CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external` 即為雲端模式（設定腳本與完整指南見 `deploy/cloudrun/`）。程序內不輪詢也不排程，所以沒有請求時可縮到 0，也能多實例並行：
+
+```
+ Cloud Scheduler ── 每分鐘 ──► POST /internal/tick
+        認領到期的排程／pipeline／摘要（next_run_at）、清理被遺棄的工作、補送等待中的工作
+
+ 使用者／agent 動作 ─► cueflow ── 寫 DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|dispatch|pipeline|schedule}/{id}
+                                                                       原子認領、做事、回應
+ /api/runner/*、/mcp/run/{token}：任何實例都能服務（憑證與結果都在資料庫）
+```
+
+| 面向 | 做法 |
+|---|---|
+| 工作派送 | `jobs.Queue`（`internal/jobs`）：crew 與發布 worker 的 `Wake()` 會送出一筆派送；`internal/jobs/cloudtasks` 以 REST 丟進 Cloud Tasks。至少送達一次，每個 handler 都先做原子認領，重複送達只會發現沒事做。Handler 認領「下一件工作」（id 只用於命名與去重），做到沒有為止，最多 25 分鐘，還有剩就再送一筆 |
+| 時鐘 | `Scheduler.Tick` 用排程與 pipeline 的 `next_run_at`，摘要用 `clock` 表。到期的列以 `FOR UPDATE SKIP LOCKED` 認領並在同一交易內推進，多個 tick 同時進來也只觸發一次。沒有 `next_run_at` 的列（新增或剛編輯過）只排程、不觸發；遲到超過 15 分鐘的觸發會被略過 |
+| 清理 | 雲端不做啟動時「所有執行中都算過期」的清理；由 tick 的 `Store.FailAbandoned` 依租約與時間關閉主人已消失的工作 |
+| Per-run MCP | 執行的 token 是 `run_tokens` 的一列，任何實例都能據此重建工具伺服器。終止型工具把結果寫進去，等待中的實例輪詢取得，所以呼叫可以由別的實例處理 |
+| 取消 | 執行中的實例用心跳發現任務不再是 `IN_PROGRESS` 就取消該次執行，所以在任一實例按取消，一個租約間隔內就會生效 |
+| 內部端點 | `/internal/*` 只在雲端模式存在，需要帶有指定 audience、來自白名單服務帳號的 Google ID token（`internal/internalauth`） |
+| 事件 | PostgreSQL `LISTEN/NOTIFY`（見第 7 節）：每個實例把每個事件推給自己的瀏覽器。資料庫請用 session pooler，不要用 transaction pooler |
+| 媒體 | `gcs://bucket/prefix`（`internal/blob`）：`/media/{id}` 回 302 到短效的簽名網址（IAM 簽署，不需金鑰檔） |
+| Agent | 只有 Runner 與自主 agent（`runner_pool`、`external`）：雲端沒有 agent CLI。內建 LLM agent 照常運作 |
+
+自動化測試沒有涵蓋（需要真實專案）：Cloud Tasks 與 Cloud Scheduler 的呼叫、IAM 簽署與真正的 ID token 驗證，這幾項只用假的對象測過。
 
 ## 9. 擴充點
 

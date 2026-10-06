@@ -62,6 +62,23 @@ func (r *Runner) Trigger(ctx context.Context, pipelineID uuid.UUID, trigger stri
 	return run.ID, nil
 }
 
+// RunSync starts a run and works it to the end in the calling goroutine (the jobs.KindPipeline
+// handler). A pipeline that is already running is not an error: the delivery is a duplicate.
+func (r *Runner) RunSync(ctx context.Context, pipelineID uuid.UUID, trigger string) error {
+	run, ok, err := r.store.StartRun(ctx, pipelineID, trigger)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	r.broker.Publish("run.updated", map[string]any{"id": run.ID, "pipeline_id": pipelineID, "status": run.Status})
+	runCtx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	r.execute(runCtx, pipelineID, run.ID)
+	return nil
+}
+
 // Wait blocks until in-flight runs finish (used on shutdown and in tests).
 func (r *Runner) Wait() { r.wg.Wait() }
 

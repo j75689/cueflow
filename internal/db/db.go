@@ -16,8 +16,19 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, url)
+func Open(ctx context.Context, url string) (*pgxpool.Pool, error) { return OpenWith(ctx, url, 0) }
+
+// OpenWith opens the pool capped at maxConns connections (0 keeps the driver default). A small cap
+// lets several cloud instances share a database with a low connection limit.
+func OpenWith(ctx context.Context, url string, maxConns int) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	if maxConns > 0 {
+		cfg.MaxConns = int32(maxConns)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

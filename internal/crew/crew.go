@@ -21,6 +21,7 @@ import (
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -43,6 +44,10 @@ type Crew struct {
 	// (e.g. http://127.0.0.1:3000); per-run tool servers live under MCPPathPrefix.
 	MCPBaseURL string
 
+	// Queue, when set (cloud deployment), replaces the in-process wake-up: Wake enqueues a
+	// jobs.KindCrew delivery, handled by HandleCrew.
+	Queue jobs.Queue
+
 	mcp mcpRegistry
 	// selfEnvs holds the per-task tool state of self-driven agents (see selfdriven.go).
 	selfEnvs sync.Map
@@ -60,6 +65,14 @@ func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, all
 }
 
 func (c *Crew) Wake() {
+	if c.Queue != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := c.Queue.Enqueue(ctx, jobs.KindCrew, uuid.Nil, 0); err != nil {
+			c.logger.Warn("enqueue crew work", "err", err)
+		}
+		return
+	}
 	select {
 	case c.wake <- struct{}{}:
 	default:
@@ -131,6 +144,74 @@ func (c *Crew) start(ctx context.Context, id uuid.UUID) {
 		}()
 		c.runTask(runCtx, id)
 	}()
+}
+
+// handlerBudget bounds one crew delivery; whatever is left is picked up by a fresh one.
+const handlerBudget = 25 * time.Minute
+
+// HandleCrew is the jobs.KindCrew handler: it claims TODO tasks (as many at once as this process
+// has capacity for) and works them to the end of their runs, repeating until none are left. Every
+// delivery is idempotent: claiming is atomic, so a duplicate finds nothing to do.
+func (c *Crew) HandleCrew(ctx context.Context) error {
+	deadline := time.Now().Add(handlerBudget)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		c.recoverExpired(ctx)
+		c.mu.Lock()
+		free := max(c.Concurrency-len(c.running), 1)
+		c.mu.Unlock()
+		ids, err := c.store.ClaimTodo(ctx, c.Lease, free)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		var wg sync.WaitGroup
+		for _, id := range ids {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c.runNow(ctx, id)
+			}()
+		}
+		wg.Wait()
+	}
+	if n, _ := c.store.TodoTaskCount(context.WithoutCancel(ctx)); n > 0 {
+		c.Wake()
+	}
+	return nil
+}
+
+// runNow works one claimed task synchronously.
+func (c *Crew) runNow(ctx context.Context, id uuid.UUID) {
+	runCtx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	c.running[id] = cancel
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.running, id)
+		c.mu.Unlock()
+		cancel()
+	}()
+	c.runTask(runCtx, id)
+}
+
+// Sweep is the crew's part of the external clock: it returns interrupted tasks to the board and
+// makes sure waiting work has a delivery coming.
+func (c *Crew) Sweep(ctx context.Context) error {
+	c.recoverExpired(ctx)
+	if err := c.store.FailAbandoned(ctx); err != nil {
+		c.logger.Warn("close abandoned work", "err", err)
+	}
+	n, err := c.store.TodoTaskCount(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		c.Wake()
+	}
+	return nil
 }
 
 // RunPending claims and works TODO tasks synchronously until none remain or maxRounds is hit.
@@ -239,7 +320,9 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 		c.logger.Error("start run", "err", err)
 		return
 	}
-	stopBeat := c.heartbeat(ctx, task.ID)
+	ctx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	stopBeat := c.heartbeat(ctx, cancelRun, task.ID)
 	defer stopBeat()
 
 	var out *outcome
@@ -254,7 +337,9 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 	c.finish(bg, task, a, run, out)
 }
 
-func (c *Crew) heartbeat(ctx context.Context, id uuid.UUID) func() {
+// heartbeat keeps a running task's lease alive. When the task is no longer IN_PROGRESS (a human
+// canceled it, possibly through another instance) it calls cancel so the run stops.
+func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelFunc, id uuid.UUID) func() {
 	done := make(chan struct{})
 	go func() {
 		t := time.NewTicker(c.Lease / 3)
@@ -266,7 +351,10 @@ func (c *Crew) heartbeat(ctx context.Context, id uuid.UUID) func() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, c.Lease)
+				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, c.Lease); err == nil && !ok {
+					cancel()
+					return
+				}
 			}
 		}
 	}()

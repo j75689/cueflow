@@ -17,6 +17,7 @@ import (
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -30,6 +31,9 @@ type Worker struct {
 	lease   time.Duration
 	timeout time.Duration
 	wake    chan struct{}
+	// Queue, when set (cloud deployment), replaces the in-process wake-up: Wake enqueues a
+	// jobs.KindDispatch delivery, handled by Handle.
+	Queue jobs.Queue
 	// MediaBaseURL turns stored media ("/media/{id}") into URLs publishers can fetch.
 	MediaBaseURL string
 }
@@ -41,6 +45,14 @@ func NewWorker(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logge
 
 // Wake makes the worker run a cycle immediately (called right after an approval or retry).
 func (w *Worker) Wake() {
+	if w.Queue != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := w.Queue.Enqueue(ctx, jobs.KindDispatch, uuid.Nil, 0); err != nil {
+			w.logger.Warn("enqueue publish work", "err", err)
+		}
+		return
+	}
 	select {
 	case w.wake <- struct{}{}:
 	default:
@@ -91,6 +103,29 @@ func (w *Worker) Tick(ctx context.Context) {
 			w.publish(ctx, p)
 		}
 	}
+}
+
+// Handle is the jobs.KindDispatch handler: one pass of Tick. Tick already drains every queued post,
+// and claiming is atomic, so duplicate deliveries are harmless.
+func (w *Worker) Handle(ctx context.Context) error {
+	w.Tick(ctx)
+	return nil
+}
+
+// Sweep is the publisher's part of the external clock: it fails posts whose publisher died mid-call
+// and makes sure waiting posts have a delivery coming.
+func (w *Worker) Sweep(ctx context.Context) error {
+	if err := w.failExpired(ctx); err != nil {
+		return err
+	}
+	n, err := w.store.PublishableCount(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		w.Wake()
+	}
+	return nil
 }
 
 func (w *Worker) failExpired(ctx context.Context) error {
