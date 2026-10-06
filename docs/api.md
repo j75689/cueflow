@@ -321,7 +321,10 @@ A schedule creates a new task for an agent on a cron expression (agents with `pl
 A Runner is a machine you own that works agents' tasks: `cueflow runner run` long-polls CueFlow for jobs
 (outbound HTTP only), launches the agent CLI locally (Claude Code, Codex, ...) with that machine's own
 credentials, and reports back. Point an agent at runners with a `runner_pool` runtime connector
-(`labels`, `preset`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`); a runner takes a job only if it
+(`labels`, `preset`, `model`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`). `model` (also a field of
+`acp_agent`) is chosen through the agent's ACP `model` session option, by id or display name; the run fails and
+lists the available models if the agent does not offer it. A runner's local `models` map pins its own and wins.
+A runner takes a job only if it
 has every label the connector asks for and serves the job's org. The agent still works through CueFlow's
 per-run MCP tools, so review, permissions and "agents never publish" hold. Runners are global (not per org);
 a runner's `org_ids` can restrict it (empty = every org).
