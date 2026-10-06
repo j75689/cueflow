@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +27,9 @@ type fakeCueSocial struct {
 	calls        []string
 	lastCreate   map[string]any
 	headers      http.Header
+	localMedia   bool   // create_upload refuses, like a CueSocial that keeps media locally
+	uploaded     []byte // body received at the signed upload URL
+	uploadHeader http.Header
 }
 
 func (f *fakeCueSocial) record(name string) {
@@ -77,6 +82,21 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 			}
 			return jsonResult(map[string]any{"id": "post-1", "status": status, "results": results}), nil
 		})
+	var base string
+	srv.AddTool(&mcp.Tool{Name: "create_upload", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			f.record("create_upload")
+			if f.localMedia {
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "this server keeps media locally and can't take direct uploads"}}}, nil
+			}
+			var in struct {
+				ContentType string `json:"content_type"`
+				Size        int    `json:"size"`
+			}
+			_ = json.Unmarshal(req.Params.Arguments, &in)
+			return jsonResult(map[string]any{"upload_url": base + "/upload/vid-1", "method": "PUT", "key": "uploads/vid-1.mp4",
+				"headers": map[string]string{"Content-Type": in.ContentType, "X-Goog-Content-Length-Range": fmt.Sprintf("0,%d", in.Size)}}), nil
+		})
 	srv.AddTool(&mcp.Tool{Name: "publish_post", InputSchema: map[string]any{"type": "object"}},
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("publish_post")
@@ -88,12 +108,21 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/upload/") {
+			body, _ := io.ReadAll(r.Body)
+			f.mu.Lock()
+			f.uploaded, f.uploadHeader = body, r.Header.Clone()
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		f.mu.Lock()
 		f.headers = r.Header.Clone()
 		f.mu.Unlock()
 		h.ServeHTTP(w, r)
 	}))
 	t.Cleanup(ts.Close)
+	base = ts.URL
 	return ts
 }
 
@@ -338,10 +367,10 @@ func TestTopicAndLink(t *testing.T) {
 	}
 }
 
-func TestStoredVideoGoesByPublicURL(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
-	ts := f.server(t)
-	mk := func(public string) *Publisher {
+func TestStoredVideoUpload(t *testing.T) {
+	video := []byte("\x00\x00\x00\x18ftypmp42-fake-video")
+	mk := func(f *fakeCueSocial, public string) *Publisher {
+		ts := f.server(t)
 		inst, _ := New(connector.Config{"endpoint_url": ts.URL, "public_media_base_url": public}, connector.Env{HTTPClient: ts.Client()})
 		return inst.(*Publisher)
 	}
@@ -349,16 +378,36 @@ func TestStoredVideoGoesByPublicURL(t *testing.T) {
 	r.Platforms = []string{"instagram"}
 	r.MediaURLs = []string{"http://cueflow:3000/media/abc.mp4"}
 	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0], Stored: true,
-		Load: func(context.Context) ([]byte, string, error) { t.Fatal("videos must not be loaded"); return nil, "", nil }}}
-	if _, err := mk("").Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), "public media URL") {
-		t.Fatalf("no public URL: %v", err)
-	}
-	if _, err := mk("https://media.example.com/").Publish(context.Background(), r); err != nil {
+		Load: func(context.Context) ([]byte, string, error) { return video, "video/mp4", nil }}}
+
+	// Default: uploaded to CueSocial's signed URL, then referenced by key.
+	f := &fakeCueSocial{createStatus: "published"}
+	if _, err := mk(f, "").Publish(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
 	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
+	if k := part["video_keys"].([]any); len(k) != 1 || k[0] != "uploads/vid-1.mp4" || part["video_urls"] != nil {
+		t.Fatalf("video_keys: %v", part)
+	}
+	if string(f.uploaded) != string(video) || f.uploadHeader.Get("Content-Type") != "video/mp4" ||
+		f.uploadHeader.Get("X-Goog-Content-Length-Range") != fmt.Sprintf("0,%d", len(video)) {
+		t.Fatalf("upload: %q %v", f.uploaded, f.uploadHeader)
+	}
+
+	// A CueSocial without direct uploads fetches from the public media URL instead.
+	f = &fakeCueSocial{createStatus: "published", localMedia: true}
+	if _, err := mk(f, "https://media.example.com/").Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	part = f.lastCreate["parts"].([]any)[0].(map[string]any)
 	if v := part["video_urls"].([]any); len(v) != 1 || v[0] != "https://media.example.com/media/abc.mp4" {
-		t.Fatalf("video_urls: %v", part)
+		t.Fatalf("video_urls fallback: %v", part)
+	}
+
+	// Neither works: a clear error, nothing created.
+	f = &fakeCueSocial{createStatus: "published", localMedia: true}
+	if _, err := mk(f, "").Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), "upload video 1") {
+		t.Fatalf("no upload, no public URL: %v", err)
 	}
 }
 

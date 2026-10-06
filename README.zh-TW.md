@@ -46,7 +46,7 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 
 | 類型 | 型別 |
 |---|---|
-| 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio），可逐篇選擇頻道 · `cuesocial`：透過 MCP 連 CueSocial，發到每篇貼文勾選的 Threads/Instagram 帳號（串文、輪播、影片與 Reels；影片需要公開的媒體網址） |
+| 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio），可逐篇選擇頻道 · `cuesocial`：透過 MCP 連 CueSocial，發到每篇貼文勾選的 Threads/Instagram 帳號（串文、輪播、影片與 Reels；影片直接上傳給 CueSocial） |
 | 資料來源 | `rss`（RSS/Atom，以 GUID 去重）· `imap`（信箱資料夾，唯讀） |
 | 搜尋 | `searxng`（自託管）· `tavily` |
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |

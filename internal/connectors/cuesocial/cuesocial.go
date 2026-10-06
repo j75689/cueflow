@@ -5,7 +5,8 @@
 // CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
 // service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
 //   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_post {parts:[{text, image_urls?, images_base64?, video_urls?}], accounts[], scheduled_at?, topic?, link?}
+//   - create_upload {content_type, size}                -> {upload_url, method, headers, key} (signed, 15 min)
+//   - create_post {parts:[{text, image_urls?, images_base64?, video_urls?, video_keys?}], accounts[], scheduled_at?, topic?, link?}
 //     (several parts make a Threads reply chain; on Instagram they become one caption and carousel)
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
@@ -17,11 +18,14 @@
 package cuesocial
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -54,7 +58,7 @@ func init() {
 			{Key: "cf_client_secret", Label: "Cloudflare Access client secret", Type: connector.FieldPassword, Secret: true,
 				Help: "CF-Access-Client-Secret of the same service token"},
 			{Key: "public_media_base_url", Label: "Public media URL", Type: connector.FieldString, Placeholder: "https://media.example.com",
-				Help: "Public https address where CueSocial can fetch videos stored in CueFlow (e.g. a Cloudflare Tunnel that exposes only /media/). Needed to publish videos; images are uploaded directly"},
+				Help: "Optional. Videos are uploaded straight to CueSocial; this public https address (e.g. a Cloudflare Tunnel exposing only /media/) is only used when CueSocial can't take uploads"},
 		},
 		DefaultName: func(cfg connector.Config) string {
 			if u, err := url.Parse(cfg.String("endpoint_url")); err == nil && u.Host != "" {
@@ -68,7 +72,8 @@ func init() {
 type Publisher struct {
 	opts        mcpx.Options
 	now         func() time.Time
-	publicMedia string // base URL CueSocial can fetch stored videos from
+	publicMedia string       // base URL CueSocial can fetch stored videos from (fallback)
+	upload      *http.Client // sends videos to CueSocial's signed upload URLs
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -76,7 +81,13 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	if id := cfg.String("cf_client_id"); id != "" {
 		opts.Headers = map[string]string{"CF-Access-Client-Id": id, "CF-Access-Client-Secret": cfg.String("cf_client_secret")}
 	}
-	return &Publisher{opts: opts, now: time.Now, publicMedia: strings.TrimRight(strings.TrimSpace(cfg.String("public_media_base_url")), "/")}, nil
+	upload := &http.Client{}
+	if env.HTTPClient != nil {
+		*upload = *env.HTTPClient
+	}
+	upload.Timeout = 15 * time.Minute // a Reel is tens of MB
+	return &Publisher{opts: opts, now: time.Now, upload: upload,
+		publicMedia: strings.TrimRight(strings.TrimSpace(cfg.String("public_media_base_url")), "/")}, nil
 }
 
 type account struct {
@@ -218,7 +229,9 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		return nil, errors.New("CueSocial never mixes test accounts with real ones in one post: pick only test accounts or only real ones")
 	}
 
-	parts, err := partsFor(ctx, req, platforms, p.publicMedia)
+	parts, err := partsFor(ctx, req, platforms, p.publicMedia, func(ctx context.Context, data []byte, mime string) (string, error) {
+		return p.uploadVideo(ctx, cs, data, mime)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -251,9 +264,10 @@ const (
 
 // partsFor builds create_post's parts: CueFlow's thread parts in order, hashtags after the last
 // part, and every image and video on the first part (an album on Threads; a carousel on Instagram,
-// or a reel when it is a single video). Images CueFlow stores are uploaded as base64; videos and
-// linked images are fetched by CueSocial, so stored videos are linked through publicMedia.
-func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool, publicMedia string) ([]map[string]any, error) {
+// or a reel when it is a single video). Images CueFlow stores go as base64 and its videos are
+// uploaded to CueSocial's storage (create_upload); linked images and videos are fetched by CueSocial.
+func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool, publicMedia string,
+	upload func(ctx context.Context, data []byte, mime string) (string, error)) ([]map[string]any, error) {
 	texts := append([]string{}, req.Parts...)
 	if len(texts) == 0 {
 		texts = []string{""}
@@ -277,18 +291,29 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 		}
 	}
 
-	var urls, b64, videos []string
+	var urls, b64, videos, videoKeys []string
 	for i, u := range req.MediaURLs {
 		u = strings.TrimSpace(u)
 		stored := i < len(req.Media) && req.Media[i].Stored
 		switch {
 		case isVideoURL(u) && stored:
-			if publicMedia == "" {
-				return nil, fmt.Errorf("media %d is a video stored in CueFlow; CueSocial fetches videos itself, so set the connector's public media URL", i+1)
-			}
-			pu, err := url.Parse(u)
+			data, mt, err := req.Media[i].Load(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("media %d: %w", i+1, err)
+				return nil, fmt.Errorf("load video %d: %w", i+1, err)
+			}
+			key, err := upload(ctx, data, mt)
+			if err == nil {
+				videoKeys = append(videoKeys, key)
+				break
+			}
+			var te *mcpx.ToolError
+			if !errors.As(err, &te) || publicMedia == "" {
+				return nil, fmt.Errorf("upload video %d to CueSocial: %w", i+1, err)
+			}
+			// This CueSocial can't take uploads: let it fetch the video from the public media URL.
+			pu, perr := url.Parse(u)
+			if perr != nil {
+				return nil, fmt.Errorf("media %d: %w", i+1, perr)
 			}
 			videos = append(videos, publicMedia+pu.Path)
 		case isVideoURL(u):
@@ -315,7 +340,7 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 			urls = append(urls, u)
 		}
 	}
-	media := len(urls) + len(b64) + len(videos)
+	media := len(urls) + len(b64) + len(videos) + len(videoKeys)
 	if platforms["instagram"] && media == 0 {
 		return nil, errors.New("Instagram needs at least one image or video: add one, or untick the Instagram accounts")
 	}
@@ -340,7 +365,49 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 	if len(videos) > 0 {
 		parts[0]["video_urls"] = videos
 	}
+	if len(videoKeys) > 0 {
+		parts[0]["video_keys"] = videoKeys
+	}
 	return parts, nil
+}
+
+// uploadVideo sends a video to a signed URL from CueSocial's create_upload and returns its key.
+func (p *Publisher) uploadVideo(ctx context.Context, cs *mcp.ClientSession, data []byte, mime string) (string, error) {
+	raw, err := mcpx.CallJSON(ctx, cs, "create_upload", map[string]any{"content_type": mime, "size": len(data)})
+	if err != nil {
+		return "", err
+	}
+	var up struct {
+		UploadURL string            `json:"upload_url"`
+		Method    string            `json:"method"`
+		Headers   map[string]string `json:"headers"`
+		Key       string            `json:"key"`
+	}
+	if err := json.Unmarshal(raw, &up); err != nil || up.UploadURL == "" || up.Key == "" {
+		return "", fmt.Errorf("unexpected create_upload reply: %.200s", raw)
+	}
+	method := up.Method
+	if method == "" {
+		method = http.MethodPut
+	}
+	hreq, err := http.NewRequestWithContext(ctx, method, up.UploadURL, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	hreq.ContentLength = int64(len(data))
+	for k, v := range up.Headers {
+		hreq.Header.Set(k, v)
+	}
+	resp, err := p.upload.Do(hreq)
+	if err != nil {
+		return "", fmt.Errorf("upload: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return "", fmt.Errorf("upload: HTTP %d %s", resp.StatusCode, body)
+	}
+	return up.Key, nil
 }
 
 // isVideoURL recognizes video links by extension (CueFlow serves stored videos as /media/{id}.mp4).
@@ -375,7 +442,7 @@ func extras(req connector.PublishRequest, parts []map[string]any) (string, strin
 		}
 		textOnly := false
 		for _, p := range parts {
-			if p["image_urls"] == nil && p["images_base64"] == nil && p["video_urls"] == nil {
+			if p["image_urls"] == nil && p["images_base64"] == nil && p["video_urls"] == nil && p["video_keys"] == nil {
 				textOnly = true
 			}
 		}
