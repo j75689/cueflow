@@ -61,6 +61,9 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	if !ok {
 		return &outcome{kind: "error", text: fmt.Sprintf("connector %q is not an agent runtime", conn.Name)}
 	}
+	if pool, ok := inst.(runnerPool); ok {
+		return c.runnerLoop(ctx, task, a, run, pool)
+	}
 	launch := rt.Launch()
 	allowWeb := true
 	authMethod := ""

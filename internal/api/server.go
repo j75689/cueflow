@@ -46,6 +46,8 @@ type Server struct {
 	AdminToken string
 	// MCPToken enables the operator MCP endpoint (CUEFLOW_MCP_TOKEN); empty disables it.
 	MCPToken string
+	// PublicURL is how runners reach this server; it goes into registration commands.
+	PublicURL string
 }
 
 func (s *Server) Handler() http.Handler {
@@ -119,6 +121,13 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/tasks/{id}/approvals", s.taskApprovals)
 		r.Post("/tasks/{id}/approvals/{approvalId}", s.decideApproval)
 
+		r.Get("/tasks/{id}/runner-jobs", s.taskRunnerJobs)
+
+		r.Get("/runners", s.listRunners)
+		r.Post("/runners/registrations", s.createRegistration)
+		r.Patch("/runners/{id}", s.updateRunner)
+		r.Delete("/runners/{id}", s.deleteRunner)
+
 		r.Get("/usage", s.usage)
 
 		r.Post("/media", s.uploadMedia)
@@ -135,6 +144,8 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
+	// Runners authenticate with their own tokens, not the admin token.
+	r.Route("/api/runner/v1", s.runnerRoutes)
 	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run
 	// token in the path, not the admin token: the agent process never sees admin credentials.
 	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler())

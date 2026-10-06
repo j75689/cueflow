@@ -37,6 +37,7 @@ import (
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/pipeline"
+	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
@@ -61,6 +62,8 @@ func main() {
 		err = healthcheck()
 	case "rotate-key":
 		err = rotateKey(len(os.Args) > 2 && os.Args[2] == "--dry-run")
+	case "runner":
+		err = runner.Main(os.Args[2:], api.Version)
 	case "media":
 		err = mediaCmd(os.Args[2:])
 	case "mcp-bridge":
@@ -72,7 +75,7 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Println("cueflow", api.Version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|mcp-bridge|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|runner|mcp-bridge|version]\n")
 		os.Exit(2)
 	}
 	if err != nil {
@@ -171,6 +174,9 @@ func serve() error {
 	if err := st.FailStaleAgentRuns(ctx); err != nil {
 		logger.Warn("clean stale agent runs", "err", err)
 	}
+	if err := st.CancelOrphanRunnerJobs(ctx); err != nil {
+		logger.Warn("clean stale runner jobs", "err", err)
+	}
 	if org, err := st.DefaultOrg(ctx); err != nil {
 		logger.Warn("seed default agents", "err", err)
 	} else if n, err := crew.SeedDefaults(ctx, st, org.ID); err != nil {
@@ -190,7 +196,7 @@ func serve() error {
 		Addr: cfg.Addr,
 		Handler: (&api.Server{
 			Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
-			Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken,
+			Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
