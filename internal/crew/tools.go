@@ -410,8 +410,8 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	if e.drafts >= maxDraftsPerRun {
 		return "", fmt.Errorf("draft limit reached (%d per run)", maxDraftsPerRun)
 	}
-	if strings.TrimSpace(a.Link) == "" && len(a.SourceURLs) > 0 {
-		// No link card given: show the main source, so readers can always open it.
+	if a.Platform == "threads" && strings.TrimSpace(a.Link) == "" && len(a.SourceURLs) > 0 {
+		// No link card given: show the main source, so readers can always open it (Threads only).
 		a.Link = strings.TrimSpace(a.SourceURLs[0])
 	}
 	var mediaURLs []string

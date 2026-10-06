@@ -236,7 +236,7 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		return nil, err
 	}
 	args := map[string]any{"parts": parts, "accounts": req.Accounts}
-	topic, link, err := extras(req, parts)
+	topic, link, err := extras(req, parts, platforms)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +424,10 @@ const threadsMaxTopic = 50
 
 // extras checks the Threads topic tag and link card. CueSocial puts the topic on the first part and
 // the link card on the last part without images; Instagram ignores both.
-func extras(req connector.PublishRequest, parts []map[string]any) (string, string, error) {
+func extras(req connector.PublishRequest, parts []map[string]any, platforms map[string]bool) (string, string, error) {
+	if !platforms["threads"] {
+		return "", "", nil // Threads-only features; Instagram ignores them
+	}
 	topic := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(req.Topic), "#"))
 	if topic != "" {
 		if n := utf8.RuneCountInString(topic); n > threadsMaxTopic {
@@ -447,7 +450,7 @@ func extras(req connector.PublishRequest, parts []map[string]any) (string, strin
 			}
 		}
 		if !textOnly {
-			return "", "", errors.New("a link card needs a part without images: add a text-only thread part for it")
+			return "", "", errors.New("a Threads link card needs a part without images or videos: add a text-only thread part, or clear the link card")
 		}
 	}
 	return topic, link, nil

@@ -351,7 +351,7 @@ func TestTopicAndLink(t *testing.T) {
 	b = req("th1")
 	b.Link = "https://futureindex.ai"
 	b.MediaURLs = []string{"https://cdn.example.com/a.png"}
-	bad["part without images"] = b
+	bad["part without images or videos"] = b
 	for want, r := range bad {
 		if _, err := p.Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v", want, err)
@@ -419,5 +419,20 @@ func TestTestAndRealAccountsDontMix(t *testing.T) {
 	}
 	if _, err := p.Publish(context.Background(), req("th9")); err != nil {
 		t.Fatalf("test account alone: %v", err)
+	}
+}
+
+func TestInstagramIgnoresTopicAndLink(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	p := newPublisher(t, f)
+	r := req("ig1")
+	r.Platforms = []string{"instagram"}
+	r.Topic, r.Link = "AI Threads", "https://example.com/a"
+	r.MediaURLs = []string{"https://cdn.example.com/a.png"}
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatalf("instagram with a link card set: %v", err)
+	}
+	if f.lastCreate["link"] != nil || f.lastCreate["topic"] != nil {
+		t.Fatalf("topic/link must not be sent for Instagram-only posts: %v", f.lastCreate)
 	}
 }
