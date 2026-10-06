@@ -42,13 +42,17 @@ type Config struct {
 	AllowPresets []string `json:"allow_presets,omitempty"`
 	// Commands overrides the launch command per preset (e.g. {"claude-code": "/opt/bin/claude-agent-acp"}).
 	Commands map[string]string `json:"commands,omitempty"`
+	// AuthMethods names the ACP authenticate method to use per preset, for agents that require one
+	// (e.g. {"custom": "oauth-personal"} for Google's Antigravity ACP server).
+	AuthMethods map[string]string `json:"auth_methods,omitempty"`
 	// Env is added to every agent process's environment (credentials can live here).
 	Env map[string]string `json:"env,omitempty"`
 	// DenyWeb refuses the agent's web fetch/search tools whatever the server asks for.
 	DenyWeb bool `json:"deny_web,omitempty"`
 }
 
-// DefaultConfigPath is ~/.config/cueflow/runner.json.
+// DefaultConfigPath is cueflow/runner.json under the OS user config dir (macOS: ~/Library/Application
+// Support, Linux: ~/.config), or $CUEFLOW_RUNNER_CONFIG.
 func DefaultConfigPath() string {
 	if p := os.Getenv("CUEFLOW_RUNNER_CONFIG"); p != "" {
 		return p
@@ -384,6 +388,9 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 	cc := connector.Config{"preset": job.Preset}
 	if cmd := r.cfg.Commands[job.Preset]; cmd != "" {
 		cc["command"] = cmd
+	}
+	if m := r.cfg.AuthMethods[job.Preset]; m != "" {
+		cc["auth_method"] = m
 	}
 	if len(r.cfg.Env) > 0 {
 		env := map[string]any{}

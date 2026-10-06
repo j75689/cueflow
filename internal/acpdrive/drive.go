@@ -235,7 +235,30 @@ func (a *client) flush(ctx context.Context) {
 func isCueflowTool(title string) bool {
 	t := strings.ToLower(title)
 	return strings.Contains(t, "mcp__"+ServerName+"__") || strings.HasPrefix(t, ServerName+".") ||
-		strings.HasPrefix(t, ServerName+"/") || strings.HasPrefix(t, ServerName+":")
+		strings.HasPrefix(t, ServerName+"/") || strings.HasPrefix(t, ServerName+":") ||
+		strings.HasPrefix(t, ServerName+"_") // Google Antigravity: cueflow_complete_task
+}
+
+// hostTouching kinds act on the machine; a title alone never earns them a pass.
+func hostTouching(kind acp.ToolKind) bool {
+	switch kind {
+	case acp.ToolKindExecute, acp.ToolKindEdit, acp.ToolKindDelete, acp.ToolKindMove:
+		return true
+	}
+	return false
+}
+
+// allowedTool decides whether a permission request is for one of CueFlow's own tools (or a
+// harmless kind). The "cueflow_" naming is not a documented convention, so it is only trusted for
+// tools that do not claim to touch the host.
+func allowedTool(title string, kind acp.ToolKind, allowWeb bool) bool {
+	if isCueflowTool(title) {
+		underscoreOnly := strings.HasPrefix(strings.ToLower(title), ServerName+"_")
+		if !underscoreOnly || !hostTouching(kind) {
+			return true
+		}
+	}
+	return kind == acp.ToolKindThink || (allowWeb && kind == acp.ToolKindFetch)
 }
 
 func (a *client) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
@@ -318,9 +341,7 @@ func (a *client) RequestPermission(ctx context.Context, p acp.RequestPermissionR
 	if p.ToolCall.Kind != nil {
 		kind = *p.ToolCall.Kind
 	}
-	allowed := isCueflowTool(title) || kind == acp.ToolKindThink ||
-		(a.allowWeb && kind == acp.ToolKindFetch)
-	if allowed {
+	if allowedTool(title, kind, a.allowWeb) {
 		if out, ok := acpx.AllowOutcome(p.Options); ok {
 			return acp.RequestPermissionResponse{Outcome: out}, nil
 		}

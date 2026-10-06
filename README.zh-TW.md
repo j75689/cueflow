@@ -142,8 +142,10 @@ agent CLI（Claude Code、Codex⋯），agent 仍然透過 CueFlow 的工具作�
    ```
 3. 在 **Connectors** 新增 **Runner pool**（標籤 `claude-code`），再把它選為 agent 的 *Runtime*。
 
-本機政策優先：`~/.config/cueflow/runner.json` 可以限制 `allow_presets`、設定 `deny_web`、把 preset 對應到 `commands`
-路徑並用 `env` 提供憑證，伺服器無法放寬任何一項。`cueflow runner status` 可檢查連線；在後台撤銷 Runner 會立即讓它停止。
+本機政策優先：Runner 的 `runner.json`（Linux 在 `~/.config/cueflow/`、macOS 在 `~/Library/Application Support/cueflow/`，或用 `CUEFLOW_RUNNER_CONFIG` 指定）可以限制 `allow_presets`、設定 `deny_web`、把 preset 對應到 `commands`
+路徑、為各 preset 指定 ACP 的 `auth_methods`，並用 `env` 提供憑證，伺服器無法放寬任何一項。
+例如 Google Antigravity 的官方 ACP 伺服器（取自 [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)）可寫成
+`"commands": {"custom": "/path/to/agy_acp_server.par"}, "auth_methods": {"custom": "oauth-personal"}`，並把 agent 的 Runner pool 設為 `custom` preset。`cueflow runner status` 可檢查連線；在後台撤銷 Runner 會立即讓它停止。
 
 Agent 也可以完全自己控制：把它的 Runtime 設為 **External (self-driven)**，在 agent 編輯頁建立 agent token，再用任何
 MCP client 帶著 token 連 `/mcp`。Agent 用 `claim_task` 領自己的任務，並使用同一套工具。詳見 [`docs/api.md`](docs/api.md#runners)。
