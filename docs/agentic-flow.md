@@ -64,7 +64,7 @@ The default names and instructions are in English; the language agents write in 
 | | `read_url` | Read a public web page (internal networks blocked, see §10) |
 | | `search_materials` | Search material already collected from RSS / mail |
 | | `fetch_sources` | Pull the latest items from source connectors now |
-| drafting | `create_post_draft` | Create a draft for one platform (optional Threads `topic` and `link` card); it goes straight to `PENDING_REVIEW` |
+| drafting | `create_post_draft` | Create a draft for one platform (optional Threads `topic`, `link` card and `publish_at` time); it goes straight to `PENDING_REVIEW` |
 | | `list_posts` | List posts and their review status |
 | | `revise_draft` | Revise a draft still in `DRAFT` / `PENDING_REVIEW` (audited as the agent) |
 | imaging | `generate_image` | Generate an image with the first active image connector and attach it to an editable draft (default prompt: the draft's `image_prompt`). At most 2 per run, since each image costs money |

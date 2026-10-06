@@ -123,6 +123,7 @@ func init() {
 				"image_prompt": str("Prompt for an accompanying image (Instagram)"),
 				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
 				"link":         str("Optional URL shown as a link preview card (Threads), e.g. the main source"),
+				"publish_at":   str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
 				"source_urls":  strList("URLs backing the claims in this post"),
 			}, "platform", "content"), run: toolCreateDraft},
 		{name: "list_posts", capability: "drafting", description: "List recent posts and drafts with their review status.",
@@ -397,6 +398,7 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		ImagePrompt string   `json:"image_prompt"`
 		Topic       string   `json:"topic"`
 		Link        string   `json:"link"`
+		PublishAt   string   `json:"publish_at"`
 		SourceURLs  []string `json:"source_urls"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
@@ -404,6 +406,17 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	}
 	if e.drafts >= maxDraftsPerRun {
 		return "", fmt.Errorf("draft limit reached (%d per run)", maxDraftsPerRun)
+	}
+	var publishAt *time.Time
+	if s := strings.TrimSpace(a.PublishAt); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return "", fmt.Errorf("publish_at must be RFC 3339, e.g. 2026-10-07T12:00:00+08:00: %v", err)
+		}
+		if !t.After(time.Now()) {
+			return "", errors.New("publish_at must be in the future")
+		}
+		publishAt = &t
 	}
 	if _, ok := domain.PlatformByID(a.Platform); !ok {
 		return "", fmt.Errorf("unknown platform %q (use one of %s)", a.Platform, strings.Join(platformIDs(), ", "))
@@ -427,7 +440,7 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	post, err := e.c.store.CreatePost(ctx, store.NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
-		PublisherConnectorID: publisher, Accounts: accounts,
+		PublisherConnectorID: publisher, Accounts: accounts, ScheduledAt: publishAt,
 		SourceContext: map[string]any{"task": e.task.Number, "agent": e.agent.Name, "urls": a.SourceURLs},
 	}, domain.ActorAgent, true)
 	if err != nil {
