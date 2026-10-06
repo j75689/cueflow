@@ -1,9 +1,16 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 
 	"github.com/google/uuid"
+
+	"github.com/j75689/cueflow/internal/blob"
+	"github.com/j75689/cueflow/internal/domain"
 )
 
 // Media is an image CueFlow stores itself (uploaded or generated).
@@ -36,22 +43,156 @@ func (s *Store) CreateMedia(ctx context.Context, in NewMedia) (*Media, error) {
 	}
 	m := &Media{MimeType: in.MimeType, SizeBytes: len(in.Data), Source: in.Source, Prompt: in.Prompt,
 		ConnectorID: in.ConnectorID, CreatedBy: in.CreatedBy}
-	err := s.pool.QueryRow(ctx, `INSERT INTO media (mime_type, data, size_bytes, source, prompt, connector_id, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		in.MimeType, in.Data, len(in.Data), in.Source, in.Prompt, in.ConnectorID, in.CreatedBy).Scan(&m.ID)
+	m.ID = uuid.New()
+	kind, row := blob.KindDB, in.Data
+	if s.blobs != nil {
+		// Bytes first: a row that points at nothing is worse than an orphaned file.
+		if err := s.blobs.Put(ctx, m.ID.String(), in.Data); err != nil {
+			return nil, err
+		}
+		kind, row = s.blobs.Kind(), nil
+	}
+	_, err := s.pool.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, connector_id, created_by, storage)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		m.ID, in.MimeType, row, len(in.Data), in.Source, in.Prompt, in.ConnectorID, in.CreatedBy, kind)
 	if err != nil {
+		if s.blobs != nil {
+			_ = s.blobs.Delete(ctx, m.ID.String())
+		}
 		return nil, err
 	}
 	return m, nil
 }
 
+// getMedia reads a row. Bytes are loaded only when withData is set and they live in the database.
+func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*Media, string, error) {
+	m := &Media{ID: id}
+	var kind string
+	q := `SELECT mime_type, size_bytes, source, prompt, connector_id, created_by, storage`
+	dest := []any{&m.MimeType, &m.SizeBytes, &m.Source, &m.Prompt, &m.ConnectorID, &m.CreatedBy, &kind}
+	if withData {
+		q += `, data`
+		dest = append(dest, &m.Data)
+	}
+	if err := s.pool.QueryRow(ctx, q+` FROM media WHERE id=$1`, id).Scan(dest...); err != nil {
+		return nil, "", notFound(err)
+	}
+	return m, kind, nil
+}
+
+// blobFor returns the backend that holds rows tagged kind.
+func (s *Store) blobFor(kind string) (blob.Store, error) {
+	if s.blobs != nil && s.blobs.Kind() == kind {
+		return s.blobs, nil
+	}
+	return nil, fmt.Errorf("media stored in %q but that backend is not configured (CUEFLOW_MEDIA_STORAGE)", kind)
+}
+
 // GetMedia returns an image with its bytes.
 func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*Media, error) {
-	m := &Media{ID: id}
-	err := s.pool.QueryRow(ctx, `SELECT mime_type, size_bytes, source, prompt, connector_id, created_by, data
-		FROM media WHERE id=$1`, id).Scan(&m.MimeType, &m.SizeBytes, &m.Source, &m.Prompt, &m.ConnectorID, &m.CreatedBy, &m.Data)
+	m, kind, err := s.getMedia(ctx, id, true)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, err
+	}
+	if kind == blob.KindDB {
+		return m, nil
+	}
+	b, err := s.blobFor(kind)
+	if err != nil {
+		return nil, err
+	}
+	rc, _, err := b.Open(ctx, id.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	if m.Data, err = io.ReadAll(rc); err != nil {
+		return nil, err
 	}
 	return m, nil
+}
+
+// OpenMedia returns the image's metadata and a seekable stream of its bytes (for Range requests).
+// The caller closes the stream.
+func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*Media, io.ReadSeekCloser, error) {
+	m, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	if kind == blob.KindDB {
+		var data []byte
+		if err := s.pool.QueryRow(ctx, `SELECT data FROM media WHERE id=$1`, id).Scan(&data); err != nil {
+			return nil, nil, notFound(err)
+		}
+		return m, nopCloser{bytes.NewReader(data)}, nil
+	}
+	b, err := s.blobFor(kind)
+	if err != nil {
+		return nil, nil, err
+	}
+	rc, _, err := b.Open(ctx, id.String())
+	if err != nil {
+		if errors.Is(err, blob.ErrNotFound) {
+			return nil, nil, domain.ErrNotFound
+		}
+		return nil, nil, err
+	}
+	return m, rc, nil
+}
+
+type nopCloser struct{ *bytes.Reader }
+
+func (nopCloser) Close() error { return nil }
+
+// MigrateMedia moves every row not yet on dst into it and clears the database copy. dst nil moves
+// everything back into the database. It returns how many rows moved.
+func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
+	want := blob.KindDB
+	if dst != nil {
+		want = dst.Kind()
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id FROM media WHERE storage <> $1 ORDER BY created_at`, want)
+	if err != nil {
+		return 0, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	moved := 0
+	for _, id := range ids {
+		m, err := s.GetMedia(ctx, id) // reads from wherever it lives now
+		if err != nil {
+			return moved, fmt.Errorf("media %s: %w", id, err)
+		}
+		_, oldKind, err := s.getMedia(ctx, id, false)
+		if err != nil {
+			return moved, err
+		}
+		if dst != nil {
+			if err := dst.Put(ctx, id.String(), m.Data); err != nil {
+				return moved, fmt.Errorf("media %s: %w", id, err)
+			}
+			_, err = s.pool.Exec(ctx, `UPDATE media SET storage=$2, data=NULL WHERE id=$1`, id, want)
+		} else {
+			_, err = s.pool.Exec(ctx, `UPDATE media SET storage=$2, data=$3 WHERE id=$1`, id, want, m.Data)
+		}
+		if err != nil {
+			return moved, err
+		}
+		if old, err := s.blobFor(oldKind); err == nil {
+			_ = old.Delete(ctx, id.String())
+		}
+		moved++
+	}
+	return moved, nil
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/crew"
@@ -60,6 +61,8 @@ func main() {
 		err = healthcheck()
 	case "rotate-key":
 		err = rotateKey(len(os.Args) > 2 && os.Args[2] == "--dry-run")
+	case "media":
+		err = mediaCmd(os.Args[2:])
 	case "mcp-bridge":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: cueflow mcp-bridge URL")
@@ -69,7 +72,7 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Println("cueflow", api.Version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|mcp-bridge|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|mcp-bridge|version]\n")
 		os.Exit(2)
 	}
 	if err != nil {
@@ -139,6 +142,11 @@ func serve() error {
 		logger.Info("secret key rotation in progress: previous keys accepted for reading; run `cueflow rotate-key`, then remove CUEFLOW_SECRET_KEY_PREVIOUS")
 	}
 	st := store.New(pool, box)
+	blobs, err := blob.Parse(cfg.MediaStorage)
+	if err != nil {
+		return err
+	}
+	st.SetBlobs(blobs)
 	if err := st.FailStaleRuns(ctx); err != nil {
 		logger.Warn("clean stale runs", "err", err)
 	}
@@ -299,4 +307,42 @@ func rotateKey(dryRun bool) error {
 		fmt.Println("done: remove CUEFLOW_SECRET_KEY_PREVIOUS and restart CueFlow")
 	}
 	return nil
+}
+
+// mediaCmd handles `cueflow media migrate --to LOCATION` (LOCATION: file:///dir, or db).
+func mediaCmd(args []string) error {
+	if len(args) < 3 || args[0] != "migrate" || args[1] != "--to" {
+		return errors.New("usage: cueflow media migrate --to file:///dir|db")
+	}
+	dst, err := blob.Parse(args[2])
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
+	if err != nil {
+		return err
+	}
+	st := store.New(pool, box)
+	// Rows already moved elsewhere stay readable only through the configured backend.
+	cur, err := blob.Parse(cfg.MediaStorage)
+	if err != nil {
+		return err
+	}
+	st.SetBlobs(cur)
+	if dst != nil && cur != nil && dst.Kind() == cur.Kind() {
+		st.SetBlobs(dst)
+	}
+	n, err := st.MigrateMedia(ctx, dst)
+	fmt.Printf("moved %d media item(s)\n", n)
+	return err
 }

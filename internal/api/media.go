@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -84,14 +83,15 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	m, err := s.Store.GetMedia(r.Context(), id)
+	m, rc, err := s.Store.OpenMedia(r.Context(), id)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	defer rc.Close()
 	w.Header().Set("Content-Type", m.MimeType)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// ServeContent answers Range requests, which video players use to seek.
-	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(m.Data))
+	http.ServeContent(w, r, "", time.Time{}, rc)
 }

@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"errors"
+	"github.com/j75689/cueflow/internal/blob"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,11 +17,16 @@ import (
 type Store struct {
 	pool *pgxpool.Pool
 	box  *secret.Box
+	// blobs holds new media bytes; nil keeps them in the database.
+	blobs blob.Store
 }
 
 func New(pool *pgxpool.Pool, box *secret.Box) *Store {
 	return &Store{pool: pool, box: box}
 }
+
+// SetBlobs makes new media bytes go to b instead of the database. Existing rows keep working.
+func (s *Store) SetBlobs(b blob.Store) { s.blobs = b }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
