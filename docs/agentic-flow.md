@@ -234,7 +234,9 @@ Rules:
 A schedule (or a task) can name a publisher and accounts (`publisher_connector_id`,
 `publish_accounts`). Tasks created by the schedule copy them, subtasks inherit them from their parent,
 and every draft an agent writes for such a task starts with that publisher and the accounts that are on
-the draft's platform. Drafts still wait for a human in Review; the defaults only save picking the
+the draft's platform. When accounts are picked, the brief tells the agent which platforms they cover
+and `create_post_draft` refuses drafts for any other platform (e.g. no Instagram draft when only a
+Threads account is picked). Drafts still wait for a human in Review; the defaults only save picking the
 target each time.
 
 ## 10. Guardrails and limits

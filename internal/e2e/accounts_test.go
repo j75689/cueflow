@@ -106,8 +106,16 @@ func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
 	if sc.PublisherConnectorID == nil || len(sc.PublishAccounts) != 2 {
 		t.Fatalf("schedule defaults: %+v", sc)
 	}
+	var briefText string
+	var refused string
 	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
-		if len(toolResults(req)) == 0 {
+		res := toolResults(req)
+		switch len(res) {
+		case 0:
+			briefText = brief(req)
+			return calls("create_post_draft", map[string]any{"platform": "instagram", "content": "AI news of the day"})
+		case 1:
+			refused = res[0].Content
 			return calls("create_post_draft", map[string]any{"platform": "threads", "content": "AI news of the day"})
 		}
 		return calls("complete_task", map[string]any{"summary": "drafted"})
@@ -121,6 +129,12 @@ func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
 		t.Fatalf("task did not get the schedule's defaults: %+v", tasks)
 	}
 	e.crew.RunPending(ctx, 2)
+	if !strings.Contains(briefText, "Only write drafts for: threads.") || !strings.Contains(briefText, "threads @one") {
+		t.Fatalf("brief should name the publishing target:\n%s", briefText)
+	}
+	if !strings.Contains(refused, "publishes only to threads") {
+		t.Fatalf("instagram draft should be refused: %q", refused)
+	}
 	posts, _ := e.store.PostsForTask(ctx, tasks[0].ID)
 	if len(posts) != 1 {
 		t.Fatalf("posts: %+v", posts)

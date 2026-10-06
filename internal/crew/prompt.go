@@ -107,6 +107,25 @@ func (c *Crew) buildBrief(ctx context.Context, task *store.Task) string {
 			fmt.Fprintf(&b, "- %s [%s] %s: %s\n", p.ID, p.Status, strings.Join(p.Platforms, ","), p.Title)
 		}
 	}
+	if pt := c.publishTarget(ctx, task); pt != nil {
+		b.WriteString("\n## Publishing\n")
+		name := pt.name
+		if name == "" {
+			name = "the chosen publisher"
+		}
+		if pls, ok := pt.platforms(); ok {
+			var labels []string
+			for _, id := range pt.picked {
+				if a, ok := pt.known[id]; ok {
+					labels = append(labels, a.Platform+" "+a.Name)
+				}
+			}
+			fmt.Fprintf(&b, "Drafts for this task go to %s: %s. Only write drafts for: %s.\n",
+				name, strings.Join(labels, ", "), strings.Join(pls, ", "))
+		} else {
+			fmt.Fprintf(&b, "Drafts for this task go to %s.\n", name)
+		}
+	}
 	msgs, _ := c.store.TaskMessages(ctx, task.ID)
 	const keep = 60
 	if len(msgs) > 0 {

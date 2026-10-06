@@ -415,7 +415,15 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	}
 	d := drafts[0]
 	taskID := e.task.ID
-	publisher, accounts := e.c.publishDefaults(ctx, e.task, d.Platform)
+	var publisher *uuid.UUID
+	var accounts []string
+	if pt := e.c.publishTarget(ctx, e.task); pt != nil {
+		if pls, ok := pt.platforms(); ok && !slices.Contains(pls, d.Platform) {
+			return "", fmt.Errorf("this task publishes only to %s (the accounts chosen for it); do not write a %s draft",
+				strings.Join(pls, ", "), d.Platform)
+		}
+		publisher, accounts = &pt.connectorID, pt.accountsOn(d.Platform)
+	}
 	post, err := e.c.store.CreatePost(ctx, store.NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
@@ -434,43 +442,82 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	return msg, nil
 }
 
-// publishDefaults returns the task's publisher and the default accounts that are on platform.
-// Accounts are filtered through the publisher's account list; if it cannot be read, all are kept
-// and the reviewer can fix them.
-func (c *Crew) publishDefaults(ctx context.Context, t *store.Task, platform string) (*uuid.UUID, []string) {
+// publishTarget is where a task's drafts go: its publisher and the accounts picked for it.
+type publishTarget struct {
+	connectorID uuid.UUID
+	name        string
+	picked      []string                     // account IDs as set on the task
+	known       map[string]connector.Account // picked accounts the publisher still lists; nil if unknown
+}
+
+// publishTarget resolves the task's publishing defaults, or nil when it has none. The account list
+// comes from the publisher; if it cannot be read, accounts are taken as given.
+func (c *Crew) publishTarget(ctx context.Context, t *store.Task) *publishTarget {
 	if t.PublisherConnectorID == nil {
-		return nil, nil
+		return nil
 	}
-	if len(t.PublishAccounts) == 0 {
-		return t.PublisherConnectorID, nil
+	pt := &publishTarget{connectorID: *t.PublisherConnectorID, picked: t.PublishAccounts}
+	if conn, err := c.store.GetConnector(ctx, pt.connectorID); err == nil {
+		pt.name = conn.Name
 	}
-	inst, _, err := c.hub.Instance(ctx, *t.PublisherConnectorID, true)
+	if len(pt.picked) == 0 {
+		return pt
+	}
+	inst, _, err := c.hub.Instance(ctx, pt.connectorID, true)
 	if err != nil {
-		return t.PublisherConnectorID, t.PublishAccounts
+		return pt
 	}
 	defer hub.Close(inst)
 	al, ok := inst.(connector.AccountLister)
 	if !ok {
-		return t.PublisherConnectorID, nil
+		return pt
 	}
 	lctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	list, err := al.ListAccounts(lctx)
 	if err != nil {
 		c.logger.Warn("list publisher accounts", "err", err)
-		return t.PublisherConnectorID, t.PublishAccounts
+		return pt
 	}
-	on := map[string]string{}
+	pt.known = map[string]connector.Account{}
 	for _, a := range list {
-		on[a.ID] = a.Platform
+		if slices.Contains(pt.picked, a.ID) {
+			pt.known[a.ID] = a
+		}
+	}
+	return pt
+}
+
+// platforms lists the platforms the picked accounts are on; ok is false when that is unknown
+// (no accounts picked, or the publisher's list could not be read).
+func (pt *publishTarget) platforms() ([]string, bool) {
+	if pt == nil || len(pt.picked) == 0 || pt.known == nil {
+		return nil, false
 	}
 	var out []string
-	for _, id := range t.PublishAccounts {
-		if on[id] == platform {
+	for _, id := range pt.picked {
+		if a, ok := pt.known[id]; ok && !slices.Contains(out, a.Platform) {
+			out = append(out, a.Platform)
+		}
+	}
+	return out, true
+}
+
+// accountsOn returns the picked accounts on platform (all of them if their platforms are unknown).
+func (pt *publishTarget) accountsOn(platform string) []string {
+	if pt == nil {
+		return nil
+	}
+	if pt.known == nil {
+		return pt.picked
+	}
+	var out []string
+	for _, id := range pt.picked {
+		if a, ok := pt.known[id]; ok && a.Platform == platform {
 			out = append(out, id)
 		}
 	}
-	return t.PublisherConnectorID, out
+	return out
 }
 
 func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
