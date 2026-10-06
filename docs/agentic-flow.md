@@ -46,9 +46,9 @@ On first start, when no agents exist, the system creates these four roles (`inte
 
 | Role | slug | Capabilities | Responsibility |
 |---|---|---|---|
-| 🧭 Chief | `chief` | planning, delegation, memory, research | The front desk: understands requests, breaks them down, delegates, sets up schedules, reports back; turn limit 16 |
-| 🔎 Researcher | `researcher` | research, memory | Gathers and verifies information, produces summaries with sources |
-| ✍️ Writer | `writer` | drafting, imaging, research, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
+| 🧭 Chief | `chief` | planning, delegation, memory, research, sources | The front desk: understands requests, breaks them down, delegates, sets up schedules, reports back; turn limit 16 |
+| 🔎 Researcher | `researcher` | research, sources, memory | Gathers and verifies information, produces summaries with sources |
+| ✍️ Writer | `writer` | drafting, imaging, research, sources, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
 | 🧐 Editor | `editor` | drafting, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
 
 The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `en`).
@@ -62,7 +62,7 @@ The default names and instructions are in English; the language agents write in 
 | | `complete_task` | Report the result and finish (ends the run) |
 | research | `web_search` | Search via SearXNG / Tavily |
 | | `read_url` | Read a public web page (internal networks blocked, see §10) |
-| | `search_materials` | Search material already collected from RSS / mail |
+| sources | `search_materials` | Search material already collected from RSS / mail (the agent's Sources, or all when none are picked) |
 | | `fetch_sources` | Pull the latest items from source connectors now |
 | drafting | `create_post_draft` | Create a draft for one platform (optional Threads `topic`, `link` card and `publish_at` time); it goes straight to `PENDING_REVIEW` |
 | | `list_posts` | List posts and their review status |

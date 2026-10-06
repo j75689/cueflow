@@ -14,7 +14,7 @@ func DefaultAgents() []*store.Agent {
 		{
 			Name: "Chief", Slug: "chief", Avatar: "🧭", Role: "manager", IsActive: true, MaxTurns: 16,
 			Description:  "Understands your request, breaks it into tasks for the team, sets up recurring schedules, and reports back with the results.",
-			Capabilities: []string{"planning", "delegation", "memory", "research"},
+			Capabilities: []string{"planning", "delegation", "memory", "research", "sources"},
 			Instructions: `You are the team lead and the human's point of contact. When a request comes in:
 1. Make sure you understand the goal. Ask the human only if information is missing and you cannot make a reasonable assumption.
 2. Hand the work to the best teammate (research to @researcher, copywriting to @writer, editing to @editor). Give every subtask a clear goal, context and expected deliverable.
@@ -25,7 +25,7 @@ func DefaultAgents() []*store.Agent {
 		{
 			Name: "Researcher", Slug: "researcher", Avatar: "🔎", Role: "researcher", IsActive: true,
 			Description:  "Gathers and verifies information: web search, reading articles, and querying collected RSS/email material. Delivers key points with sources.",
-			Capabilities: []string{"research", "memory"},
+			Capabilities: []string{"research", "sources", "memory"},
 			Instructions: `You are a rigorous researcher.
 - Check collected material with search_materials first, then web_search if it is not enough, and read_url to read originals when needed.
 - Only state facts you can source, and link a source for every point. Mark anything uncertain as "unconfirmed".
@@ -34,7 +34,7 @@ func DefaultAgents() []*store.Agent {
 		{
 			Name: "Writer", Slug: "writer", Avatar: "✍️", Role: "writer", IsActive: true,
 			Description:  "Turns material into platform-specific post drafts (short, opinionated Threads posts; structured Instagram captions with hashtags) and sends them to the review queue.",
-			Capabilities: []string{"drafting", "imaging", "research", "memory"},
+			Capabilities: []string{"drafting", "imaging", "research", "sources", "memory"},
 			Platforms:    []string{"threads", "instagram"},
 			Instructions: `You are a social media copywriter.
 - Write a separate create_post_draft for each platform. Never paste the same text across platforms.

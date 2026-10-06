@@ -82,7 +82,8 @@ func integer(desc string) map[string]any {
 var priorityEnum = map[string]any{"type": "string", "enum": []string{"low", "normal", "high", "urgent"}}
 
 var capabilities = []Capability{
-	{ID: "research", Name: "Research", Description: "Search the web, read pages, and query material collected by source connectors."},
+	{ID: "research", Name: "Research", Description: "Search the web and read pages."},
+	{ID: "sources", Name: "Sources", Description: "Fetch and search material collected by source connectors (RSS feeds, mailboxes)."},
 	{ID: "drafting", Name: "Drafting", Description: "Write social post drafts into the human review queue and revise drafts that are still pending."},
 	{ID: "imaging", Name: "Images", Description: "Generate images for drafts with the image connector (each image costs money; at most a few per run)."},
 	{ID: "delegation", Name: "Delegation", Description: "Split work into subtasks for teammates and wait for their results."},
@@ -107,9 +108,9 @@ func init() {
 			schema: obj(map[string]any{"query": str("Search query"), "limit": integer("Max results (default 5)")}, "query"), run: toolWebSearch},
 		{name: "read_url", capability: "research", description: "Read the text of a public web page.",
 			schema: obj(map[string]any{"url": str("Absolute http(s) URL")}, "url"), run: toolReadURL},
-		{name: "search_materials", capability: "research", description: "Search items already collected from RSS feeds and mailboxes.",
+		{name: "search_materials", capability: "sources", description: "Search items already collected from RSS feeds and mailboxes.",
 			schema: obj(map[string]any{"query": str("Keyword (blank = latest)"), "days": integer("Look back this many days (default 7)"), "limit": integer("Max items (default 10)")}), run: toolSearchMaterials},
-		{name: "fetch_sources", capability: "research", description: "Pull the latest items from your source connectors (RSS, IMAP) right now.",
+		{name: "fetch_sources", capability: "sources", description: "Pull the latest items from your source connectors (RSS, IMAP) right now.",
 			schema: obj(map[string]any{}), run: toolFetchSources},
 
 		// --- drafting ---

@@ -45,9 +45,9 @@ flowchart LR
 
 | 角色 | slug | 能力 | 職責 |
 |---|---|---|---|
-| 🧭 Chief（總管） | `chief` | planning, delegation, memory, research | 對外窗口：理解需求、拆解、委派、設定排程、彙整回報；回合上限 16 |
-| 🔎 Researcher（研究員） | `researcher` | research, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
-| ✍️ Writer（文案） | `writer` | drafting, imaging, research, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
+| 🧭 Chief（總管） | `chief` | planning, delegation, memory, research, sources | 對外窗口：理解需求、拆解、委派、設定排程、彙整回報；回合上限 16 |
+| 🔎 Researcher（研究員） | `researcher` | research, sources, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
+| ✍️ Writer（文案） | `writer` | drafting, imaging, research, sources, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
 | 🧐 Editor（編輯） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
 
 預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設英文 `en`）；想讓 agent 用繁體中文工作，把該角色的 Language 改成 `zh-TW` 即可。
@@ -61,7 +61,7 @@ flowchart LR
 | | `complete_task` | 回報成果並結束（終止本次執行） |
 | research | `web_search` | 透過 SearXNG / Tavily 搜尋 |
 | | `read_url` | 讀公開網頁（擋內網，見 §10） |
-| | `search_materials` | 搜尋 RSS / 信件已收集的素材 |
+| sources | `search_materials` | 搜尋 RSS / 信件已收集的素材（agent 勾選的來源，沒勾就是全部） |
 | | `fetch_sources` | 立刻從來源 connector 抓最新內容 |
 | drafting | `create_post_draft` | 為單一平台建立草稿（可帶 Threads 的 `topic`、`link` 連結卡與預定發布時間 `publish_at`），直接進 `PENDING_REVIEW` |
 | | `list_posts` | 列出貼文與審核狀態 |
