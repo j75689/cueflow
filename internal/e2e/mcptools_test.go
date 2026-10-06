@@ -96,7 +96,8 @@ func TestMCPToolPermissionsAndApproval(t *testing.T) {
 		case strings.Contains(b, "A human approved the call to create_page"):
 			return calls("complete_task", map[string]any{"summary": "done: " + b[strings.Index(b, "page created"):][:40]})
 		case len(res) == 0:
-			return calls("notes__search_notes", map[string]any{"title": "launch"})
+			// The bare MCP tool name resolves to notes__search_notes.
+			return calls("search_notes", map[string]any{"title": "launch"})
 		default:
 			return calls("notes__create_page", map[string]any{"title": "Launch plan"})
 		}

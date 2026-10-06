@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -350,8 +351,33 @@ var quietTools = map[string]bool{"add_comment": true, "ask_human": true, "comple
 func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool, call llm.ToolCall) (string, bool) {
 	t, ok := byName[call.Name]
 	if !ok {
+		// Models often call an MCP tool by its bare name ("render_reel" for "reels_renderer__render_reel").
+		var matches []string
+		for name := range byName {
+			if strings.HasSuffix(name, "__"+call.Name) {
+				matches = append(matches, name)
+			}
+		}
+		if len(matches) == 1 {
+			t, ok = byName[matches[0]], true
+			call.Name = matches[0]
+		}
+	}
+	if !ok {
 		c.logger.Warn("agent requested a tool it does not have", "agent", env.agent.Slug, "tool", call.Name)
-		msg := fmt.Sprintf("Tool %q is not available to you. Publishing is always done by humans after review.", call.Name)
+		msg := fmt.Sprintf("Tool %q is not available to you.", call.Name)
+		var similar []string
+		for name := range byName {
+			if strings.Contains(name, call.Name) || strings.Contains(call.Name, strings.TrimPrefix(name[strings.LastIndex(name, "__")+1:], "_")) {
+				similar = append(similar, name)
+			}
+		}
+		if len(similar) > 0 {
+			sort.Strings(similar)
+			msg += " Did you mean: " + strings.Join(similar, ", ") + "?"
+		} else if strings.Contains(call.Name, "publish") {
+			msg += " Publishing is always done by humans after review."
+		}
 		c.say(ctx, env.task.ID, env.agent, "tool_result", msg, map[string]any{"tool": call.Name, "is_error": true})
 		return msg, true
 	}
