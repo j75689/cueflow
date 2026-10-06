@@ -462,7 +462,7 @@ function AgentEditor() {
                 label="Sources"
                 help="Feeds and mailboxes this agent may read and fetch."
               >
-                <div className="space-y-1.5">
+                <div className="flex flex-col items-start gap-1.5">
                   {byKind("source").length === 0 && (
                     <p className="text-xs text-zinc-500">
                       No source connectors yet.
@@ -487,7 +487,7 @@ function AgentEditor() {
                 label="MCP tool servers"
                 help="External tools this agent may use. Set what each tool may do on the server's connector page (allow, ask you first, or deny)."
               >
-                <div className="space-y-1.5">
+                <div className="flex flex-col items-start gap-1.5">
                   {byKind("tools").length === 0 && (
                     <p className="text-xs text-zinc-500">
                       No MCP servers yet. Add one under Connectors.
