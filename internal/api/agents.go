@@ -14,7 +14,12 @@ import (
 )
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
-	as, err := s.Store.ListAgents(r.Context())
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	as, err := s.Store.ListAgents(r.Context(), org.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -100,7 +105,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	a := &store.Agent{IsActive: true, Language: "en", MaxTurns: 12}
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	a := &store.Agent{OrgID: org.ID, IsActive: true, Language: "en", MaxTurns: 12}
 	body.apply(a)
 	if err := s.checkToolServers(r.Context(), a.ToolConnectorIDs); err != nil {
 		s.fail(w, err)

@@ -187,20 +187,36 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-        <Card>
-          <CardHeader title="By source" />
-          <ShareTable
-            rows={u.by_source.map((s) => ({
-              key: s.source,
-              label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules" : s.source}</span>,
-              runs: s.runs,
-              input: s.input_tokens,
-              output: s.output_tokens,
-            }))}
-            empty="—"
-            compact
-          />
-        </Card>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader title="By org" />
+            <ShareTable
+              rows={(u.by_org ?? []).map((o) => ({
+                key: o.org_id,
+                label: <span className="truncate">{o.name}</span>,
+                runs: o.runs,
+                input: o.input_tokens,
+                output: o.output_tokens,
+              }))}
+              empty="—"
+              compact
+            />
+          </Card>
+          <Card>
+            <CardHeader title="By source" />
+            <ShareTable
+              rows={u.by_source.map((s) => ({
+                key: s.source,
+                label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules" : s.source}</span>,
+                runs: s.runs,
+                input: s.input_tokens,
+                output: s.output_tokens,
+              }))}
+              empty="—"
+              compact
+            />
+          </Card>
+        </div>
         <Card>
           <CardHeader title="Top tasks" subtitle="Most tokens in this period" />
           {u.top_tasks.length === 0 ? (

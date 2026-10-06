@@ -118,7 +118,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 	if s.cron == nil {
 		return nil
 	}
-	pipelines, err := s.store.ListPipelines(ctx)
+	pipelines, err := s.store.ListPipelines(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 		s.cron.Remove(e)
 		delete(s.schedules, id)
 	}
-	schedules, err := s.store.ListSchedules(ctx)
+	schedules, err := s.store.ListSchedules(ctx, nil)
 	if err != nil {
 		return err
 	}

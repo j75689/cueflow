@@ -4,16 +4,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { setToken } from "@/lib/api";
+import { OrgSwitcher, useOrg } from "./org";
 import { useMeta, useServerEvents } from "./providers";
-import { Icon, cx } from "./ui";
+import { Icon, Loading, cx } from "./ui";
 
-const NAV = [
+// Pages that belong to the current org.
+const ORG_NAV = [
   { href: "/command/", label: "Command", icon: "sparkle", match: (p: string) => p.startsWith("/command") },
   { href: "/board/", label: "Board", icon: "kanban", match: (p: string) => p.startsWith("/board") || p.startsWith("/tasks") },
   { href: "/agents/", label: "Agents", icon: "users", match: (p: string) => p.startsWith("/agents") },
   { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts") },
   { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
   { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
+];
+
+// Pages shared by every org.
+const GLOBAL_NAV = [
   { href: "/usage/", label: "Usage", icon: "chart", match: (p: string) => p.startsWith("/usage") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },
 ];
@@ -23,30 +29,39 @@ export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { connected } = useServerEvents();
   const { meta } = useMeta();
+  const { org, ready } = useOrg();
 
   useEffect(() => setOpen(false), [pathname]);
 
+  const links = (items: typeof ORG_NAV) =>
+    items.map((n) => {
+      const active = n.match(pathname);
+      return (
+        <Link
+          key={n.href}
+          href={n.href}
+          className={cx(
+            "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+            active
+              ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
+              : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100",
+          )}
+        >
+          <Icon name={n.icon} className="h-4 w-4" />
+          {n.label}
+        </Link>
+      );
+    });
+
   const nav = (
-    <nav className="flex flex-col gap-0.5 p-2">
-      {NAV.map((n) => {
-        const active = n.match(pathname);
-        return (
-          <Link
-            key={n.href}
-            href={n.href}
-            className={cx(
-              "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100",
-            )}
-          >
-            <Icon name={n.icon} className="h-4 w-4" />
-            {n.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <>
+      <OrgSwitcher />
+      <nav className="flex flex-col gap-0.5 p-2">{links(ORG_NAV)}</nav>
+      <nav className="flex flex-col gap-0.5 border-t border-zinc-200 p-2 dark:border-zinc-800" aria-label="Shared">
+        <span className="px-2.5 pt-1 pb-1 text-[11px] font-medium tracking-wide text-zinc-400 uppercase">Shared</span>
+        {links(GLOBAL_NAV)}
+      </nav>
+    </>
   );
 
   const footer = (
@@ -116,8 +131,12 @@ export function Shell({ children }: { children: ReactNode }) {
             <Icon name="menu" className="h-5 w-5" />
           </button>
           <span className="text-sm font-semibold">CueFlow</span>
+          {org && <span className="truncate text-sm text-zinc-500">· {org.name}</span>}
         </header>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 sm:px-6 lg:px-8">{children}</main>
+        {/* Re-mount the page when the org changes so it refetches for the new org. */}
+        <main key={org?.id ?? ""} className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 sm:px-6 lg:px-8">
+          {ready ? children : <Loading />}
+        </main>
       </div>
     </div>
   );

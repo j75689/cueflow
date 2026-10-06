@@ -75,7 +75,7 @@ func TestOperatorMCP(t *testing.T) {
 			t.Fatalf("operator MCP must not expose %s", tl.Name)
 		}
 	}
-	if len(names) != 9 {
+	if len(names) != 10 {
 		t.Fatalf("tools: %v", names)
 	}
 

@@ -15,6 +15,7 @@ import (
 
 type Pipeline struct {
 	ID                   uuid.UUID   `json:"id"`
+	OrgID                uuid.UUID   `json:"org_id"`
 	Name                 string      `json:"name"`
 	Description          string      `json:"description"`
 	IsActive             bool        `json:"is_active"`
@@ -40,14 +41,14 @@ type Pipeline struct {
 
 const pipelineColumns = `id, name, description, is_active, cron_expr, timezone, topic, instructions, language,
 	platforms, llm_connector_id, source_connector_ids, search_connector_id, search_queries, publisher_connector_id,
-	notifier_connector_id, lookback_hours, max_items, last_run_at, created_at, updated_at`
+	notifier_connector_id, lookback_hours, max_items, last_run_at, created_at, updated_at, org_id`
 
 func scanPipeline(row pgx.Row) (*Pipeline, error) {
 	var p Pipeline
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.IsActive, &p.CronExpr, &p.Timezone, &p.Topic,
 		&p.Instructions, &p.Language, &p.Platforms, &p.LLMConnectorID, &p.SourceConnectorIDs, &p.SearchConnectorID,
 		&p.SearchQueries, &p.PublisherConnectorID, &p.NotifierConnectorID, &p.LookbackHours, &p.MaxItems,
-		&p.LastRunAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.LastRunAt, &p.CreatedAt, &p.UpdatedAt, &p.OrgID); err != nil {
 		return nil, err
 	}
 	if p.Platforms == nil {
@@ -104,8 +105,9 @@ func (p *Pipeline) normalize(validate CronValidator) error {
 	return nil
 }
 
-func (s *Store) ListPipelines(ctx context.Context) ([]*Pipeline, error) {
-	rows, err := s.pool.Query(ctx, "SELECT "+pipelineColumns+" FROM pipelines ORDER BY name")
+// ListPipelines returns an org's pipelines, or every org's when org is nil (the scheduler).
+func (s *Store) ListPipelines(ctx context.Context, org *uuid.UUID) ([]*Pipeline, error) {
+	rows, err := s.pool.Query(ctx, "SELECT "+pipelineColumns+" FROM pipelines WHERE $1::uuid IS NULL OR org_id=$1 ORDER BY name", org)
 	if err != nil {
 		return nil, err
 	}
@@ -130,13 +132,16 @@ func (s *Store) CreatePipeline(ctx context.Context, p *Pipeline, validate CronVa
 	if err := p.normalize(validate); err != nil {
 		return nil, err
 	}
+	if p.OrgID == uuid.Nil {
+		return nil, invalid("org is required")
+	}
 	return scanPipeline(s.pool.QueryRow(ctx, `INSERT INTO pipelines (name, description, is_active, cron_expr, timezone,
 		topic, instructions, language, platforms, llm_connector_id, source_connector_ids, search_connector_id,
-		search_queries, publisher_connector_id, notifier_connector_id, lookback_hours, max_items)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING `+pipelineColumns,
+		search_queries, publisher_connector_id, notifier_connector_id, lookback_hours, max_items, org_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING `+pipelineColumns,
 		p.Name, p.Description, p.IsActive, p.CronExpr, p.Timezone, p.Topic, p.Instructions, p.Language, p.Platforms,
 		p.LLMConnectorID, p.SourceConnectorIDs, p.SearchConnectorID, p.SearchQueries, p.PublisherConnectorID,
-		p.NotifierConnectorID, p.LookbackHours, p.MaxItems))
+		p.NotifierConnectorID, p.LookbackHours, p.MaxItems, p.OrgID))
 }
 
 // UpdatePipeline replaces all editable fields (the API merges the patch onto the current row first).
@@ -222,7 +227,8 @@ func (s *Store) StartRun(ctx context.Context, pipelineID uuid.UUID, trigger stri
 			return nil
 		}
 		var id uuid.UUID
-		if err := tx.QueryRow(ctx, `INSERT INTO pipeline_runs (pipeline_id, trigger) VALUES ($1,$2) RETURNING id`,
+		if err := tx.QueryRow(ctx, `INSERT INTO pipeline_runs (pipeline_id, trigger, org_id)
+			SELECT $1, $2, org_id FROM pipelines WHERE id=$1 RETURNING id`,
 			pipelineID, trigger).Scan(&id); err != nil {
 			return err
 		}
@@ -261,17 +267,14 @@ func (s *Store) GetRun(ctx context.Context, id uuid.UUID) (*Run, error) {
 	return r, notFound(err)
 }
 
-func (s *Store) ListRuns(ctx context.Context, pipelineID *uuid.UUID, limit int) ([]*Run, error) {
+// ListRuns returns recent pipeline runs of an org (nil = every org), optionally of one pipeline.
+func (s *Store) ListRuns(ctx context.Context, org, pipelineID *uuid.UUID, limit int) ([]*Run, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := "SELECT " + runColumns + " FROM pipeline_runs r LEFT JOIN pipelines p ON p.id=r.pipeline_id"
-	args := []any{limit}
-	if pipelineID != nil {
-		q += " WHERE r.pipeline_id=$2"
-		args = append(args, *pipelineID)
-	}
-	rows, err := s.pool.Query(ctx, q+" ORDER BY r.started_at DESC LIMIT $1", args...)
+	q := "SELECT " + runColumns + ` FROM pipeline_runs r LEFT JOIN pipelines p ON p.id=r.pipeline_id
+		WHERE ($2::uuid IS NULL OR r.org_id=$2) AND ($3::uuid IS NULL OR r.pipeline_id=$3)`
+	rows, err := s.pool.Query(ctx, q+" ORDER BY r.started_at DESC LIMIT $1", limit, org, pipelineID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,11 +290,11 @@ func (s *Store) ListRuns(ctx context.Context, pipelineID *uuid.UUID, limit int) 
 	return out, rows.Err()
 }
 
-// Counts for the dashboard.
-func (s *Store) Counts(ctx context.Context) (connTotal, connActive, pipeTotal, pipeActive int, err error) {
+// Counts for the dashboard: connectors are global, pipelines are the org's.
+func (s *Store) Counts(ctx context.Context, org uuid.UUID) (connTotal, connActive, pipeTotal, pipeActive int, err error) {
 	err = s.pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM connectors), (SELECT count(*) FROM connectors WHERE is_active),
-		(SELECT count(*) FROM pipelines), (SELECT count(*) FROM pipelines WHERE is_active)`).
+		(SELECT count(*) FROM pipelines WHERE org_id=$1), (SELECT count(*) FROM pipelines WHERE is_active AND org_id=$1)`, org).
 		Scan(&connTotal, &connActive, &pipeTotal, &pipeActive)
 	return
 }

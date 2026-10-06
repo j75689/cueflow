@@ -65,6 +65,15 @@ export interface ConnectorAccount {
   tag?: string;
 }
 
+/** A team with its own agents, board, schedules, review queue and runs. Connectors are shared. */
+export interface Org {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Platform {
   id: string;
   name: string;
@@ -109,6 +118,7 @@ export interface SourceContext {
 
 export interface Post {
   id: string;
+  org_id: string;
   task_id?: string | null;
   group_id: string | null;
   pipeline_id: string | null;
@@ -200,6 +210,7 @@ export interface SourceItem {
 
 export interface Pipeline {
   id: string;
+  org_id: string;
   name: string;
   description: string;
   is_active: boolean;
@@ -225,7 +236,7 @@ export interface Pipeline {
 
 export type PipelineInput = Omit<
   Pipeline,
-  "id" | "created_at" | "updated_at" | "last_run_at" | "next_run_at"
+  "id" | "org_id" | "created_at" | "updated_at" | "last_run_at" | "next_run_at"
 >;
 
 export interface RunLogLine {
@@ -260,6 +271,7 @@ export type AgentRole = "manager" | "researcher" | "writer" | "editor" | "custom
 
 export interface Agent {
   id: string;
+  org_id: string;
   name: string;
   slug: string;
   avatar: string;
@@ -283,7 +295,7 @@ export interface Agent {
   updated_at: string;
 }
 
-export type AgentInput = Omit<Agent, "id" | "stats" | "created_at" | "updated_at">;
+export type AgentInput = Omit<Agent, "id" | "org_id" | "stats" | "created_at" | "updated_at">;
 
 export interface AgentMemory {
   id: string;
@@ -313,6 +325,7 @@ export interface AgentRef {
 
 export interface Task {
   id: string;
+  org_id: string;
   number: number;
   title: string;
   description: string;
@@ -486,6 +499,15 @@ export interface UsageModel {
   output_tokens: number;
 }
 
+export interface UsageOrg {
+  org_id: string;
+  name: string;
+  slug: string;
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface UsageTask {
   task_id: string;
   number: number;
@@ -502,6 +524,7 @@ export interface Usage {
   totals: UsageTotals;
   daily: UsageDay[];
   by_source: UsageSource[];
+  by_org?: UsageOrg[];
   by_agent: UsageAgent[];
   by_model: UsageModel[];
   top_tasks: UsageTask[];
@@ -509,6 +532,7 @@ export interface Usage {
 
 export interface Schedule {
   id: string;
+  org_id: string;
   name: string;
   cron_expr: string;
   timezone: string;

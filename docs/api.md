@@ -8,6 +8,34 @@ Auth: if the server was started with `CUEFLOW_ADMIN_TOKEN`, every `/api/*` reque
 `Authorization: Bearer <token>` (the SSE endpoint also accepts `?token=<token>`). The UI stores the token
 in `localStorage["cueflow.token"]` and shows a token prompt on a `401`.
 
+Orgs: agents, tasks, schedules, pipelines, posts and runs belong to an org. List and create endpoints for
+them take `?org=<id or slug>`; without it they use the default org (the oldest). An unknown org is a
+`400 invalid_argument`. Endpoints that address one item by id work in any org. Connectors, source items,
+media and usage are global and ignore `org`. Items carry `"org_id":"uuid"`. The UI stores the chosen org in
+`localStorage["cueflow.org"]` and also accepts `?org=` in a page URL.
+
+---
+
+## Orgs
+
+### `GET /api/v1/orgs`
+`[{"id":"uuid","name":"Default","slug":"default","created_at":"...","updated_at":"..."}]`, oldest first; the
+first one is the default org.
+
+### `POST /api/v1/orgs`
+`{"name":"CueFlow Dev","slug":"cueflow-dev","seed_agents":true}`. `slug` is optional (derived from the name);
+`seed_agents` creates the starter crew (Chief, Researcher, Writer, Editor). `201` with the org.
+
+### `PATCH /api/v1/orgs/{id}`
+`{"name":"...","slug":"..."}`, either field optional.
+
+### `DELETE /api/v1/orgs/{id}`
+`204`. Only an empty org (no agents, tasks, schedules, pipelines or posts) can be deleted, and never the last
+one; otherwise `400 invalid_argument`.
+
+Within an org, agent slugs are unique and task numbers count from `#1`. A subtask always lives in its
+parent's org; assigning an agent from another org (task create/update, schedules) is a `400`.
+
 ---
 
 ## Meta
@@ -50,7 +78,8 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 ### `GET /api/v1/health`
 `{"status":"ok","db":"ok","time":"..."}`
 
-### `GET /api/v1/stats`
+### `GET /api/v1/stats?org=`
+Posts and pipelines of the org; connectors are global.
 ```json
 {"posts_by_status":{"DRAFT":0,"PENDING_REVIEW":3,...},"connectors":{"total":4,"active":3},
  "pipelines":{"total":2,"active":1},"last_run":PipelineRun|null}
@@ -306,6 +335,7 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
   "daily":[{"date":"2026-10-04","runs":7,"input_tokens":120000,"output_tokens":15000}],
   "by_source":[{"source":"agent","runs":30,"input_tokens":700000,"output_tokens":80000},
                {"source":"pipeline","runs":12,"input_tokens":112345,"output_tokens":10211}],
+  "by_org":[{"org_id":"uuid","name":"Default","slug":"default","runs":42,"input_tokens":812345,"output_tokens":90211}],
   "by_agent":[{"agent_id":"uuid","name":"Writer","avatar":"✍️","slug":"writer","runs":12,
                "input_tokens":300000,"output_tokens":40000}],
   "by_model":[{"connector_id":"uuid|null","connector_name":"Gemini on Vertex · gemini-3.1-flash-lite",
@@ -332,7 +362,8 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 
 | Tool | Does |
 |---|---|
-| `list_agents` | The crew: slug, name, role, description, active |
+| `list_orgs` | Orgs: slug, name, whether it is the default |
+| `list_agents` | The org's crew: slug, name, role, description, active |
 | `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query`, `all`, `limit` |
 | `get_task` | One task (`#12`, `12` or id) with description, subtasks, drafts and the last 30 thread messages |
 | `create_task` | `title`, `description`, `assignee` slug, `status` `TODO` (default) or `BACKLOG`, `priority`, `labels` |
@@ -341,7 +372,8 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 | `run_task` / `stop_task` | Same as `POST /tasks/{id}/run` and `/cancel` |
 | `list_drafts` | Posts by status (default `PENDING_REVIEW`), read-only |
 
-Tasks created here have `created_by: "human"`. No tool approves, schedules or publishes posts. Mistakes
+Every tool except `list_orgs` takes an optional `org` slug (default org when blank); task numbers and agent
+slugs are resolved within it. Tasks created here have `created_by: "human"`. No tool approves, schedules or publishes posts. Mistakes
 (unknown task or agent, a status owned by the runner) come back as tool errors (`isError: true`).
 
 ---
@@ -358,5 +390,6 @@ Event names and `data` payloads:
 - `task.deleted` → `{"id":"uuid"}`
 - `task.message` → `{"task_id":"uuid","id":"uuid"}`
 - `agent.updated` → `{"id":"uuid"}`
+- `org.updated` → `{"id":"uuid"}` (created, renamed or deleted)
 - `schedule.updated` → `{"id":"uuid"}`
 A `: ping` comment is sent every 20s.

@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { HealthDot, RunStatusBadge } from "@/components/badges";
 import { TagInput } from "@/components/inputs";
 import { useDialog } from "@/components/dialog";
+import { useOrgFollow } from "@/components/org";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -123,6 +124,7 @@ function PipelineEdit() {
     async () => (id ? api.getPipeline(id) : null),
     [id],
   );
+  useOrgFollow(pipeline.data?.org_id);
   const runs = useAsync(
     async () => (id ? api.listRuns({ pipeline_id: id, limit: 10 }) : []),
     [id],

@@ -3,6 +3,8 @@ package crew
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -54,14 +56,15 @@ func DefaultAgents() []*store.Agent {
 	}
 }
 
-// SeedDefaults creates the starter team when no agents exist yet.
-func SeedDefaults(ctx context.Context, st *store.Store) (int, error) {
-	n, err := st.CountAgents(ctx)
+// SeedDefaults creates the starter team in an org that has no agents yet.
+func SeedDefaults(ctx context.Context, st *store.Store, org uuid.UUID) (int, error) {
+	n, err := st.CountAgents(ctx, org)
 	if err != nil || n > 0 {
 		return 0, err
 	}
 	created := 0
 	for _, a := range DefaultAgents() {
+		a.OrgID = org
 		if _, err := st.CreateAgent(ctx, a); err != nil {
 			return created, err
 		}

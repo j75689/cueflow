@@ -59,6 +59,11 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/stats", s.stats)
 		r.Get("/events", s.events)
 
+		r.Get("/orgs", s.listOrgs)
+		r.Post("/orgs", s.createOrg)
+		r.Patch("/orgs/{id}", s.updateOrg)
+		r.Delete("/orgs/{id}", s.deleteOrg)
+
 		r.Get("/posts", s.listPosts)
 		r.Post("/posts", s.createPost)
 		r.Get("/posts/{id}", s.getPost)
@@ -210,18 +215,23 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	byStatus, err := s.Store.CountPostsByStatus(ctx)
+	org, err := s.reqOrg(r)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	ct, ca, pt, pa, err := s.Store.Counts(ctx)
+	byStatus, err := s.Store.CountPostsByStatus(ctx, org.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	ct, ca, pt, pa, err := s.Store.Counts(ctx, org.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	var last *store.Run
-	if runs, err := s.Store.ListRuns(ctx, nil, 1); err == nil && len(runs) > 0 {
+	if runs, err := s.Store.ListRuns(ctx, &org.ID, nil, 1); err == nil && len(runs) > 0 {
 		last = runs[0]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

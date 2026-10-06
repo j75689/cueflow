@@ -276,7 +276,7 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	defer hub.Close(model)
 	run.ConnectorID, run.Model, run.Runtime = &connID, model.Model(), "builtin"
 
-	team, _ := c.store.ListAgents(ctx)
+	team, _ := c.store.ListAgents(ctx, task.OrgID)
 	var memories []store.AgentMemory
 	if a.Has("memory") {
 		memories, _ = c.store.Memories(ctx, a.ID, "", 30)

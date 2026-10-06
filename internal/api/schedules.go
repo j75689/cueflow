@@ -13,7 +13,12 @@ func (s *Server) withScheduleNext(sc *store.Schedule) *store.Schedule {
 }
 
 func (s *Server) listSchedules(w http.ResponseWriter, r *http.Request) {
-	scs, err := s.Store.ListSchedules(r.Context())
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	scs, err := s.Store.ListSchedules(r.Context(), &org.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -82,7 +87,12 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	sc := &store.Schedule{IsActive: true, Timezone: "UTC", Priority: "normal", CreatedBy: "human"}
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	sc := &store.Schedule{OrgID: org.ID, IsActive: true, Timezone: "UTC", Priority: "normal", CreatedBy: "human"}
 	body.apply(sc)
 	out, err := s.Store.CreateSchedule(r.Context(), sc, scheduler.ValidateSchedule)
 	if err != nil {

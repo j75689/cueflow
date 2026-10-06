@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { AgentAvatar, NewTaskModal, ROLE_LABEL } from "@/components/agents";
 import { useDialog } from "@/components/dialog";
+import { useOrgFollow } from "@/components/org";
 import { useMeta, useToast } from "@/components/providers";
 import {
   Button,
@@ -95,6 +96,7 @@ function AgentEditor() {
     [id],
   );
   const connectors = useAsync(() => api.listConnectors(), []);
+  useOrgFollow(existing.data?.org_id);
 
   useEffect(() => {
     const a = existing.data;

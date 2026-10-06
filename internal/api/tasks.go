@@ -38,7 +38,12 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		f.AssigneeID = &id
 	}
-	var err error
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	f.OrgID = &org.ID
 	if f.ParentID, err = queryUUID(r, "parent_id"); err != nil {
 		s.fail(w, err)
 		return
@@ -105,11 +110,20 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	t, err := s.createTaskOp(r.Context(), store.NewTask{
+	in := store.NewTask{
 		Title: req.Title, Description: req.Description, AssigneeAgentID: req.AssigneeAgentID, Priority: req.Priority,
 		Labels: req.Labels, DueAt: req.DueAt, Status: req.Status, ParentID: req.ParentID,
 		PublisherConnectorID: req.PublisherConnectorID, PublishAccounts: req.PublishAccounts,
-	})
+	}
+	if req.ParentID == nil { // a subtask lives in its parent's org
+		org, err := s.reqOrg(r)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		in.OrgID = org.ID
+	}
+	t, err := s.createTaskOp(r.Context(), in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -274,7 +288,7 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 		return nil, err
 	}
 	if m := mentionRe.FindStringSubmatch(strings.ToLower(content)); m != nil {
-		if a, err := s.Store.GetAgentBySlug(ctx, m[1]); err == nil && !sameAgent(t.AssigneeAgentID, &a.ID) {
+		if a, err := s.Store.GetAgentBySlug(ctx, t.OrgID, m[1]); err == nil && !sameAgent(t.AssigneeAgentID, &a.ID) {
 			aid := &a.ID
 			if _, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{AssigneeAgentID: &aid}); err == nil {
 				if t.Status == store.TaskInProgress {

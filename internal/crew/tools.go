@@ -551,6 +551,15 @@ func (pt *publishTarget) accountsOn(platform string) []string {
 	return out
 }
 
+// postInOrg loads a post of the task's org; other orgs' posts don't exist for the agent.
+func (e *runEnv) postInOrg(ctx context.Context, id uuid.UUID) (*domain.Post, error) {
+	p, err := e.c.store.GetPost(ctx, id)
+	if err == nil && p.OrgID != e.task.OrgID {
+		err = domain.ErrNotFound
+	}
+	return p, err
+}
+
 func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct {
 		Status string
@@ -559,7 +568,7 @@ func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 	if err := decodeArgs(raw, &a); err != nil {
 		return "", err
 	}
-	f := store.PostFilter{Limit: a.Limit}
+	f := store.PostFilter{OrgID: &e.task.OrgID, Limit: a.Limit}
 	if f.Limit <= 0 || f.Limit > 30 {
 		f.Limit = 10
 	}
@@ -607,7 +616,7 @@ func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	if err != nil {
 		return "", errors.New("post_id must be a post UUID")
 	}
-	cur, err := e.c.store.GetPost(ctx, id)
+	cur, err := e.postInOrg(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -650,7 +659,7 @@ func toolGenerateImage(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 	if err != nil {
 		return "", errors.New("post_id must be a post UUID")
 	}
-	post, err := e.c.store.GetPost(ctx, id)
+	post, err := e.postInOrg(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -687,7 +696,7 @@ func toolGenerateImage(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 // --- delegation ---
 
 func toolListAgents(ctx context.Context, e *runEnv, _ json.RawMessage) (string, error) {
-	agents, err := e.c.store.ListAgents(ctx)
+	agents, err := e.c.store.ListAgents(ctx, e.task.OrgID)
 	if err != nil {
 		return "", err
 	}
@@ -712,7 +721,7 @@ func (e *runEnv) resolveAgent(ctx context.Context, slug string) (*store.Agent, e
 	if strings.TrimSpace(slug) == "" {
 		return e.agent, nil
 	}
-	a, err := e.c.store.GetAgentBySlug(ctx, slug)
+	a, err := e.c.store.GetAgentBySlug(ctx, e.task.OrgID, slug)
 	if err != nil {
 		return nil, fmt.Errorf("no teammate with slug %q (use list_agents)", slug)
 	}
@@ -790,7 +799,7 @@ func toolListTasks(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 	if err := decodeArgs(raw, &a); err != nil {
 		return "", err
 	}
-	f := store.TaskFilter{Limit: a.Limit}
+	f := store.TaskFilter{OrgID: &e.task.OrgID, Limit: a.Limit}
 	if f.Limit <= 0 || f.Limit > 50 {
 		f.Limit = 20
 	}
@@ -826,7 +835,7 @@ func toolGetTask(ctx context.Context, e *runEnv, raw json.RawMessage) (string, e
 	if err := decodeArgs(raw, &a); err != nil {
 		return "", err
 	}
-	t, err := e.c.store.GetTaskByNumber(ctx, a.Number)
+	t, err := e.c.store.GetTaskByNumber(ctx, e.task.OrgID, a.Number)
 	if err != nil {
 		return "", fmt.Errorf("task #%d not found", a.Number)
 	}
@@ -859,7 +868,7 @@ func toolCreateTask(ctx context.Context, e *runEnv, raw json.RawMessage) (string
 	if e.subtasks >= maxSubtasksPerRun {
 		return "", fmt.Errorf("task creation limit reached (%d per run)", maxSubtasksPerRun)
 	}
-	in := store.NewTask{Title: a.Title, Description: a.Description, Priority: a.Priority, CreatedBy: "agent", CreatorAgentID: &e.agent.ID}
+	in := store.NewTask{OrgID: e.task.OrgID, Title: a.Title, Description: a.Description, Priority: a.Priority, CreatedBy: "agent", CreatorAgentID: &e.agent.ID}
 	if a.Assignee != "" {
 		ag, err := e.resolveAgent(ctx, a.Assignee)
 		if err != nil {
@@ -891,7 +900,7 @@ func toolScheduleTask(ctx context.Context, e *runEnv, raw json.RawMessage) (stri
 	}
 	creator := e.agent.ID
 	sc, err := e.c.store.CreateSchedule(ctx, &store.Schedule{
-		Name: a.Name, CronExpr: a.Cron, Timezone: a.Timezone, IsActive: true, AssigneeAgentID: &assignee.ID,
+		OrgID: e.task.OrgID, Name: a.Name, CronExpr: a.Cron, Timezone: a.Timezone, IsActive: true, AssigneeAgentID: &assignee.ID,
 		TaskTitle: a.Title, TaskDescription: a.Description, Priority: a.Priority, CreatedBy: "agent", CreatorAgentID: &creator,
 	}, e.c.ValidateSchedule)
 	if err != nil {
@@ -904,7 +913,7 @@ func toolScheduleTask(ctx context.Context, e *runEnv, raw json.RawMessage) (stri
 }
 
 func toolListSchedules(ctx context.Context, e *runEnv, _ json.RawMessage) (string, error) {
-	scs, err := e.c.store.ListSchedules(ctx)
+	scs, err := e.c.store.ListSchedules(ctx, &e.task.OrgID)
 	if err != nil {
 		return "", err
 	}

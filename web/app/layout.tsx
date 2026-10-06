@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { OrgProvider } from "@/components/org";
 import { Providers } from "@/components/providers";
 import { Shell } from "@/components/shell";
 import "./globals.css";
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="antialiased">
         <Providers>
-          <Shell>{children}</Shell>
+          <OrgProvider>
+            <Shell>{children}</Shell>
+          </OrgProvider>
         </Providers>
       </body>
     </html>

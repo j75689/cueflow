@@ -13,6 +13,7 @@ import {
 } from "@/components/post-editor";
 import { AuditTimeline, RejectDialog, Warnings } from "@/components/post";
 import { useDialog } from "@/components/dialog";
+import { useOrgFollow } from "@/components/org";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -75,6 +76,7 @@ function PostView() {
 
   const post = useAsync(() => api.getPost(id), [id]);
   const audit = useAsync(() => api.postAudit(id), [id]);
+  useOrgFollow(post.data?.org_id);
   const publishers = useAsync(() => api.listConnectors("publisher"), []);
 
   const [draft, setDraft] = useState<PostDraft | null>(null);

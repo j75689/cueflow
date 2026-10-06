@@ -8,6 +8,7 @@ import type {
   ConnectorTestResult,
   ConnectorTool,
   Meta,
+  Org,
   Pipeline,
   PipelineInput,
   PipelineRun,
@@ -60,6 +61,14 @@ export class ApiError extends Error {
   }
 }
 
+// The org every request works in (sent as ?org=); set by the org switcher. Global endpoints
+// (connectors, usage, media) ignore it.
+let currentOrg = "";
+
+export function setApiOrg(id: string) {
+  currentOrg = id;
+}
+
 // Fired when the server answers 401 so the token prompt can open.
 export const UNAUTHORIZED_EVENT = "cueflow:unauthorized";
 
@@ -86,7 +95,8 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}${buildQuery(query)}`, {
+    const q = currentOrg && !path.startsWith("/orgs") ? { org: currentOrg, ...query } : query;
+    res = await fetch(`${BASE}${path}${buildQuery(q)}`, {
       method,
       headers,
       body: body === undefined ? undefined : form ? body : JSON.stringify(body),
@@ -156,6 +166,11 @@ export const api = {
   meta: () => request<Meta>("GET", "/meta"),
   stats: () => request<Stats>("GET", "/stats"),
   health: () => request<{ status: string }>("GET", "/health"),
+
+  listOrgs: () => request<Org[]>("GET", "/orgs"),
+  createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) => request<Org>("POST", "/orgs", body),
+  updateOrg: (id: string, body: { name?: string; slug?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
+  deleteOrg: (id: string) => request<void>("DELETE", `/orgs/${id}`),
 
   listPosts: (q: {
     status?: string[];

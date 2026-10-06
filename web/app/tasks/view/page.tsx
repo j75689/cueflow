@@ -24,6 +24,7 @@ import {
 import { RunStatusBadge, StatusBadge } from "@/components/badges";
 import { TagInput } from "@/components/inputs";
 import { useDialog } from "@/components/dialog";
+import { useOrgFollow } from "@/components/org";
 import { PublishTarget } from "@/components/publish-target";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
@@ -70,6 +71,7 @@ function TaskView() {
   const task = useAsync(() => api.getTask(id), [id]);
   const messages = useAsync(() => api.taskMessages(id), [id]);
   const runs = useAsync(() => api.taskRuns(id), [id]);
+  useOrgFollow(task.data?.org_id);
 
   useServerEvent("task.message", (d) => {
     if (d.task_id === id) void messages.reload();

@@ -108,6 +108,7 @@ const SSE_EVENTS = [
   "task.message",
   "agent.updated",
   "schedule.updated",
+  "org.updated",
 ];
 
 /* -------------------------------- Providers -------------------------------- */

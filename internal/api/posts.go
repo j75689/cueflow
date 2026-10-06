@@ -25,7 +25,12 @@ func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 			f.Statuses = append(f.Statuses, status)
 		}
 	}
-	var err error
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	f.OrgID = &org.ID
 	if f.PipelineID, err = queryUUID(r, "pipeline_id"); err != nil {
 		s.fail(w, err)
 		return
@@ -78,8 +83,13 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	p, err := s.Store.CreatePost(r.Context(), store.NewPost{
-		Title: req.Title, Content: req.Content, Platforms: req.Platforms, ThreadParts: req.ThreadParts,
+		OrgID: org.ID, Title: req.Title, Content: req.Content, Platforms: req.Platforms, ThreadParts: req.ThreadParts,
 		Hashtags: req.Hashtags, MediaURLs: req.MediaURLs, Accounts: req.Accounts, ImagePrompt: req.ImagePrompt,
 		Topic: req.Topic, LinkURL: req.LinkURL, ScheduledAt: req.ScheduledAt, PublisherConnectorID: req.PublisherConnectorID,
 		SourceContext: map[string]any{"manual": true},

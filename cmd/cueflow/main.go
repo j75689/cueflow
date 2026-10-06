@@ -161,7 +161,9 @@ func serve() error {
 	if err := st.FailStaleAgentRuns(ctx); err != nil {
 		logger.Warn("clean stale agent runs", "err", err)
 	}
-	if n, err := crew.SeedDefaults(ctx, st); err != nil {
+	if org, err := st.DefaultOrg(ctx); err != nil {
+		logger.Warn("seed default agents", "err", err)
+	} else if n, err := crew.SeedDefaults(ctx, st, org.ID); err != nil {
 		logger.Warn("seed default agents", "err", err)
 	} else if n > 0 {
 		logger.Info("created the default agent team", "agents", n)

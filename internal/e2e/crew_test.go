@@ -99,10 +99,14 @@ func crewSetup(t *testing.T) (*env, map[string]*store.Agent) {
 		t.Fatal(err)
 	}
 	// Seed the default team the same way the server does on first start.
-	if _, err := crew.SeedDefaults(ctx, e.store); err != nil {
+	org, err := e.store.DefaultOrg(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	agents, _ := e.store.ListAgents(ctx)
+	if _, err := crew.SeedDefaults(ctx, e.store, org.ID); err != nil {
+		t.Fatal(err)
+	}
+	agents, _ := e.store.ListAgents(ctx, org.ID)
 	bySlug := map[string]*store.Agent{}
 	for _, a := range agents {
 		bySlug[a.Slug] = a

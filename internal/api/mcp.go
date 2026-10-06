@@ -53,6 +53,7 @@ const taskRefDesc = "task number (e.g. 12 or #12) or task id"
 
 type mcpTaskRef struct {
 	Task string `json:"task" jsonschema:"task number (e.g. 12 or #12) or task id"`
+	Org  string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpListTasksIn struct {
@@ -61,6 +62,7 @@ type mcpListTasksIn struct {
 	Query    string   `json:"query,omitempty" jsonschema:"text to search in titles"`
 	All      bool     `json:"all,omitempty" jsonschema:"include subtasks and tasks finished more than two weeks ago"`
 	Limit    int      `json:"limit,omitempty" jsonschema:"maximum tasks to return (default 50)"`
+	Org      string   `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpCreateTaskIn struct {
@@ -70,6 +72,7 @@ type mcpCreateTaskIn struct {
 	Status      string   `json:"status,omitempty" jsonschema:"TODO (default; an assigned agent starts right away) or BACKLOG"`
 	Priority    string   `json:"priority,omitempty" jsonschema:"low, normal (default), high or urgent"`
 	Labels      []string `json:"labels,omitempty"`
+	Org         string   `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpUpdateTaskIn struct {
@@ -80,16 +83,23 @@ type mcpUpdateTaskIn struct {
 	Status      *string   `json:"status,omitempty" jsonschema:"BACKLOG, TODO, REVIEW, DONE or CANCELED (moving a running task stops its run)"`
 	Priority    *string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
 	Labels      *[]string `json:"labels,omitempty"`
+	Org         string    `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpCommentIn struct {
 	Task    string `json:"task" jsonschema:"task number (e.g. 12 or #12) or task id"`
 	Content string `json:"content" jsonschema:"message for the agent; start with @slug to hand the task to that agent"`
+	Org     string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpListDraftsIn struct {
 	Status string `json:"status,omitempty" jsonschema:"post status (default PENDING_REVIEW): DRAFT, PENDING_REVIEW, APPROVED, REJECTED, QUEUED, PUBLISHED or FAILED"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"maximum posts to return (default 20)"`
+	Org    string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
+}
+
+type mcpOrgIn struct {
+	Org string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpNoInput struct{}
@@ -98,15 +108,33 @@ func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
 		Instructions: "CueFlow is a social-content studio run by a crew of AI agents on a kanban board. " +
 			"Create tasks for agents, follow their progress, answer their questions and steer them with comments. " +
+			"Each org has its own crew and board: pass org (see list_orgs) to work outside the default org. " +
 			"Agents write drafts that a human reviews in the CueFlow dashboard; nothing here publishes.",
 	})
 	tool := func(name, desc string, readOnly bool) *mcp.Tool {
 		return &mcp.Tool{Name: name, Description: desc, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly}}
 	}
 
-	mcp.AddTool(srv, tool("list_agents", "List the crew: each agent's slug, name, role and description. Use the slug to assign tasks.", true),
+	mcp.AddTool(srv, tool("list_orgs", "List the orgs. Each org has its own crew, board, schedules and review queue; the first one is the default.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, any, error) {
-			agents, err := s.Store.ListAgents(ctx)
+			orgs, err := s.Store.ListOrgs(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			out := make([]map[string]any, 0, len(orgs))
+			for i, o := range orgs {
+				out = append(out, map[string]any{"slug": o.Slug, "name": o.Name, "default": i == 0})
+			}
+			return mcpJSON(out)
+		})
+
+	mcp.AddTool(srv, tool("list_agents", "List an org's crew: each agent's slug, name, role and description. Use the slug to assign tasks.", true),
+		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOrgIn) (*mcp.CallToolResult, any, error) {
+			org, err := s.mcpOrg(ctx, in.Org)
+			if err != nil {
+				return mcpErr(err)
+			}
+			agents, err := s.Store.ListAgents(ctx, org.ID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -120,7 +148,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("list_tasks", "List board tasks. By default shows top-level tasks, skipping those finished more than two weeks ago.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpListTasksIn) (*mcp.CallToolResult, any, error) {
-			f := store.TaskFilter{Query: in.Query, All: in.All, Limit: in.Limit}
+			org, err := s.mcpOrg(ctx, in.Org)
+			if err != nil {
+				return mcpErr(err)
+			}
+			f := store.TaskFilter{OrgID: &org.ID, Query: in.Query, All: in.All, Limit: in.Limit}
 			if f.Limit <= 0 || f.Limit > 200 {
 				f.Limit = 50
 			}
@@ -135,7 +167,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 				if strings.EqualFold(in.Assignee, "none") {
 					f.Unassigned = true
 				} else {
-					a, err := s.mcpAgent(ctx, in.Assignee)
+					a, err := s.mcpAgent(ctx, org.ID, in.Assignee)
 					if err != nil {
 						return mcpErr(err)
 					}
@@ -155,7 +187,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("get_task", "Show a task with its description, subtasks, linked drafts and the latest messages in its thread.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
-			t, err := s.mcpResolveTask(ctx, in.Task)
+			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
@@ -197,7 +229,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("create_task", "Create a task on the board. An assigned TODO task starts right away; the agent reports back in the task thread.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCreateTaskIn) (*mcp.CallToolResult, any, error) {
-			nt := store.NewTask{Title: in.Title, Description: in.Description, Priority: strings.ToLower(in.Priority), Labels: in.Labels}
+			org, err := s.mcpOrg(ctx, in.Org)
+			if err != nil {
+				return mcpErr(err)
+			}
+			nt := store.NewTask{OrgID: org.ID, Title: in.Title, Description: in.Description, Priority: strings.ToLower(in.Priority), Labels: in.Labels}
 			switch st := store.TaskStatus(strings.ToUpper(strings.TrimSpace(in.Status))); st {
 			case "", store.TaskTodo:
 				nt.Status = store.TaskTodo
@@ -207,7 +243,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 				return mcpError("status must be TODO or BACKLOG")
 			}
 			if in.Assignee != "" {
-				a, err := s.mcpAgent(ctx, in.Assignee)
+				a, err := s.mcpAgent(ctx, org.ID, in.Assignee)
 				if err != nil {
 					return mcpErr(err)
 				}
@@ -222,7 +258,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("update_task", "Edit a task's title, description, priority, labels, assignee or status. Only the fields you pass change.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUpdateTaskIn) (*mcp.CallToolResult, any, error) {
-			t, err := s.mcpResolveTask(ctx, in.Task)
+			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
@@ -241,7 +277,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 			if in.Assignee != nil {
 				var id *uuid.UUID
 				if ref := strings.TrimSpace(*in.Assignee); ref != "" && !strings.EqualFold(ref, "none") {
-					a, err := s.mcpAgent(ctx, ref)
+					a, err := s.mcpAgent(ctx, t.OrgID, ref)
 					if err != nil {
 						return mcpErr(err)
 					}
@@ -258,7 +294,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("comment_task", "Post a message in a task's thread as the operator. The assigned agent picks it up and continues; this is how you answer an agent that is waiting on you.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCommentIn) (*mcp.CallToolResult, any, error) {
-			t, err := s.mcpResolveTask(ctx, in.Task)
+			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
@@ -274,7 +310,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("run_task", "Start (or restart) the assigned agent on a task.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
-			t, err := s.mcpResolveTask(ctx, in.Task)
+			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
@@ -287,7 +323,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 	mcp.AddTool(srv, tool("stop_task", "Stop the agent working on a task; the task then waits for you.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
-			t, err := s.mcpResolveTask(ctx, in.Task)
+			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
@@ -311,7 +347,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 			if limit <= 0 || limit > 100 {
 				limit = 20
 			}
-			posts, total, err := s.Store.ListPosts(ctx, store.PostFilter{Statuses: []domain.Status{st}, Limit: limit})
+			org, err := s.mcpOrg(ctx, in.Org)
+			if err != nil {
+				return mcpErr(err)
+			}
+			posts, total, err := s.Store.ListPosts(ctx, store.PostFilter{OrgID: &org.ID, Statuses: []domain.Status{st}, Limit: limit})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -326,11 +366,24 @@ func (s *Server) newMCPServer() *mcp.Server {
 	return srv
 }
 
-// mcpResolveTask accepts "12", "#12" or a task id.
-func (s *Server) mcpResolveTask(ctx context.Context, ref string) (*store.Task, error) {
+// mcpOrg resolves an org slug; blank means the default org.
+func (s *Server) mcpOrg(ctx context.Context, ref string) (*store.Org, error) {
+	o, err := s.Store.ResolveOrg(ctx, ref)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, &store.ValidationError{Msg: fmt.Sprintf("no org %q (see list_orgs)", ref)}
+	}
+	return o, err
+}
+
+// mcpResolveTask accepts "12", "#12" (numbered within the org) or a task id.
+func (s *Server) mcpResolveTask(ctx context.Context, orgRef, ref string) (*store.Task, error) {
 	ref = strings.TrimSpace(ref)
 	if n, err := strconv.ParseInt(strings.TrimPrefix(ref, "#"), 10, 64); err == nil {
-		return s.Store.GetTaskByNumber(ctx, n)
+		org, err := s.mcpOrg(ctx, orgRef)
+		if err != nil {
+			return nil, err
+		}
+		return s.Store.GetTaskByNumber(ctx, org.ID, n)
 	}
 	id, err := uuid.Parse(ref)
 	if err != nil {
@@ -339,9 +392,9 @@ func (s *Server) mcpResolveTask(ctx context.Context, ref string) (*store.Task, e
 	return s.Store.GetTask(ctx, id)
 }
 
-func (s *Server) mcpAgent(ctx context.Context, slug string) (*store.Agent, error) {
+func (s *Server) mcpAgent(ctx context.Context, org uuid.UUID, slug string) (*store.Agent, error) {
 	slug = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(slug), "@"))
-	a, err := s.Store.GetAgentBySlug(ctx, slug)
+	a, err := s.Store.GetAgentBySlug(ctx, org, slug)
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, &store.ValidationError{Msg: fmt.Sprintf("no agent with slug %q (see list_agents)", slug)}
 	}

@@ -51,6 +51,15 @@ type UsageModel struct {
 	OutputTokens  int64      `json:"output_tokens"`
 }
 
+type UsageOrg struct {
+	OrgID        uuid.UUID `json:"org_id"`
+	Name         string    `json:"name"`
+	Slug         string    `json:"slug"`
+	Runs         int64     `json:"runs"`
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+}
+
 type UsageTask struct {
 	TaskID       uuid.UUID `json:"task_id"`
 	Number       int64     `json:"number"`
@@ -67,6 +76,7 @@ type Usage struct {
 	Totals   UsageTotals   `json:"totals"`
 	Daily    []UsageDay    `json:"daily"`
 	BySource []UsageSource `json:"by_source"`
+	ByOrg    []UsageOrg    `json:"by_org"`
 	ByAgent  []UsageAgent  `json:"by_agent"`
 	ByModel  []UsageModel  `json:"by_model"`
 	TopTasks []UsageTask   `json:"top_tasks"`
@@ -74,11 +84,11 @@ type Usage struct {
 
 // usageRuns unifies agent runs and pipeline runs started since $1.
 const usageRuns = `WITH runs AS (
-	SELECT r.started_at, 'agent' AS source, r.agent_id, r.task_id, r.connector_id, r.model, r.runtime,
+	SELECT r.started_at, 'agent' AS source, r.org_id, r.agent_id, r.task_id, r.connector_id, r.model, r.runtime,
 	       r.input_tokens AS inp, r.output_tokens AS outp, r.tool_calls::bigint AS calls, r.status
 	FROM agent_runs r WHERE r.started_at >= $1
 	UNION ALL
-	SELECT p.started_at, 'pipeline', NULL, NULL, p.llm_connector_id, p.model, 'builtin',
+	SELECT p.started_at, 'pipeline', p.org_id, NULL, NULL, p.llm_connector_id, p.model, 'builtin',
 	       COALESCE((p.stats->>'input_tokens')::bigint, 0), COALESCE((p.stats->>'output_tokens')::bigint, 0),
 	       COALESCE((p.stats->>'tool_calls')::bigint, 0), p.status
 	FROM pipeline_runs p WHERE p.started_at >= $1
@@ -86,7 +96,7 @@ const usageRuns = `WITH runs AS (
 
 // UsageReport aggregates token usage since `since`, bucketing days in tz.
 func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*Usage, error) {
-	u := &Usage{From: since, To: time.Now(), TZ: tz, Daily: []UsageDay{}, BySource: []UsageSource{},
+	u := &Usage{From: since, To: time.Now(), TZ: tz, Daily: []UsageDay{}, BySource: []UsageSource{}, ByOrg: []UsageOrg{},
 		ByAgent: []UsageAgent{}, ByModel: []UsageModel{}, TopTasks: []UsageTask{}}
 
 	if err := s.pool.QueryRow(ctx, usageRuns+`SELECT count(*), count(*) FILTER (WHERE status = 'FAILED'),
@@ -132,6 +142,23 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 			return nil, err
 		}
 		u.BySource = append(u.BySource, v)
+	}
+	rows.Close()
+
+	rows, err = s.pool.Query(ctx, usageRuns+`SELECT o.id, o.name, o.slug, count(*),
+		COALESCE(sum(inp), 0)::bigint, COALESCE(sum(outp), 0)::bigint
+		FROM runs JOIN orgs o ON o.id = runs.org_id
+		GROUP BY o.id, o.name, o.slug ORDER BY sum(inp) + sum(outp) DESC, count(*) DESC`, since)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var v UsageOrg
+		if err := rows.Scan(&v.OrgID, &v.Name, &v.Slug, &v.Runs, &v.InputTokens, &v.OutputTokens); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		u.ByOrg = append(u.ByOrg, v)
 	}
 	rows.Close()
 

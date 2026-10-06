@@ -23,6 +23,7 @@ type AgentStats struct {
 
 type Agent struct {
 	ID                uuid.UUID  `json:"id"`
+	OrgID             uuid.UUID  `json:"org_id"`
 	Name              string     `json:"name"`
 	Slug              string     `json:"slug"`
 	Avatar            string     `json:"avatar"`
@@ -57,7 +58,7 @@ func (a *Agent) Has(capability string) bool {
 
 const agentColumns = `a.id, a.name, a.slug, a.avatar, a.role, a.description, a.instructions, a.capabilities,
 	a.llm_connector_id, a.search_connector_id, a.source_connector_ids, a.language, a.platforms, a.max_turns,
-	a.is_active, a.created_at, a.updated_at, a.runtime_connector_id, a.tool_connector_ids,
+	a.is_active, a.created_at, a.updated_at, a.runtime_connector_id, a.tool_connector_ids, a.org_id,
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status NOT IN ('DONE','CANCELED')),
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status='IN_PROGRESS')`
 
@@ -65,7 +66,7 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	var a Agent
 	if err := row.Scan(&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.Role, &a.Description, &a.Instructions, &a.Capabilities,
 		&a.LLMConnectorID, &a.SearchConnectorID, &a.SourceConnectorIDs, &a.Language, &a.Platforms, &a.MaxTurns,
-		&a.IsActive, &a.CreatedAt, &a.UpdatedAt, &a.RuntimeConnectorID, &a.ToolConnectorIDs, &a.Stats.OpenTasks, &a.Stats.Running); err != nil {
+		&a.IsActive, &a.CreatedAt, &a.UpdatedAt, &a.RuntimeConnectorID, &a.ToolConnectorIDs, &a.OrgID, &a.Stats.OpenTasks, &a.Stats.Running); err != nil {
 		return nil, err
 	}
 	if a.Capabilities == nil {
@@ -178,13 +179,14 @@ func (a *Agent) normalize() error {
 func dupSlug(err error) error {
 	var pg *pgconn.PgError
 	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
-		return invalid("another agent already uses this slug")
+		return invalid("another agent in this org already uses this slug")
 	}
 	return err
 }
 
-func (s *Store) ListAgents(ctx context.Context) ([]*Agent, error) {
-	rows, err := s.pool.Query(ctx, "SELECT "+agentColumns+" FROM agents a ORDER BY a.created_at")
+// ListAgents returns an org's agents.
+func (s *Store) ListAgents(ctx context.Context, org uuid.UUID) ([]*Agent, error) {
+	rows, err := s.pool.Query(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.org_id=$1 ORDER BY a.created_at", org)
 	if err != nil {
 		return nil, err
 	}
@@ -205,15 +207,16 @@ func (s *Store) GetAgent(ctx context.Context, id uuid.UUID) (*Agent, error) {
 	return a, notFound(err)
 }
 
-func (s *Store) GetAgentBySlug(ctx context.Context, slug string) (*Agent, error) {
-	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.slug=$1",
-		strings.ToLower(strings.TrimPrefix(strings.TrimSpace(slug), "@"))))
+// GetAgentBySlug finds an agent of an org by its @slug.
+func (s *Store) GetAgentBySlug(ctx context.Context, org uuid.UUID, slug string) (*Agent, error) {
+	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.org_id=$1 AND a.slug=$2",
+		org, strings.ToLower(strings.TrimPrefix(strings.TrimSpace(slug), "@"))))
 	return a, notFound(err)
 }
 
-func (s *Store) CountAgents(ctx context.Context) (int, error) {
+func (s *Store) CountAgents(ctx context.Context, org uuid.UUID) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, "SELECT count(*) FROM agents").Scan(&n)
+	err := s.pool.QueryRow(ctx, "SELECT count(*) FROM agents WHERE org_id=$1", org).Scan(&n)
 	return n, err
 }
 
@@ -221,14 +224,17 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	if err := a.normalize(); err != nil {
 		return nil, err
 	}
+	if a.OrgID == uuid.Nil {
+		return nil, invalid("org is required")
+	}
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `INSERT INTO agents (name, slug, avatar, role, description, instructions, capabilities,
 		llm_connector_id, search_connector_id, source_connector_ids, language, platforms, max_turns, is_active,
-		runtime_connector_id, tool_connector_ids)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+		runtime_connector_id, tool_connector_ids, org_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
 		truncate(a.Name, 64), a.Slug, truncate(a.Avatar, 16), a.Role, a.Description, a.Instructions, a.Capabilities,
 		a.LLMConnectorID, a.SearchConnectorID, a.SourceConnectorIDs, a.Language, a.Platforms, a.MaxTurns, a.IsActive,
-		a.RuntimeConnectorID, nonNilIDs(a.ToolConnectorIDs)).Scan(&id)
+		a.RuntimeConnectorID, nonNilIDs(a.ToolConnectorIDs), a.OrgID).Scan(&id)
 	if err != nil {
 		return nil, dupSlug(err)
 	}

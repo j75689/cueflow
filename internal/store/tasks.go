@@ -64,6 +64,7 @@ type SubtaskCounts struct {
 
 type Task struct {
 	ID              uuid.UUID  `json:"id"`
+	OrgID           uuid.UUID  `json:"org_id"`
 	Number          int64      `json:"number"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
@@ -97,7 +98,7 @@ const taskColumns = `t.id, t.number, t.title, t.description, t.status, t.priorit
 	(SELECT count(*) FROM tasks c WHERE c.parent_id=t.id),
 	(SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.status IN ('DONE','CANCELED','REVIEW')),
 	t.result, t.due_at, t.position, (t.status='IN_PROGRESS' AND t.lease_until > NOW()), t.attempts, t.version,
-	t.created_at, t.updated_at, t.started_at, t.completed_at, t.publisher_connector_id, t.publish_accounts`
+	t.created_at, t.updated_at, t.started_at, t.completed_at, t.publisher_connector_id, t.publish_accounts, t.org_id`
 
 const taskFrom = ` FROM tasks t LEFT JOIN agents a ON a.id = t.assignee_agent_id`
 
@@ -109,7 +110,7 @@ func scanTask(row pgx.Row) (*Task, error) {
 	if err := row.Scan(&t.ID, &t.Number, &t.Title, &t.Description, &status, &t.Priority, &t.Labels, &t.AssigneeAgentID,
 		&aID, &aName, &aSlug, &aAvatar, &t.CreatedBy, &t.CreatorAgentID, &t.ParentID, &t.ScheduleID,
 		&t.SubtaskCounts.Total, &t.SubtaskCounts.Done, &t.Result, &t.DueAt, &t.Position, &t.Running, &t.Attempts,
-		&t.Version, &t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt, &t.PublisherConnectorID, &t.PublishAccounts); err != nil {
+		&t.Version, &t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt, &t.PublisherConnectorID, &t.PublishAccounts, &t.OrgID); err != nil {
 		return nil, err
 	}
 	t.Status = TaskStatus(status)
@@ -137,12 +138,14 @@ func (s *Store) GetTask(ctx context.Context, id uuid.UUID) (*Task, error) {
 	return t, notFound(err)
 }
 
-func (s *Store) GetTaskByNumber(ctx context.Context, n int64) (*Task, error) {
-	t, err := scanTask(s.pool.QueryRow(ctx, "SELECT "+taskColumns+taskFrom+" WHERE t.number=$1", n))
+// GetTaskByNumber finds a task by its #number within an org.
+func (s *Store) GetTaskByNumber(ctx context.Context, org uuid.UUID, n int64) (*Task, error) {
+	t, err := scanTask(s.pool.QueryRow(ctx, "SELECT "+taskColumns+taskFrom+" WHERE t.org_id=$1 AND t.number=$2", org, n))
 	return t, notFound(err)
 }
 
 type TaskFilter struct {
+	OrgID      *uuid.UUID
 	Statuses   []TaskStatus
 	AssigneeID *uuid.UUID
 	Unassigned bool
@@ -159,6 +162,9 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
 	arg := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.OrgID != nil {
+		where = append(where, "t.org_id = "+arg(*f.OrgID))
 	}
 	if len(f.Statuses) > 0 {
 		ss := make([]string, len(f.Statuses))
@@ -212,6 +218,9 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
 }
 
 type NewTask struct {
+	// OrgID may be left empty: it then comes from the parent task, the schedule or the assignee,
+	// and falls back to the default org.
+	OrgID           uuid.UUID
 	Title           string
 	Description     string
 	Status          TaskStatus
@@ -253,13 +262,32 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 	}
 	var id uuid.UUID
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		org, err := s.taskOrg(ctx, tx, in)
+		if err != nil {
+			return err
+		}
+		for _, ref := range []struct {
+			table, what string
+			id          *uuid.UUID
+		}{{"tasks", "parent task", in.ParentID}, {"schedules", "schedule", in.ScheduleID},
+			{"agents", "assignee", in.AssigneeAgentID}, {"agents", "creator agent", in.CreatorAgentID}} {
+			if err := sameOrg(ctx, tx, org, ref.table, ref.what, ref.id); err != nil {
+				return err
+			}
+		}
+		// The org row lock serializes numbering, so numbers never collide.
+		var number int64
+		if err := tx.QueryRow(ctx, `UPDATE orgs SET next_task_number = next_task_number + 1 WHERE id=$1
+			RETURNING next_task_number - 1`, org).Scan(&number); err != nil {
+			return notFound(err)
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO tasks (title, description, status, priority, labels, assignee_agent_id,
-			created_by, creator_agent_id, parent_id, schedule_id, due_at, publisher_connector_id, publish_accounts, position)
-			VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-			  COALESCE((SELECT max(position) FROM tasks WHERE status=$3::text), 0) + 1024) RETURNING id`,
+			created_by, creator_agent_id, parent_id, schedule_id, due_at, publisher_connector_id, publish_accounts, org_id, number, position)
+			VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+			  COALESCE((SELECT max(position) FROM tasks WHERE status=$3::text AND org_id=$14), 0) + 1024) RETURNING id`,
 			truncate(in.Title, 255), in.Description, string(in.Status), in.Priority, cleanLabels(in.Labels),
 			in.AssigneeAgentID, in.CreatedBy, in.CreatorAgentID, in.ParentID, in.ScheduleID, in.DueAt,
-			in.PublisherConnectorID, cleanList(in.PublishAccounts)).Scan(&id); err != nil {
+			in.PublisherConnectorID, cleanList(in.PublishAccounts), org, number).Scan(&id); err != nil {
 			return notFound(err)
 		}
 		return nil
@@ -268,6 +296,27 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 		return nil, err
 	}
 	return s.GetTask(ctx, id)
+}
+
+// taskOrg picks the org of a new task: the given one, else the parent's, the schedule's or the
+// assignee's, else the default org.
+func (s *Store) taskOrg(ctx context.Context, q querier, in NewTask) (uuid.UUID, error) {
+	if in.OrgID != uuid.Nil {
+		return in.OrgID, nil
+	}
+	for _, ref := range []struct {
+		table string
+		id    *uuid.UUID
+	}{{"tasks", in.ParentID}, {"schedules", in.ScheduleID}, {"agents", in.AssigneeAgentID}} {
+		if ref.id != nil {
+			if org, err := orgOf(ctx, q, ref.table, *ref.id); err == nil {
+				return org, nil
+			}
+		}
+	}
+	var org uuid.UUID
+	err := q.QueryRow(ctx, "SELECT id FROM orgs ORDER BY created_at, id LIMIT 1").Scan(&org)
+	return org, notFound(err)
 }
 
 type TaskPatch struct {
@@ -334,6 +383,9 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		add("labels", cleanLabels(*p.Labels))
 	}
 	if p.AssigneeAgentID != nil {
+		if err := sameOrg(ctx, s.pool, before.OrgID, "agents", "assignee", *p.AssigneeAgentID); err != nil {
+			return nil, nil, err
+		}
 		add("assignee_agent_id", *p.AssigneeAgentID)
 	}
 	if p.DueAt != nil {
@@ -366,7 +418,7 @@ func (s *Store) SetTaskStatusIf(ctx context.Context, id uuid.UUID, from []TaskSt
 	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status=$3::text, lease_until=NULL, version=version+1, updated_at=NOW(),
 		result = COALESCE($4, result),
 		completed_at = CASE WHEN $5 THEN NOW() ELSE completed_at END,
-		position = COALESCE((SELECT max(position) FROM tasks WHERE status=$3::text), 0) + 1024
+		position = COALESCE((SELECT max(o.position) FROM tasks o WHERE o.status=$3::text AND o.org_id=tasks.org_id), 0) + 1024
 		WHERE id=$1 AND status = ANY($2)`, id, fs, string(to), result, completed)
 	if err != nil {
 		return false, err
@@ -558,7 +610,8 @@ type AgentRun struct {
 
 func (s *Store) StartAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
 	r := &AgentRun{TaskID: taskID, AgentID: &agentID, Status: "RUNNING", Runtime: "builtin"}
-	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (task_id, agent_id) VALUES ($1,$2) RETURNING id, started_at`,
+	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (task_id, agent_id, org_id)
+		SELECT $1, $2, org_id FROM tasks WHERE id=$1 RETURNING id, started_at`,
 		taskID, agentID).Scan(&r.ID, &r.StartedAt)
 	return r, err
 }
@@ -633,6 +686,7 @@ func (s *Store) PostsForTask(ctx context.Context, taskID uuid.UUID) ([]PostRef, 
 
 type Schedule struct {
 	ID              uuid.UUID  `json:"id"`
+	OrgID           uuid.UUID  `json:"org_id"`
 	Name            string     `json:"name"`
 	CronExpr        string     `json:"cron_expr"`
 	Timezone        string     `json:"timezone"`
@@ -653,13 +707,13 @@ type Schedule struct {
 }
 
 const scheduleColumns = `id, name, cron_expr, timezone, is_active, assignee_agent_id, task_title, task_description,
-	priority, created_by, creator_agent_id, last_run_at, created_at, updated_at, publisher_connector_id, publish_accounts`
+	priority, created_by, creator_agent_id, last_run_at, created_at, updated_at, publisher_connector_id, publish_accounts, org_id`
 
 func scanSchedule(row pgx.Row) (*Schedule, error) {
 	var s Schedule
 	err := row.Scan(&s.ID, &s.Name, &s.CronExpr, &s.Timezone, &s.IsActive, &s.AssigneeAgentID, &s.TaskTitle,
 		&s.TaskDescription, &s.Priority, &s.CreatedBy, &s.CreatorAgentID, &s.LastRunAt, &s.CreatedAt, &s.UpdatedAt,
-		&s.PublisherConnectorID, &s.PublishAccounts)
+		&s.PublisherConnectorID, &s.PublishAccounts, &s.OrgID)
 	if s.PublishAccounts == nil {
 		s.PublishAccounts = []string{}
 	}
@@ -699,8 +753,9 @@ func (sc *Schedule) normalize(validate CronValidator) error {
 	return nil
 }
 
-func (s *Store) ListSchedules(ctx context.Context) ([]*Schedule, error) {
-	rows, err := s.pool.Query(ctx, "SELECT "+scheduleColumns+" FROM schedules ORDER BY created_at")
+// ListSchedules returns an org's schedules, or every org's when org is nil (the scheduler).
+func (s *Store) ListSchedules(ctx context.Context, org *uuid.UUID) ([]*Schedule, error) {
+	rows, err := s.pool.Query(ctx, "SELECT "+scheduleColumns+" FROM schedules WHERE $1::uuid IS NULL OR org_id=$1 ORDER BY created_at", org)
 	if err != nil {
 		return nil, err
 	}
@@ -725,15 +780,28 @@ func (s *Store) CreateSchedule(ctx context.Context, sc *Schedule, validate CronV
 	if err := sc.normalize(validate); err != nil {
 		return nil, err
 	}
+	if sc.OrgID == uuid.Nil {
+		return nil, invalid("org is required")
+	}
+	if err := sameOrg(ctx, s.pool, sc.OrgID, "agents", "assignee", sc.AssigneeAgentID); err != nil {
+		return nil, err
+	}
 	return scanSchedule(s.pool.QueryRow(ctx, `INSERT INTO schedules (name, cron_expr, timezone, is_active, assignee_agent_id,
-		task_title, task_description, priority, created_by, creator_agent_id, publisher_connector_id, publish_accounts)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+scheduleColumns,
+		task_title, task_description, priority, created_by, creator_agent_id, publisher_connector_id, publish_accounts, org_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING `+scheduleColumns,
 		truncate(sc.Name, 128), sc.CronExpr, sc.Timezone, sc.IsActive, sc.AssigneeAgentID, truncate(sc.TaskTitle, 255),
-		sc.TaskDescription, sc.Priority, sc.CreatedBy, sc.CreatorAgentID, sc.PublisherConnectorID, cleanList(sc.PublishAccounts)))
+		sc.TaskDescription, sc.Priority, sc.CreatedBy, sc.CreatorAgentID, sc.PublisherConnectorID, cleanList(sc.PublishAccounts), sc.OrgID))
 }
 
 func (s *Store) UpdateSchedule(ctx context.Context, sc *Schedule, validate CronValidator) (*Schedule, error) {
 	if err := sc.normalize(validate); err != nil {
+		return nil, err
+	}
+	org, err := orgOf(ctx, s.pool, "schedules", sc.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := sameOrg(ctx, s.pool, org, "agents", "assignee", sc.AssigneeAgentID); err != nil {
 		return nil, err
 	}
 	out, err := scanSchedule(s.pool.QueryRow(ctx, `UPDATE schedules SET name=$2, cron_expr=$3, timezone=$4, is_active=$5,
@@ -776,7 +844,7 @@ func (s *Store) SpawnScheduledTask(ctx context.Context, scheduleID uuid.UUID) (*
 	desc += fmt.Sprintf("(Created by schedule %q.)", sc.Name)
 	return s.CreateTask(ctx, NewTask{
 		Title: fmt.Sprintf("%s · %s", sc.TaskTitle, time.Now().Format("2006-01-02")), Description: desc,
-		Priority: sc.Priority, AssigneeAgentID: sc.AssigneeAgentID, CreatedBy: createdBy,
+		OrgID: sc.OrgID, Priority: sc.Priority, AssigneeAgentID: sc.AssigneeAgentID, CreatedBy: createdBy,
 		CreatorAgentID: sc.CreatorAgentID, ScheduleID: &sc.ID, Labels: []string{"scheduled"},
 		PublisherConnectorID: sc.PublisherConnectorID, PublishAccounts: sc.PublishAccounts,
 	})

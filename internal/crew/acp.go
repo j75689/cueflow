@@ -131,7 +131,7 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 	}
 	client.setSession(string(sess.SessionId))
 
-	team, _ := c.store.ListAgents(ctx)
+	team, _ := c.store.ListAgents(ctx, task.OrgID)
 	var memories []store.AgentMemory
 	if a.Has("memory") {
 		memories, _ = c.store.Memories(ctx, a.ID, "", 30)

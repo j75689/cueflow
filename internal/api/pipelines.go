@@ -16,7 +16,12 @@ func (s *Server) withNextRun(p *store.Pipeline) *store.Pipeline {
 }
 
 func (s *Server) listPipelines(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.Store.ListPipelines(r.Context())
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	ps, err := s.Store.ListPipelines(r.Context(), &org.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -137,7 +142,12 @@ func (s *Server) createPipeline(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	p := &store.Pipeline{IsActive: true, Timezone: "UTC", Language: "en", LookbackHours: 24, MaxItems: 20}
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	p := &store.Pipeline{OrgID: org.ID, IsActive: true, Timezone: "UTC", Language: "en", LookbackHours: 24, MaxItems: 20}
 	body.apply(p)
 	out, err := s.Store.CreatePipeline(r.Context(), p, scheduler.Validate)
 	if err != nil {
@@ -212,7 +222,12 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	runs, err := s.Store.ListRuns(r.Context(), pid, queryInt(r, "limit", 50))
+	org, err := s.reqOrg(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	runs, err := s.Store.ListRuns(r.Context(), &org.ID, pid, queryInt(r, "limit", 50))
 	if err != nil {
 		s.fail(w, err)
 		return

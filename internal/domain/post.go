@@ -116,6 +116,7 @@ const (
 
 type Post struct {
 	ID                   uuid.UUID         `json:"id"`
+	OrgID                uuid.UUID         `json:"org_id"`
 	GroupID              *uuid.UUID        `json:"group_id"`
 	PipelineID           *uuid.UUID        `json:"pipeline_id"`
 	RunID                *uuid.UUID        `json:"run_id"`

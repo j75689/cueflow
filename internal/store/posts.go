@@ -16,7 +16,7 @@ import (
 
 const postColumns = `id, group_id, pipeline_id, run_id, task_id, publisher_connector_id, title, content, thread_parts,
 	hashtags, image_prompt, platforms, media_urls, accounts, topic, link_url, status, review_note, source_context, error_message,
-	external_post_ids, attempts, version, scheduled_at, published_at, created_at, updated_at`
+	external_post_ids, attempts, version, scheduled_at, published_at, created_at, updated_at, org_id`
 
 func scanPost(row pgx.Row) (*domain.Post, error) {
 	var p domain.Post
@@ -25,7 +25,7 @@ func scanPost(row pgx.Row) (*domain.Post, error) {
 	if err := row.Scan(&p.ID, &p.GroupID, &p.PipelineID, &p.RunID, &p.TaskID, &p.PublisherConnectorID, &p.Title, &p.Content,
 		&p.ThreadParts, &p.Hashtags, &p.ImagePrompt, &p.Platforms, &p.MediaURLs, &p.Accounts, &p.Topic, &p.LinkURL, &status, &p.ReviewNote,
 		&p.SourceContext, &p.ErrorMessage, &ext, &p.Attempts, &p.Version, &p.ScheduledAt, &p.PublishedAt,
-		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.CreatedAt, &p.UpdatedAt, &p.OrgID); err != nil {
 		return nil, err
 	}
 	p.Status = domain.Status(status)
@@ -51,6 +51,7 @@ func normalizePost(p *domain.Post) {
 }
 
 type PostFilter struct {
+	OrgID      *uuid.UUID
 	Statuses   []domain.Status
 	Query      string
 	PipelineID *uuid.UUID
@@ -65,6 +66,9 @@ func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*domain.Post, in
 	arg := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.OrgID != nil {
+		where = append(where, "org_id = "+arg(*f.OrgID))
 	}
 	if len(f.Statuses) > 0 {
 		ss := make([]string, len(f.Statuses))
@@ -125,6 +129,8 @@ func getPostForUpdate(ctx context.Context, q querier, id uuid.UUID) (*domain.Pos
 
 // NewPost is the input for CreatePost.
 type NewPost struct {
+	// OrgID may be left empty: it then comes from the task or pipeline, else the default org.
+	OrgID                uuid.UUID
 	GroupID              *uuid.UUID
 	PipelineID           *uuid.UUID
 	RunID                *uuid.UUID
@@ -162,12 +168,18 @@ func (s *Store) CreatePost(ctx context.Context, in NewPost, actor domain.Actor, 
 	}
 	var out *domain.Post
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var org *uuid.UUID
+		if in.OrgID != uuid.Nil {
+			org = &in.OrgID
+		}
 		p, err := scanPost(tx.QueryRow(ctx, `INSERT INTO posts (group_id, pipeline_id, run_id, publisher_connector_id,
-			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at, task_id, accounts, topic, link_url)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING `+postColumns,
+			title, content, thread_parts, hashtags, image_prompt, platforms, media_urls, source_context, scheduled_at, task_id, accounts, topic, link_url, org_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18::uuid,
+			  (SELECT org_id FROM tasks WHERE id=$14), (SELECT org_id FROM pipelines WHERE id=$2),
+			  (SELECT id FROM orgs ORDER BY created_at, id LIMIT 1))) RETURNING `+postColumns,
 			in.GroupID, in.PipelineID, in.RunID, in.PublisherConnectorID, truncate(in.Title, 255), in.Content,
 			nonNil(in.ThreadParts), cleanTags(in.Hashtags), in.ImagePrompt, in.Platforms, nonNil(in.MediaURLs), srcCtx, in.ScheduledAt, in.TaskID,
-			nonNil(in.Accounts), strings.TrimSpace(in.Topic), strings.TrimSpace(in.LinkURL)))
+			nonNil(in.Accounts), strings.TrimSpace(in.Topic), strings.TrimSpace(in.LinkURL), org))
 		if err != nil {
 			return err
 		}
@@ -407,12 +419,13 @@ func (s *Store) AuditLogs(ctx context.Context, postID uuid.UUID) ([]domain.Audit
 	return out, rows.Err()
 }
 
-func (s *Store) CountPostsByStatus(ctx context.Context) (map[domain.Status]int, error) {
+// CountPostsByStatus counts an org's posts per status.
+func (s *Store) CountPostsByStatus(ctx context.Context, org uuid.UUID) (map[domain.Status]int, error) {
 	out := map[domain.Status]int{}
 	for _, st := range domain.AllStatuses {
 		out[st] = 0
 	}
-	rows, err := s.pool.Query(ctx, "SELECT status, count(*) FROM posts GROUP BY status")
+	rows, err := s.pool.Query(ctx, "SELECT status, count(*) FROM posts WHERE org_id=$1 GROUP BY status", org)
 	if err != nil {
 		return nil, err
 	}
