@@ -42,7 +42,32 @@ type Config struct {
 	AgentConcurrency int
 	// AgentAllowPrivateURLs lets agents' read_url reach private/LAN addresses (off by default).
 	AgentAllowPrivateURLs bool
+
+	// Queue is how background work is requested: "local" (in-process loops, the default) or
+	// "cloudtasks" (each request becomes an HTTP delivery to /internal/work/{kind}/{id}).
+	Queue string
+	// Tick is who runs the clock: "internal" (in-process cron and loops) or "external" (Cloud
+	// Scheduler calls /internal/tick every minute; no in-process loops start).
+	Tick string
+	// TasksQueue is the Cloud Tasks queue, "projects/P/locations/L/queues/Q".
+	TasksQueue string
+	// TasksTargetURL is this service's own URL as Cloud Tasks reaches it (default PublicURL).
+	TasksTargetURL string
+	// TasksServiceAccount signs the OIDC token of each Cloud Tasks delivery.
+	TasksServiceAccount string
+	// InternalAudience is the audience /internal/* requires in the Google ID token (default
+	// TasksTargetURL).
+	InternalAudience string
+	// InternalServiceAccounts are the service account emails allowed to call /internal/*
+	// (Cloud Tasks and Cloud Scheduler identities).
+	InternalServiceAccounts []string
+	// DBMaxConns caps this process's connection pool (0 = driver default). Set it low (e.g. 5) in
+	// the cloud so several instances stay under a small database's connection limit.
+	DBMaxConns int
 }
+
+// Cloud reports whether work is delivered by an external queue and clock.
+func (c *Config) Cloud() bool { return c.Queue == "cloudtasks" || c.Tick == "external" }
 
 func Load() (*Config, error) {
 	c := &Config{
@@ -62,6 +87,30 @@ func Load() (*Config, error) {
 	}
 	c.MediaBaseURL = env("CUEFLOW_MEDIA_BASE_URL", c.PublicURL)
 	c.MediaStorage = env("CUEFLOW_MEDIA_STORAGE", "")
+	c.Queue = env("CUEFLOW_QUEUE", "local")
+	c.Tick = env("CUEFLOW_TICK", "internal")
+	c.TasksQueue = os.Getenv("CUEFLOW_TASKS_QUEUE")
+	c.TasksTargetURL = strings.TrimRight(env("CUEFLOW_TASKS_TARGET_URL", c.PublicURL), "/")
+	c.TasksServiceAccount = os.Getenv("CUEFLOW_TASKS_SERVICE_ACCOUNT")
+	c.InternalAudience = env("CUEFLOW_INTERNAL_AUDIENCE", c.TasksTargetURL)
+	for _, e := range strings.Split(os.Getenv("CUEFLOW_INTERNAL_SERVICE_ACCOUNTS"), ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			c.InternalServiceAccounts = append(c.InternalServiceAccounts, e)
+		}
+	}
+	c.DBMaxConns = envInt("CUEFLOW_DB_MAX_CONNS", 0)
+	if c.Queue != "local" && c.Queue != "cloudtasks" {
+		return nil, fmt.Errorf("CUEFLOW_QUEUE must be local or cloudtasks, got %q", c.Queue)
+	}
+	if c.Tick != "internal" && c.Tick != "external" {
+		return nil, fmt.Errorf("CUEFLOW_TICK must be internal or external, got %q", c.Tick)
+	}
+	if c.Queue == "cloudtasks" && (c.TasksQueue == "" || c.TasksServiceAccount == "") {
+		return nil, errors.New("CUEFLOW_QUEUE=cloudtasks needs CUEFLOW_TASKS_QUEUE and CUEFLOW_TASKS_SERVICE_ACCOUNT")
+	}
+	if c.Cloud() && len(c.InternalServiceAccounts) == 0 {
+		return nil, errors.New("cloud mode needs CUEFLOW_INTERNAL_SERVICE_ACCOUNTS (who may call /internal/*)")
+	}
 	key, err := ParseSecretKey(os.Getenv("CUEFLOW_SECRET_KEY"))
 	if err != nil {
 		return nil, err
