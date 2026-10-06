@@ -7,7 +7,7 @@ import { useAsync } from "@/lib/hooks";
 import type { Connector, ConnectorSpec, Platform } from "@/lib/types";
 import { StringListInput, TagInput } from "./inputs";
 import { useToast } from "./providers";
-import { GenericPreview, InstagramPreview, ThreadsPreview } from "./post";
+import { GenericPreview, InstagramPreview, ThreadsPreview, isVideoURL } from "./post";
 import {
   Button,
   Card,
@@ -361,13 +361,23 @@ export function PostEditor({
                   .filter((u) => u.trim())
                   .map((u, i) => (
                     <a key={i} href={u} target="_blank" rel="noreferrer" className="block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={u}
-                        alt=""
-                        className="h-20 w-20 rounded-md border border-zinc-200 bg-zinc-100 object-cover dark:border-zinc-800 dark:bg-zinc-800"
-                        onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0.3")}
-                      />
+                      {isVideoURL(u) ? (
+                        <video
+                          src={u}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          className="h-20 w-[45px] rounded-md border border-zinc-200 bg-black object-cover dark:border-zinc-800"
+                        />
+                      ) : (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={u}
+                          alt=""
+                          className="h-20 w-20 rounded-md border border-zinc-200 bg-zinc-100 object-cover dark:border-zinc-800 dark:bg-zinc-800"
+                          onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0.3")}
+                        />
+                      )}
                     </a>
                   ))}
               </div>
@@ -445,7 +455,7 @@ function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string)
     try {
       const m = await api.uploadMedia(file);
       onAdd(m.url);
-      toast.success("Image uploaded");
+      toast.success("Uploaded");
     } catch (e) {
       toast.error(e);
     } finally {
@@ -479,12 +489,12 @@ function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string)
       <input
         ref={fileRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        accept="image/png,image/jpeg,image/webp,image/gif,video/mp4"
         className="hidden"
         onChange={(e) => void upload(e.target.files?.[0])}
       />
       <Button size="sm" onClick={() => fileRef.current?.click()} loading={uploading}>
-        <Icon name="plus" className="h-3.5 w-3.5" /> Upload image
+        <Icon name="plus" className="h-3.5 w-3.5" /> Upload media
       </Button>
       <Button size="sm" onClick={openGenerate}>
         <Icon name="sparkle" className="h-3.5 w-3.5" /> Generate image

@@ -101,7 +101,11 @@ func (c *Crew) callExternal(ctx context.Context, id uuid.UUID, name string, args
 	if !ok {
 		return "", false, errors.New("not a tool server")
 	}
-	ctx, cancel := context.WithTimeout(ctx, externalCallTimeout)
+	timeout := externalCallTimeout
+	if t, ok := inst.(interface{ CallTimeout() time.Duration }); ok && t.CallTimeout() > timeout {
+		timeout = t.CallTimeout()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return p.CallTool(ctx, name, args)
 }

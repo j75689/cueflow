@@ -63,7 +63,7 @@ flowchart LR
 | | `read_url` | 讀公開網頁（擋內網，見 §10） |
 | sources | `search_materials` | 搜尋 RSS / 信件已收集的素材（agent 勾選的來源，沒勾就是全部） |
 | | `fetch_sources` | 立刻從來源 connector 抓最新內容 |
-| drafting | `create_post_draft` | 為單一平台建立草稿（可帶 Threads 的 `topic`、`link` 連結卡與預定發布時間 `publish_at`），直接進 `PENDING_REVIEW` |
+| drafting | `create_post_draft` | 為單一平台建立草稿（可帶 Threads 的 `topic`、`link` 連結卡、預定發布時間 `publish_at`，以及 `media_urls`，例如工具 render 出來的影片），直接進 `PENDING_REVIEW` |
 | | `list_posts` | 列出貼文與審核狀態 |
 | | `revise_draft` | 修改仍在 `DRAFT` / `PENDING_REVIEW` 的草稿（稽核紀錄記為 agent） |
 | imaging | `generate_image` | 用第一個啟用中的圖片生成 connector 生圖，並附到還能編輯的草稿上（預設用草稿的 `image_prompt`）。生圖要花錢，每次執行最多 2 張 |

@@ -66,6 +66,11 @@ export function RejectDialog({
 
 /* --------------------------------- Helpers --------------------------------- */
 
+/** Whether a media URL points at a video (stored videos are served as /media/{id}.mp4). */
+export function isVideoURL(u: string): boolean {
+  return /\.(mp4|mov|webm)(\?|#|$)/i.test(u);
+}
+
 export function platformMap(platforms: Platform[] | undefined): Record<string, Platform> {
   return Object.fromEntries((platforms ?? []).map((p) => [p.id, p]));
 }
@@ -257,8 +262,15 @@ export function InstagramPreview({
         <Avatar />
         <span className="text-xs font-semibold">cueflow</span>
       </div>
-      <div className="flex aspect-square items-center justify-center bg-zinc-100 dark:bg-zinc-800">
-        {media[0] ? (
+      <div
+        className={cx(
+          "flex items-center justify-center bg-zinc-100 dark:bg-zinc-800",
+          media[0] && isVideoURL(media[0]) ? "aspect-[9/16]" : "aspect-square",
+        )}
+      >
+        {media[0] && isVideoURL(media[0]) ? (
+          <video src={media[0]} controls playsInline className="h-full w-full bg-black object-contain" />
+        ) : media[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={media[0]} alt="" className="h-full w-full object-cover" />
         ) : (

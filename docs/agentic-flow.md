@@ -64,7 +64,7 @@ The default names and instructions are in English; the language agents write in 
 | | `read_url` | Read a public web page (internal networks blocked, see §10) |
 | sources | `search_materials` | Search material already collected from RSS / mail (the agent's Sources, or all when none are picked) |
 | | `fetch_sources` | Pull the latest items from source connectors now |
-| drafting | `create_post_draft` | Create a draft for one platform (optional Threads `topic`, `link` card and `publish_at` time); it goes straight to `PENDING_REVIEW` |
+| drafting | `create_post_draft` | Create a draft for one platform (optional Threads `topic`, `link` card, `publish_at` time and `media_urls`, e.g. a video a tool rendered); it goes straight to `PENDING_REVIEW` |
 | | `list_posts` | List posts and their review status |
 | | `revise_draft` | Revise a draft still in `DRAFT` / `PENDING_REVIEW` (audited as the agent) |
 | imaging | `generate_image` | Generate an image with the first active image connector and attach it to an editable draft (default prompt: the draft's `image_prompt`). At most 2 per run, since each image costs money |
@@ -321,7 +321,8 @@ Each tool has a permission, set on the connector page:
 | `ask` | the call is recorded (`tool_approvals`), shown in the task thread as an approval card, and the run ends with the task in `WAITING_HUMAN`. **Approve & run** executes the call server-side and posts the result to the thread; **Reject** posts the refusal (with an optional note). Once no approval is pending, the task goes back to `TODO` and the agent resumes with the outcome in its brief |
 | `deny` | the agent never sees it |
 
-Tools without a stored permission use the default: `allow` when the server marks them read-only (or the
+Each connector has a call timeout (`timeout_minutes`, default 2); raise it for slow tools such as video
+rendering. Tools without a stored permission use the default: `allow` when the server marks them read-only (or the
 name reads like a lookup: get, list, search...), otherwise `ask`. Tools that look like they publish,
 message people, delete data or move money are flagged *risky*; allowing one asks for confirmation. A
 server that adds tools later gets the defaults for them, so no new tool runs unattended unless it is

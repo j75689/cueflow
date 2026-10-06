@@ -175,3 +175,34 @@ func TestWriterGeneratesImageWithinLimit(t *testing.T) {
 		t.Fatalf("draft media: %v %s", p.MediaURLs, p.Status)
 	}
 }
+
+func TestVideoUploadAndRange(t *testing.T) {
+	e := setup(t)
+	mp4 := append([]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), bytes.Repeat([]byte{7}, 4096)...)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "reel.mp4")
+	_, _ = fw.Write(mp4)
+	_ = mw.Close()
+	resp, err := http.Post(e.api.URL+"/api/v1/media", mw.FormDataContentType(), &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var up mediaOut
+	_ = json.NewDecoder(resp.Body).Decode(&up)
+	resp.Body.Close()
+	if resp.StatusCode != 201 || up.MimeType != "video/mp4" || !strings.HasSuffix(up.URL, ".mp4") {
+		t.Fatalf("video upload: %d %+v", resp.StatusCode, up)
+	}
+	req, _ := http.NewRequest("GET", e.api.URL+up.URL, nil)
+	req.Header.Set("Range", "bytes=0-7")
+	got, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, _ := io.ReadAll(got.Body)
+	got.Body.Close()
+	if got.StatusCode != http.StatusPartialContent || len(part) != 8 || got.Header.Get("Content-Type") != "video/mp4" {
+		t.Fatalf("range request: %d len=%d type=%s", got.StatusCode, len(part), got.Header.Get("Content-Type"))
+	}
+}

@@ -1,11 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,12 +23,16 @@ type mediaResp struct {
 
 func (s *Server) mediaService() *media.Service { return &media.Service{Store: s.Store, Hub: s.Hub} }
 
-// uploadMedia stores an image sent as multipart field "file".
+// uploadMedia stores an image or MP4 sent as multipart field "file".
 func (s *Server) uploadMedia(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, media.MaxBytes+1<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
+		return
+	}
 	f, _, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "send the image as multipart field \"file\" (max 10 MB)")
+		writeError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
 		return
 	}
 	defer f.Close()
@@ -42,7 +46,7 @@ func (s *Server) uploadMedia(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, mediaResp{m, media.URL(m.ID)})
+	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
 // generateMedia makes an image with an image connector and stores it.
@@ -69,7 +73,7 @@ func (s *Server) generateMedia(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, mediaResp{m, media.URL(m.ID)})
+	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
 // serveMedia serves a stored image. It is public (publishers such as Postiz fetch it without the
@@ -86,8 +90,8 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", m.MimeType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(m.Data)))
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(m.Data)
+	// ServeContent answers Range requests, which video players use to seek.
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(m.Data))
 }

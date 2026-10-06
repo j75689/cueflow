@@ -24,13 +24,32 @@ import (
 // PathPrefix is where stored images are served.
 const PathPrefix = "/media/"
 
-// MaxBytes caps an uploaded or generated image.
-const MaxBytes = 10 << 20
+// Size limits: images (uploaded or generated) and videos (e.g. rendered Reels).
+const (
+	MaxImageBytes = 10 << 20
+	MaxVideoBytes = 100 << 20
+	// MaxBytes is the largest upload accepted at all.
+	MaxBytes = MaxVideoBytes
+)
 
-var allowedTypes = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
+var (
+	imageTypes = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
+	videoTypes = []string{"video/mp4"}
+)
+
+// IsVideo reports whether a MIME type is a supported video.
+func IsVideo(mimeType string) bool { return slices.Contains(videoTypes, mimeType) }
 
 // URL is the reference a post stores for an image.
 func URL(id uuid.UUID) string { return PathPrefix + id.String() }
+
+// URLFor is the reference for stored media; videos carry their extension so clients can tell.
+func URLFor(m *store.Media) string {
+	if IsVideo(m.MimeType) {
+		return PathPrefix + m.ID.String() + ".mp4"
+	}
+	return URL(m.ID)
+}
 
 // IDFromURL recognizes CueFlow media URLs, relative ("/media/{id}") or absolute.
 func IDFromURL(raw string) (uuid.UUID, bool) {
@@ -54,17 +73,23 @@ func Absolute(raw, base string) string {
 	return raw
 }
 
-// Sniff returns the image type of data, or an error for anything that is not a supported image.
+// Sniff returns the type of data: a supported image or MP4 video, within its size limit.
 func Sniff(data []byte) (string, error) {
 	if len(data) == 0 {
-		return "", errors.New("image is empty")
-	}
-	if len(data) > MaxBytes {
-		return "", fmt.Errorf("image is larger than %d MB", MaxBytes>>20)
+		return "", errors.New("file is empty")
 	}
 	mt := http.DetectContentType(data)
-	if !slices.Contains(allowedTypes, mt) {
-		return "", fmt.Errorf("unsupported image type %s (use PNG, JPEG, WebP or GIF)", mt)
+	switch {
+	case slices.Contains(imageTypes, mt):
+		if len(data) > MaxImageBytes {
+			return "", fmt.Errorf("image is larger than %d MB", MaxImageBytes>>20)
+		}
+	case IsVideo(mt):
+		if len(data) > MaxVideoBytes {
+			return "", fmt.Errorf("video is larger than %d MB", MaxVideoBytes>>20)
+		}
+	default:
+		return "", fmt.Errorf("unsupported file type %s (use PNG, JPEG, WebP, GIF or MP4)", mt)
 	}
 	return mt, nil
 }
@@ -74,7 +99,7 @@ type Service struct {
 	Hub   *hub.Hub
 }
 
-// Upload stores an image a person uploaded.
+// Upload stores an image or video a person (or a render service) uploaded.
 func (s *Service) Upload(ctx context.Context, data []byte) (*store.Media, error) {
 	mt, err := Sniff(data)
 	if err != nil {
@@ -129,6 +154,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (*store.Med
 		return nil, errors.New("the image generator returned no image")
 	}
 	mt, err := Sniff(images[0].Data)
+	if err == nil && IsVideo(mt) {
+		err = errors.New("a video, not an image")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("the image generator returned %w", err)
 	}

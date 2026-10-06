@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -37,6 +39,8 @@ func init() {
 			{Key: "env", Label: "Environment (stdio)", Type: connector.FieldKV},
 			{Key: "secret_env", Label: "Secret environment (stdio)", Type: connector.FieldText, Secret: true,
 				Help: "KEY=VALUE per line, e.g. API tokens"},
+			{Key: "timeout_minutes", Label: "Call timeout (minutes)", Type: connector.FieldNumber, Default: 2,
+				Help: "How long one tool call may take; raise it for slow tools such as video rendering"},
 		},
 		DefaultName: func(cfg connector.Config) string {
 			if cfg.String("transport") == mcpx.TransportStdio {
@@ -51,16 +55,29 @@ func init() {
 }
 
 type Server struct {
-	opts mcpx.Options
+	opts    mcpx.Options
+	timeout time.Duration
 }
 
+// CallTimeout is how long one tool call may take (the connector's timeout_minutes).
+func (s *Server) CallTimeout() time.Duration { return s.timeout }
+
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
+	timeout := time.Duration(cfg.Int("timeout_minutes", 2)) * time.Minute
+	if timeout <= 0 || timeout > time.Hour {
+		timeout = 2 * time.Minute
+	}
+	httpClient := &http.Client{}
+	if env.HTTPClient != nil {
+		*httpClient = *env.HTTPClient
+	}
+	httpClient.Timeout = timeout
 	o := mcpx.Options{
 		Transport:  cfg.String("transport"),
 		Endpoint:   cfg.String("endpoint_url"),
 		Command:    cfg.String("command"),
 		Args:       cfg.StringList("args"),
-		HTTPClient: env.HTTPClient,
+		HTTPClient: httpClient,
 		Headers:    map[string]string{},
 		Env:        map[string]string{},
 	}
@@ -92,7 +109,7 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		}
 		o.Env[strings.TrimSpace(k)] = v
 	}
-	return &Server{opts: o}, nil
+	return &Server{opts: o, timeout: timeout}, nil
 }
 
 func (s *Server) Test(ctx context.Context) (*connector.TestResult, error) {

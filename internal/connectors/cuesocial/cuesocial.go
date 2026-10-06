@@ -275,6 +275,9 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 			if err != nil {
 				return nil, fmt.Errorf("load image %d: %w", i+1, err)
 			}
+			if strings.HasPrefix(mt, "video/") {
+				return nil, fmt.Errorf("media %d is a video; this CueSocial connector can only publish images so far", i+1)
+			}
 			if mt != "image/jpeg" && mt != "image/png" {
 				return nil, fmt.Errorf("image %d is %s; CueSocial accepts JPEG or PNG", i+1, mt)
 			}

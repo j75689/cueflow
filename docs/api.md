@@ -287,9 +287,9 @@ Images stored by CueFlow. Posts reference them in `media_urls` as `/media/{id}`.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| POST | `/media` | multipart field `file` | PNG, JPEG, WebP or GIF up to 10 MB → `201 {"id","url":"/media/{id}","mime_type","size_bytes","source":"upload","prompt":""}` |
+| POST | `/media` | multipart field `file` | PNG, JPEG, WebP or GIF up to 10 MB, or MP4 up to 100 MB → `201 {"id","url","mime_type","size_bytes","source":"upload","prompt":""}`; `url` is `/media/{id}` for images and `/media/{id}.mp4` for videos |
 | POST | `/media/generate` | `{prompt, aspect?, connector_id?}` | `aspect` one of `1:1`, `4:5`, `3:4`, `9:16`, `16:9`, `4:3` (default `1:1`); `connector_id` defaults to the first active `image` connector (`400` if there is none). `502 upstream_error` when the provider fails. Same response with `"source":"generated"` |
-| GET | `/media/{id}` | | Outside `/api/v1` and without auth (publishers fetch it); the random id is the capability. Long-lived cache headers |
+| GET | `/media/{id}` | | Outside `/api/v1` and without auth (publishers fetch it); the random id is the capability. Long-lived cache headers; Range requests supported (video seeking) |
 
 ---
 

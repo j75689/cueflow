@@ -125,6 +125,7 @@ func init() {
 				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
 				"link":         str("Optional URL shown as a link preview card (Threads); defaults to the first source_urls entry"),
 				"publish_at":   str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
+				"media_urls":   strList("Optional images or videos to attach: CueFlow media URLs (/media/...) returned by tools, or public https URLs"),
 				"source_urls":  strList("URLs backing the claims in this post"),
 			}, "platform", "content"), run: toolCreateDraft},
 		{name: "list_posts", capability: "drafting", description: "List recent posts and drafts with their review status.",
@@ -400,6 +401,7 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		Topic       string   `json:"topic"`
 		Link        string   `json:"link"`
 		PublishAt   string   `json:"publish_at"`
+		MediaURLs   []string `json:"media_urls"`
 		SourceURLs  []string `json:"source_urls"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
@@ -411,6 +413,17 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	if strings.TrimSpace(a.Link) == "" && len(a.SourceURLs) > 0 {
 		// No link card given: show the main source, so readers can always open it.
 		a.Link = strings.TrimSpace(a.SourceURLs[0])
+	}
+	var mediaURLs []string
+	for _, u := range a.MediaURLs {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if _, stored := media.IDFromURL(u); !(stored && strings.HasPrefix(u, media.PathPrefix)) && !strings.HasPrefix(u, "https://") {
+			return "", fmt.Errorf("media_urls must be CueFlow media URLs (/media/...) or https URLs, got %q", u)
+		}
+		mediaURLs = append(mediaURLs, u)
 	}
 	var publishAt *time.Time
 	if s := strings.TrimSpace(a.PublishAt); s != "" {
@@ -445,7 +458,7 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	post, err := e.c.store.CreatePost(ctx, store.NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
-		PublisherConnectorID: publisher, Accounts: accounts, ScheduledAt: publishAt,
+		PublisherConnectorID: publisher, Accounts: accounts, ScheduledAt: publishAt, MediaURLs: mediaURLs,
 		SourceContext: map[string]any{"task": e.task.Number, "agent": e.agent.Name, "urls": a.SourceURLs},
 	}, domain.ActorAgent, true)
 	if err != nil {
