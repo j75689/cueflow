@@ -254,9 +254,6 @@ func TestFullChain(t *testing.T) {
 	}
 
 	// --- review rules ---
-	if code := e.do("POST", "/posts/"+threads.ID.String()+"/reject", map[string]any{"reason": " "}, nil); code != 400 {
-		t.Fatalf("reject without reason: %d", code)
-	}
 	var apiErr struct {
 		Error struct{ Code string } `json:"error"`
 	}
@@ -456,5 +453,19 @@ func TestSecretKeyRotation(t *testing.T) {
 	}
 	if rep, err := rotating.ReencryptConnectorSecrets(ctx, false); err != nil || rep.AlreadyPrimary != 1 || rep.Reencrypted != 0 {
 		t.Fatalf("second rotation should be a no-op: %+v %v", rep, err)
+	}
+}
+
+func TestRejectWithoutReason(t *testing.T) {
+	e := setup(t)
+	var a, b domain.Post
+	e.do("POST", "/posts", map[string]any{"content": "one", "platforms": []string{"threads"}, "submit": true}, &a)
+	e.do("POST", "/posts", map[string]any{"content": "two", "platforms": []string{"threads"}, "submit": true}, &b)
+	var got domain.Post
+	if code := e.do("POST", "/posts/"+a.ID.String()+"/reject", nil, &got); code != 200 || got.Status != domain.StatusRejected || got.ReviewNote != "" {
+		t.Fatalf("reject with no body: %d %s %q", code, got.Status, got.ReviewNote)
+	}
+	if code := e.do("POST", "/posts/"+b.ID.String()+"/reject", map[string]any{"reason": " off-brand "}, &got); code != 200 || got.ReviewNote != "off-brand" {
+		t.Fatalf("reject with reason: %d %q", code, got.ReviewNote)
 	}
 }

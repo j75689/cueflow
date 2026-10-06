@@ -94,7 +94,7 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 | DELETE | `/posts/{id}` | | only `DRAFT`/`REJECTED` |
 | POST | `/posts/{id}/submit` | | `DRAFT → PENDING_REVIEW` |
 | POST | `/posts/{id}/approve` | `{scheduled_at?, publisher_connector_id?}` | `PENDING_REVIEW → APPROVED`; worker then moves it to `QUEUED → PUBLISHED/FAILED` |
-| POST | `/posts/{id}/reject` | `{reason}` (required) | `PENDING_REVIEW → REJECTED` |
+| POST | `/posts/{id}/reject` | `{reason?}` (optional; archived as `review_note` when given) | `PENDING_REVIEW → REJECTED` |
 | POST | `/posts/{id}/retry` | | `FAILED → QUEUED` |
 | GET | `/posts/{id}/audit` | | → `[AuditLog]` oldest first |
 

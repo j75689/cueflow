@@ -54,7 +54,10 @@ export const emptyDraft: PostDraft = {
 };
 
 /** The publisher a post will use: its own choice, else the first active one (as the server does). */
-export function effectivePublisher(draft: PostDraft, publishers: Connector[]): Connector | undefined {
+export function effectivePublisher(
+  draft: Pick<PostDraft, "publisher_connector_id">,
+  publishers: Connector[],
+): Connector | undefined {
   if (draft.publisher_connector_id) return publishers.find((c) => c.id === draft.publisher_connector_id);
   return publishers.filter((c) => c.is_active).sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 }

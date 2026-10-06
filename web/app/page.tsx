@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { STATUS_LABEL, STATUS_STYLE } from "@/components/badges";
 import { PostCard, RejectDialog } from "@/components/post";
-import { useServerEvent, useToast } from "@/components/providers";
-import { Button, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, cx } from "@/components/ui";
+import { accountMode, effectivePublisher } from "@/components/post-editor";
+import { useMeta, useServerEvent, useToast } from "@/components/providers";
+import { Button, Checkbox, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Post, PostStatus } from "@/lib/types";
@@ -29,6 +30,12 @@ export default function ReviewPage() {
   const [query, setQuery] = useState("");
   const [rejecting, setRejecting] = useState<Post | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const { meta } = useMeta();
+  const publishers = useAsync(() => api.listConnectors("publisher"), []);
+  // Bulk selection (inbox only): ids of pending posts.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<"approve" | "reject" | null>(null);
 
   useEffect(() => {
     try {
@@ -66,6 +73,10 @@ export default function ReviewPage() {
   useServerEvent(["post.updated", "post.deleted"], refresh);
 
   const approve = async (p: Post) => {
+    if (needsAccounts(p)) {
+      toast.error("Choose the accounts for this post first (open it and pick them under Delivery).");
+      return;
+    }
     setBusy(p.id);
     try {
       await api.approvePost(p.id);
@@ -101,6 +112,73 @@ export default function ReviewPage() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const pending = useMemo(() => (posts.data?.items ?? []).filter((p) => p.status === "PENDING_REVIEW"), [posts.data]);
+  // Drop selections for posts that left the list (approved elsewhere, filtered out...).
+  useEffect(() => {
+    setSelected((cur) => {
+      const ids = new Set(pending.map((p) => p.id));
+      const next = new Set([...cur].filter((id) => ids.has(id)));
+      return next.size === cur.size ? cur : next;
+    });
+  }, [pending]);
+  const toggleSelect = (id: string, on: boolean) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const chosen = pending.filter((p) => selected.has(p.id));
+
+  // needsAccounts: per-account publishers (CueSocial) can't publish a post with no accounts.
+  const needsAccounts = (p: Post) =>
+    accountMode(effectivePublisher(p, publishers.data ?? []), meta?.connector_types ?? []) === "required" &&
+    (p.accounts ?? []).length === 0;
+
+  const bulkApprove = async () => {
+    setBulkBusy("approve");
+    let ok = 0;
+    const skipped: string[] = [];
+    const failed: string[] = [];
+    for (const p of chosen) {
+      if (needsAccounts(p)) {
+        skipped.push(p.title || p.id.slice(0, 8));
+        continue;
+      }
+      try {
+        await api.approvePost(p.id);
+        ok++;
+      } catch {
+        failed.push(p.title || p.id.slice(0, 8));
+      }
+    }
+    setBulkBusy(null);
+    setSelected(new Set());
+    refresh();
+    if (ok) toast.success(`Approved ${ok} post${ok === 1 ? "" : "s"}`);
+    if (skipped.length) toast.error(`Skipped ${skipped.length} with no accounts chosen: ${skipped.join(", ")}`);
+    if (failed.length) toast.error(`Could not approve: ${failed.join(", ")}`);
+  };
+
+  const bulkReject = async (reason: string) => {
+    setBulkBusy("reject");
+    let ok = 0;
+    const failed: string[] = [];
+    for (const p of chosen) {
+      try {
+        await api.rejectPost(p.id, reason);
+        ok++;
+      } catch {
+        failed.push(p.title || p.id.slice(0, 8));
+      }
+    }
+    setBulkBusy(null);
+    setSelected(new Set());
+    refresh();
+    if (ok) toast.success(`Rejected ${ok} post${ok === 1 ? "" : "s"}`);
+    if (failed.length) toast.error(`Could not reject: ${failed.join(", ")}`);
   };
 
   const counts = stats.data?.posts_by_status ?? {};
@@ -195,6 +273,32 @@ export default function ReviewPage() {
       {posts.error && <ErrorBox onRetry={posts.reload}>{posts.error}</ErrorBox>}
       {posts.loading && !posts.data && <Loading />}
 
+      {posts.data && view === "inbox" && pending.length > 0 && (
+        <div className="sticky top-0 z-20 -mx-1 mb-2.5 flex flex-wrap items-center gap-3 rounded-lg bg-zinc-50/95 px-3 py-2 backdrop-blur dark:bg-zinc-950/90">
+          <Checkbox
+            checked={chosen.length > 0 && chosen.length === pending.length}
+            onChange={(on) => setSelected(on ? new Set(pending.map((p) => p.id)) : new Set())}
+            label={chosen.length ? `${chosen.length} selected` : "Select all"}
+          />
+          {chosen.length > 0 && (
+            <div className="ml-auto flex gap-1.5">
+              <Button size="sm" variant="ghost" onClick={() => setBulkRejecting(true)} disabled={!!bulkBusy}>
+                Reject {chosen.length}
+              </Button>
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() => void bulkApprove()}
+                loading={bulkBusy === "approve"}
+                disabled={!!bulkBusy}
+              >
+                <Icon name="check" className="h-3.5 w-3.5" /> Approve {chosen.length}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {posts.data && view === "inbox" && (
         <div className="space-y-2.5">
           {posts.data.items.length === 0 ? (
@@ -210,7 +314,15 @@ export default function ReviewPage() {
               />
             </div>
           ) : (
-            posts.data.items.map((p) => <PostCard key={p.id} post={p} actions={quickActions(p)} />)
+            posts.data.items.map((p) => (
+              <PostCard
+                key={p.id}
+                post={p}
+                actions={quickActions(p)}
+                selected={selected.has(p.id)}
+                onSelect={p.status === "PENDING_REVIEW" ? (on) => toggleSelect(p.id, on) : undefined}
+              />
+            ))
           )}
           {posts.data.total > posts.data.items.length && (
             <p className="text-center text-xs text-zinc-500">
@@ -245,6 +357,12 @@ export default function ReviewPage() {
       )}
 
       <RejectDialog open={!!rejecting} onClose={() => setRejecting(null)} onConfirm={reject} />
+      <RejectDialog
+        open={bulkRejecting}
+        title={`Reject ${chosen.length} post${chosen.length === 1 ? "" : "s"}`}
+        onClose={() => setBulkRejecting(false)}
+        onConfirm={bulkReject}
+      />
     </div>
   );
 }

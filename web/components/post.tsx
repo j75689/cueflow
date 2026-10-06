@@ -6,7 +6,7 @@ import { charCount, fmtRelative, fmtTime, hostOf } from "@/lib/format";
 import type { AuditLog, Platform, Post } from "@/lib/types";
 import { PlatformBadge, StatusBadge } from "./badges";
 import { useMeta } from "./providers";
-import { Button, Field, Icon, Modal, Pill, Textarea, cx } from "./ui";
+import { Button, Checkbox, Field, Icon, Modal, Pill, Textarea, cx } from "./ui";
 
 /* ------------------------------ Reject dialog ------------------------------ */
 
@@ -14,15 +14,16 @@ export function RejectDialog({
   open,
   onClose,
   onConfirm,
+  title = "Reject post",
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => Promise<void> | void;
+  title?: string;
 }) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = async () => {
-    if (!reason.trim()) return;
     setBusy(true);
     try {
       await onConfirm(reason.trim());
@@ -36,19 +37,19 @@ export function RejectDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title="Reject post"
+      title={title}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="danger" onClick={submit} loading={busy} disabled={!reason.trim()}>
+          <Button variant="danger" onClick={submit} loading={busy}>
             Reject
           </Button>
         </>
       }
     >
-      <Field label="Reason" required help="Archived with the post and shown in the audit trail.">
+      <Field label="Reason" help="Optional. Archived with the post and shown in the audit trail.">
         <Textarea
           autoFocus
           value={reason}
@@ -77,7 +78,10 @@ export function Warnings({ warnings, compact }: { warnings: string[] | null | un
   if (!warnings?.length) return null;
   if (compact)
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400" title={warnings.join("\n")}>
+      <span
+        className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"
+        title={warnings.join("\n")}
+      >
         <Icon name="warn" className="h-3.5 w-3.5" />
         {warnings.length} warning{warnings.length > 1 ? "s" : ""}
       </span>
@@ -123,17 +127,34 @@ export function PostCard({
   post,
   actions,
   compact,
+  selected,
+  onSelect,
 }: {
   post: Post;
   actions?: React.ReactNode;
   compact?: boolean;
+  /** When onSelect is set, the card shows a checkbox for bulk actions. */
+  selected?: boolean;
+  onSelect?: (on: boolean) => void;
 }) {
   const { meta } = useMeta();
   const pm = platformMap(meta?.platforms);
   const parts = postParts(post);
   return (
-    <div className="group rounded-lg border border-zinc-200 bg-white transition-shadow hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <Link href={`/posts/view/?id=${post.id}`} className="block px-3.5 pt-3 pb-2">
+    <div
+      className={cx(
+        "group relative rounded-lg border bg-white transition-shadow hover:shadow-sm dark:bg-zinc-900",
+        selected
+          ? "border-indigo-400 ring-1 ring-indigo-300 dark:border-indigo-500/70 dark:ring-indigo-500/40"
+          : "border-zinc-200 dark:border-zinc-800",
+      )}
+    >
+      {onSelect && (
+        <div className="absolute top-3 left-3.5 z-10">
+          <Checkbox checked={!!selected} onChange={onSelect} label={<span className="sr-only">Select</span>} />
+        </div>
+      )}
+      <Link href={`/posts/view/?id=${post.id}`} className={cx("block pt-3 pb-2 pr-3.5", onSelect ? "pl-10" : "pl-3.5")}>
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           {post.platforms.map((p) => (
             <PlatformBadge key={p} id={p} name={pm[p]?.name} />
@@ -205,7 +226,9 @@ export function ThreadsPreview({ parts, platform }: { parts: string[]; platform?
                   {n}/{max}
                 </span>
               </div>
-              <p className="mt-0.5 text-sm break-words whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">{p || " "}</p>
+              <p className="mt-0.5 text-sm break-words whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+                {p || " "}
+              </p>
             </div>
           </div>
         );

@@ -219,19 +219,22 @@ func (s *Server) approvePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rejectPost(w http.ResponseWriter, r *http.Request) {
+	// The reason is optional: it is archived with the post when given.
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
-		return
+	if r.ContentLength != 0 {
+		if err := decode(r, &req); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	req.Reason = strings.TrimSpace(req.Reason)
-	if req.Reason == "" {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "a reason is required to reject a post")
-		return
+	note := req.Reason
+	if note == "" {
+		note = "rejected without a reason"
 	}
-	s.transition(w, r, domain.StatusRejected, domain.ActionRejected, req.Reason, &store.TransitionOpts{ReviewNote: &req.Reason})
+	s.transition(w, r, domain.StatusRejected, domain.ActionRejected, note, &store.TransitionOpts{ReviewNote: &req.Reason})
 }
 
 func (s *Server) retryPost(w http.ResponseWriter, r *http.Request) {
