@@ -232,6 +232,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
   "parent_id":"uuid|null","subtask_counts":{"total":3,"done":1},
   "result":"final summary from the agent","due_at":"...|null","position":1024.0,
   "running":false,"attempts":1,"schedule_id":"uuid|null","version":3,
+  "publisher_connector_id":"uuid|null","publish_accounts":["acc-id"],   // defaults for drafts made for this task (subtasks inherit)
   "created_at":"...","updated_at":"...","started_at":"...|null","completed_at":"...|null"
 }
 ```
@@ -265,7 +266,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 
 A schedule creates a new task for an agent on a cron expression (agents with `planning` can create them).
 
-`Schedule`: `{"id","name","cron_expr","timezone","is_active","assignee_agent_id","task_title","task_description",
+`Schedule`: `{"id","name","cron_expr","timezone","is_active","assignee_agent_id","task_title","task_description","publisher_connector_id","publish_accounts",
 "priority","created_by":"human|agent","last_run_at","next_run_at","created_at","updated_at"}`
 
 | Method | Path | Body | Notes |

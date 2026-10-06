@@ -63,30 +63,33 @@ type SubtaskCounts struct {
 }
 
 type Task struct {
-	ID              uuid.UUID     `json:"id"`
-	Number          int64         `json:"number"`
-	Title           string        `json:"title"`
-	Description     string        `json:"description"`
-	Status          TaskStatus    `json:"status"`
-	Priority        string        `json:"priority"`
-	Labels          []string      `json:"labels"`
-	AssigneeAgentID *uuid.UUID    `json:"assignee_agent_id"`
-	Assignee        *AgentRef     `json:"assignee"`
-	CreatedBy       string        `json:"created_by"`
-	CreatorAgentID  *uuid.UUID    `json:"creator_agent_id"`
-	ParentID        *uuid.UUID    `json:"parent_id"`
-	ScheduleID      *uuid.UUID    `json:"schedule_id"`
-	SubtaskCounts   SubtaskCounts `json:"subtask_counts"`
-	Result          string        `json:"result"`
-	DueAt           *time.Time    `json:"due_at"`
-	Position        float64       `json:"position"`
-	Running         bool          `json:"running"`
-	Attempts        int           `json:"attempts"`
-	Version         int           `json:"version"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
-	StartedAt       *time.Time    `json:"started_at"`
-	CompletedAt     *time.Time    `json:"completed_at"`
+	ID              uuid.UUID  `json:"id"`
+	Number          int64      `json:"number"`
+	Title           string     `json:"title"`
+	Description     string     `json:"description"`
+	Status          TaskStatus `json:"status"`
+	Priority        string     `json:"priority"`
+	Labels          []string   `json:"labels"`
+	AssigneeAgentID *uuid.UUID `json:"assignee_agent_id"`
+	Assignee        *AgentRef  `json:"assignee"`
+	CreatedBy       string     `json:"created_by"`
+	CreatorAgentID  *uuid.UUID `json:"creator_agent_id"`
+	ParentID        *uuid.UUID `json:"parent_id"`
+	ScheduleID      *uuid.UUID `json:"schedule_id"`
+	// PublisherConnectorID and PublishAccounts are applied to drafts agents write for this task.
+	PublisherConnectorID *uuid.UUID    `json:"publisher_connector_id"`
+	PublishAccounts      []string      `json:"publish_accounts"`
+	SubtaskCounts        SubtaskCounts `json:"subtask_counts"`
+	Result               string        `json:"result"`
+	DueAt                *time.Time    `json:"due_at"`
+	Position             float64       `json:"position"`
+	Running              bool          `json:"running"`
+	Attempts             int           `json:"attempts"`
+	Version              int           `json:"version"`
+	CreatedAt            time.Time     `json:"created_at"`
+	UpdatedAt            time.Time     `json:"updated_at"`
+	StartedAt            *time.Time    `json:"started_at"`
+	CompletedAt          *time.Time    `json:"completed_at"`
 }
 
 const taskColumns = `t.id, t.number, t.title, t.description, t.status, t.priority, t.labels, t.assignee_agent_id,
@@ -94,7 +97,7 @@ const taskColumns = `t.id, t.number, t.title, t.description, t.status, t.priorit
 	(SELECT count(*) FROM tasks c WHERE c.parent_id=t.id),
 	(SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.status IN ('DONE','CANCELED','REVIEW')),
 	t.result, t.due_at, t.position, (t.status='IN_PROGRESS' AND t.lease_until > NOW()), t.attempts, t.version,
-	t.created_at, t.updated_at, t.started_at, t.completed_at`
+	t.created_at, t.updated_at, t.started_at, t.completed_at, t.publisher_connector_id, t.publish_accounts`
 
 const taskFrom = ` FROM tasks t LEFT JOIN agents a ON a.id = t.assignee_agent_id`
 
@@ -106,10 +109,13 @@ func scanTask(row pgx.Row) (*Task, error) {
 	if err := row.Scan(&t.ID, &t.Number, &t.Title, &t.Description, &status, &t.Priority, &t.Labels, &t.AssigneeAgentID,
 		&aID, &aName, &aSlug, &aAvatar, &t.CreatedBy, &t.CreatorAgentID, &t.ParentID, &t.ScheduleID,
 		&t.SubtaskCounts.Total, &t.SubtaskCounts.Done, &t.Result, &t.DueAt, &t.Position, &t.Running, &t.Attempts,
-		&t.Version, &t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt); err != nil {
+		&t.Version, &t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt, &t.PublisherConnectorID, &t.PublishAccounts); err != nil {
 		return nil, err
 	}
 	t.Status = TaskStatus(status)
+	if t.PublishAccounts == nil {
+		t.PublishAccounts = []string{}
+	}
 	if t.Labels == nil {
 		t.Labels = []string{}
 	}
@@ -217,6 +223,9 @@ type NewTask struct {
 	ParentID        *uuid.UUID
 	ScheduleID      *uuid.UUID
 	DueAt           *time.Time
+	// Publishing defaults for drafts made for this task.
+	PublisherConnectorID *uuid.UUID
+	PublishAccounts      []string
 }
 
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
@@ -245,11 +254,12 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 	var id uuid.UUID
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO tasks (title, description, status, priority, labels, assignee_agent_id,
-			created_by, creator_agent_id, parent_id, schedule_id, due_at, position)
-			VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,$10,$11,
+			created_by, creator_agent_id, parent_id, schedule_id, due_at, publisher_connector_id, publish_accounts, position)
+			VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
 			  COALESCE((SELECT max(position) FROM tasks WHERE status=$3::text), 0) + 1024) RETURNING id`,
 			truncate(in.Title, 255), in.Description, string(in.Status), in.Priority, cleanLabels(in.Labels),
-			in.AssigneeAgentID, in.CreatedBy, in.CreatorAgentID, in.ParentID, in.ScheduleID, in.DueAt).Scan(&id); err != nil {
+			in.AssigneeAgentID, in.CreatedBy, in.CreatorAgentID, in.ParentID, in.ScheduleID, in.DueAt,
+			in.PublisherConnectorID, cleanList(in.PublishAccounts)).Scan(&id); err != nil {
 			return notFound(err)
 		}
 		return nil
@@ -269,6 +279,9 @@ type TaskPatch struct {
 	AssigneeAgentID **uuid.UUID
 	DueAt           **time.Time
 	Position        *float64
+	// Publishing defaults: both are set together.
+	PublisherConnectorID **uuid.UUID
+	PublishAccounts      *[]string
 }
 
 // UpdateTask applies a human edit. It returns the task before and after the change.
@@ -325,6 +338,12 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 	}
 	if p.DueAt != nil {
 		add("due_at", *p.DueAt)
+	}
+	if p.PublisherConnectorID != nil {
+		add("publisher_connector_id", *p.PublisherConnectorID)
+	}
+	if p.PublishAccounts != nil {
+		add("publish_accounts", cleanList(*p.PublishAccounts))
 	}
 	if p.Position != nil {
 		add("position", *p.Position)
@@ -624,19 +643,26 @@ type Schedule struct {
 	Priority        string     `json:"priority"`
 	CreatedBy       string     `json:"created_by"`
 	CreatorAgentID  *uuid.UUID `json:"creator_agent_id"`
-	LastRunAt       *time.Time `json:"last_run_at"`
-	NextRunAt       *time.Time `json:"next_run_at"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	// Publishing defaults copied to the tasks this schedule creates.
+	PublisherConnectorID *uuid.UUID `json:"publisher_connector_id"`
+	PublishAccounts      []string   `json:"publish_accounts"`
+	LastRunAt            *time.Time `json:"last_run_at"`
+	NextRunAt            *time.Time `json:"next_run_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 const scheduleColumns = `id, name, cron_expr, timezone, is_active, assignee_agent_id, task_title, task_description,
-	priority, created_by, creator_agent_id, last_run_at, created_at, updated_at`
+	priority, created_by, creator_agent_id, last_run_at, created_at, updated_at, publisher_connector_id, publish_accounts`
 
 func scanSchedule(row pgx.Row) (*Schedule, error) {
 	var s Schedule
 	err := row.Scan(&s.ID, &s.Name, &s.CronExpr, &s.Timezone, &s.IsActive, &s.AssigneeAgentID, &s.TaskTitle,
-		&s.TaskDescription, &s.Priority, &s.CreatedBy, &s.CreatorAgentID, &s.LastRunAt, &s.CreatedAt, &s.UpdatedAt)
+		&s.TaskDescription, &s.Priority, &s.CreatedBy, &s.CreatorAgentID, &s.LastRunAt, &s.CreatedAt, &s.UpdatedAt,
+		&s.PublisherConnectorID, &s.PublishAccounts)
+	if s.PublishAccounts == nil {
+		s.PublishAccounts = []string{}
+	}
 	return &s, err
 }
 
@@ -700,10 +726,10 @@ func (s *Store) CreateSchedule(ctx context.Context, sc *Schedule, validate CronV
 		return nil, err
 	}
 	return scanSchedule(s.pool.QueryRow(ctx, `INSERT INTO schedules (name, cron_expr, timezone, is_active, assignee_agent_id,
-		task_title, task_description, priority, created_by, creator_agent_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+scheduleColumns,
+		task_title, task_description, priority, created_by, creator_agent_id, publisher_connector_id, publish_accounts)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+scheduleColumns,
 		truncate(sc.Name, 128), sc.CronExpr, sc.Timezone, sc.IsActive, sc.AssigneeAgentID, truncate(sc.TaskTitle, 255),
-		sc.TaskDescription, sc.Priority, sc.CreatedBy, sc.CreatorAgentID))
+		sc.TaskDescription, sc.Priority, sc.CreatedBy, sc.CreatorAgentID, sc.PublisherConnectorID, cleanList(sc.PublishAccounts)))
 }
 
 func (s *Store) UpdateSchedule(ctx context.Context, sc *Schedule, validate CronValidator) (*Schedule, error) {
@@ -711,9 +737,11 @@ func (s *Store) UpdateSchedule(ctx context.Context, sc *Schedule, validate CronV
 		return nil, err
 	}
 	out, err := scanSchedule(s.pool.QueryRow(ctx, `UPDATE schedules SET name=$2, cron_expr=$3, timezone=$4, is_active=$5,
-		assignee_agent_id=$6, task_title=$7, task_description=$8, priority=$9, updated_at=NOW()
+		assignee_agent_id=$6, task_title=$7, task_description=$8, priority=$9, publisher_connector_id=$10,
+		publish_accounts=$11, updated_at=NOW()
 		WHERE id=$1 RETURNING `+scheduleColumns, sc.ID, truncate(sc.Name, 128), sc.CronExpr, sc.Timezone, sc.IsActive,
-		sc.AssigneeAgentID, truncate(sc.TaskTitle, 255), sc.TaskDescription, sc.Priority))
+		sc.AssigneeAgentID, truncate(sc.TaskTitle, 255), sc.TaskDescription, sc.Priority, sc.PublisherConnectorID,
+		cleanList(sc.PublishAccounts)))
 	return out, notFound(err)
 }
 
@@ -750,6 +778,7 @@ func (s *Store) SpawnScheduledTask(ctx context.Context, scheduleID uuid.UUID) (*
 		Title: fmt.Sprintf("%s · %s", sc.TaskTitle, time.Now().Format("2006-01-02")), Description: desc,
 		Priority: sc.Priority, AssigneeAgentID: sc.AssigneeAgentID, CreatedBy: createdBy,
 		CreatorAgentID: sc.CreatorAgentID, ScheduleID: &sc.ID, Labels: []string{"scheduled"},
+		PublisherConnectorID: sc.PublisherConnectorID, PublishAccounts: sc.PublishAccounts,
 	})
 }
 
@@ -762,6 +791,21 @@ func cleanLabels(in []string) []string {
 			seen[l] = true
 			out = append(out, truncate(l, 32))
 		}
+	}
+	return out
+}
+
+// cleanList trims entries, drops blanks and duplicates, and never returns nil.
+func cleanList(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
 	}
 	return out
 }

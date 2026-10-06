@@ -47,6 +47,9 @@ type scheduleBody struct {
 	TaskTitle       *string    `json:"task_title"`
 	TaskDescription *string    `json:"task_description"`
 	Priority        *string    `json:"priority"`
+	// Publishing defaults copied to the tasks this schedule creates.
+	PublisherConnectorID nullableID `json:"publisher_connector_id"`
+	PublishAccounts      *[]string  `json:"publish_accounts"`
 }
 
 func (b *scheduleBody) apply(sc *store.Schedule) {
@@ -64,6 +67,12 @@ func (b *scheduleBody) apply(sc *store.Schedule) {
 	}
 	if b.AssigneeAgentID.Set {
 		sc.AssigneeAgentID = b.AssigneeAgentID.Value
+	}
+	if b.PublisherConnectorID.Set {
+		sc.PublisherConnectorID = b.PublisherConnectorID.Value
+	}
+	if b.PublishAccounts != nil {
+		sc.PublishAccounts = *b.PublishAccounts
 	}
 }
 

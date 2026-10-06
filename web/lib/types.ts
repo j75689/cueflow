@@ -331,6 +331,9 @@ export interface Task {
   running: boolean;
   attempts: number;
   schedule_id: string | null;
+  /** Publisher and accounts applied to drafts made for this task (inherited by subtasks). */
+  publisher_connector_id: string | null;
+  publish_accounts: string[];
   version: number;
   created_at: string;
   updated_at: string;
@@ -363,7 +366,19 @@ export interface TaskCreate {
 }
 
 export type TaskPatch = Partial<
-  Pick<Task, "title" | "description" | "status" | "priority" | "labels" | "assignee_agent_id" | "due_at" | "position">
+  Pick<
+    Task,
+    | "title"
+    | "description"
+    | "status"
+    | "priority"
+    | "labels"
+    | "assignee_agent_id"
+    | "due_at"
+    | "position"
+    | "publisher_connector_id"
+    | "publish_accounts"
+  >
 >;
 
 export type TaskMessageKind = "message" | "tool_call" | "tool_result" | "status" | "question" | "result" | "approval";
@@ -503,6 +518,9 @@ export interface Schedule {
   task_description: string;
   priority: TaskPriority;
   created_by: "human" | "agent";
+  /** Publisher and accounts copied to the tasks this schedule creates. */
+  publisher_connector_id: string | null;
+  publish_accounts: string[];
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;
@@ -511,5 +529,14 @@ export interface Schedule {
 
 export type ScheduleInput = Pick<
   Schedule,
-  "name" | "cron_expr" | "timezone" | "is_active" | "assignee_agent_id" | "task_title" | "task_description" | "priority"
+  | "name"
+  | "cron_expr"
+  | "timezone"
+  | "is_active"
+  | "assignee_agent_id"
+  | "task_title"
+  | "task_description"
+  | "priority"
+  | "publisher_connector_id"
+  | "publish_accounts"
 >;

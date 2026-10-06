@@ -94,6 +94,9 @@ type createTaskReq struct {
 	DueAt           *time.Time       `json:"due_at"`
 	Status          store.TaskStatus `json:"status"`
 	ParentID        *uuid.UUID       `json:"parent_id"`
+	// Publishing defaults for drafts made for this task (a subtask inherits its parent's).
+	PublisherConnectorID *uuid.UUID `json:"publisher_connector_id"`
+	PublishAccounts      []string   `json:"publish_accounts"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +108,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	t, err := s.createTaskOp(r.Context(), store.NewTask{
 		Title: req.Title, Description: req.Description, AssigneeAgentID: req.AssigneeAgentID, Priority: req.Priority,
 		Labels: req.Labels, DueAt: req.DueAt, Status: req.Status, ParentID: req.ParentID,
+		PublisherConnectorID: req.PublisherConnectorID, PublishAccounts: req.PublishAccounts,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -116,6 +120,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 // createTaskOp creates a task on behalf of the operator (dashboard or MCP) and wakes its agent.
 func (s *Server) createTaskOp(ctx context.Context, in store.NewTask) (*store.Task, error) {
 	in.CreatedBy = "human"
+	if in.ParentID != nil && in.PublisherConnectorID == nil {
+		if parent, err := s.Store.GetTask(ctx, *in.ParentID); err == nil {
+			in.PublisherConnectorID, in.PublishAccounts = parent.PublisherConnectorID, parent.PublishAccounts
+		}
+	}
 	t, err := s.Store.CreateTask(ctx, in)
 	if err != nil {
 		return nil, err
@@ -134,6 +143,9 @@ type updateTaskReq struct {
 	AssigneeAgentID nullableID          `json:"assignee_agent_id"`
 	DueAt           optional[time.Time] `json:"due_at"`
 	Position        *float64            `json:"position"`
+	// Publishing defaults for drafts made for this task.
+	PublisherConnectorID nullableID `json:"publisher_connector_id"`
+	PublishAccounts      *[]string  `json:"publish_accounts"`
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +167,10 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if req.DueAt.Set {
 		patch.DueAt = &req.DueAt.Value
 	}
+	if req.PublisherConnectorID.Set {
+		patch.PublisherConnectorID = &req.PublisherConnectorID.Value
+	}
+	patch.PublishAccounts = req.PublishAccounts
 	after, err := s.updateTaskOp(r.Context(), id, patch)
 	if err != nil {
 		s.fail(w, err)

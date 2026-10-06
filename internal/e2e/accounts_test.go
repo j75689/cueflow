@@ -3,6 +3,8 @@ package e2e
 import (
 	"context"
 	"errors"
+	"github.com/j75689/cueflow/internal/llm"
+	"strings"
 	"sync"
 	"testing"
 
@@ -86,5 +88,52 @@ func TestPerAccountPublishAndPartialRetry(t *testing.T) {
 	if len(accountsReqs) != 2 || len(accountsReqs[0].Accounts) != 2 || accountsReqs[1].Previous["remote"] != "r1" ||
 		accountsReqs[0].Topic != "AI 新聞" || accountsReqs[0].Link != "https://example.com/a" {
 		t.Fatalf("requests: %+v", accountsReqs)
+	}
+}
+
+func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	var pub store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Accounts", "type": "fake_accounts", "config": map[string]any{}}, &pub)
+
+	var sc store.Schedule
+	if code := e.do("POST", "/schedules", map[string]any{"task_title": "Daily AI news", "cron_expr": "30 7 * * *",
+		"timezone": "Asia/Taipei", "assignee_agent_id": team["writer"].ID,
+		"publisher_connector_id": pub.ID, "publish_accounts": []string{"a1", "ig-only"}}, &sc); code != 201 {
+		t.Fatalf("create schedule: %d", code)
+	}
+	if sc.PublisherConnectorID == nil || len(sc.PublishAccounts) != 2 {
+		t.Fatalf("schedule defaults: %+v", sc)
+	}
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		if len(toolResults(req)) == 0 {
+			return calls("create_post_draft", map[string]any{"platform": "threads", "content": "AI news of the day"})
+		}
+		return calls("complete_task", map[string]any{"summary": "drafted"})
+	})
+	var task store.Task
+	if code := e.do("POST", "/schedules/"+sc.ID.String()+"/run", nil, &task); code >= 300 {
+		t.Fatalf("run schedule: %d", code)
+	}
+	tasks, _ := e.store.ListTasks(ctx, store.TaskFilter{All: true})
+	if len(tasks) != 1 || tasks[0].PublisherConnectorID == nil || *tasks[0].PublisherConnectorID != pub.ID {
+		t.Fatalf("task did not get the schedule's defaults: %+v", tasks)
+	}
+	e.crew.RunPending(ctx, 2)
+	posts, _ := e.store.PostsForTask(ctx, tasks[0].ID)
+	if len(posts) != 1 {
+		t.Fatalf("posts: %+v", posts)
+	}
+	p, _ := e.store.GetPost(ctx, posts[0].ID)
+	if p.PublisherConnectorID == nil || *p.PublisherConnectorID != pub.ID || strings.Join(p.Accounts, ",") != "a1" {
+		t.Fatalf("draft defaults (accounts filtered to the draft's platform): %v %v", p.PublisherConnectorID, p.Accounts)
+	}
+
+	// Editing a task's defaults by hand.
+	var edited store.Task
+	if code := e.do("PATCH", "/tasks/"+tasks[0].ID.String(), map[string]any{"publisher_connector_id": nil, "publish_accounts": []string{}}, &edited); code != 200 ||
+		edited.PublisherConnectorID != nil || len(edited.PublishAccounts) != 0 {
+		t.Fatalf("clear defaults: %d %+v", code, edited)
 	}
 }

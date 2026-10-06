@@ -8,7 +8,20 @@ import type { Connector, ConnectorSpec, Platform } from "@/lib/types";
 import { StringListInput, TagInput } from "./inputs";
 import { useToast } from "./providers";
 import { GenericPreview, InstagramPreview, ThreadsPreview } from "./post";
-import { Button, Card, CardHeader, Checkbox, DateTimePicker, Field, Icon, Input, Modal, Select, Textarea, cx } from "./ui";
+import {
+  Button,
+  Card,
+  CardHeader,
+  Checkbox,
+  DateTimePicker,
+  Field,
+  Icon,
+  Input,
+  Modal,
+  Select,
+  Textarea,
+  cx,
+} from "./ui";
 
 export interface PostDraft {
   title: string;
@@ -294,7 +307,10 @@ export function PostEditor({
           <Field label="Hashtags" help="Without the #. Press Enter or comma to add.">
             <TagInput value={draft.hashtags} prefix="#" disabled={readOnly} onChange={(v) => set("hashtags", v)} />
           </Field>
-          <Field label="Topic" help="Threads topic tag: one, up to 50 characters, no . or &. Other platforms ignore it.">
+          <Field
+            label="Topic"
+            help="Threads topic tag: one, up to 50 characters, no . or &. Other platforms ignore it."
+          >
             <Input
               value={draft.topic}
               disabled={readOnly}
@@ -486,7 +502,11 @@ function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string)
         }
       >
         <div className="space-y-4">
-          <Field label="Prompt" required help="Describe the subject, style and composition. Image models handle English best.">
+          <Field
+            label="Prompt"
+            required
+            help="Describe the subject, style and composition. Image models handle English best."
+          >
             <Textarea rows={5} value={prompt} data-autofocus onChange={(e) => setPrompt(e.target.value)} />
           </Field>
           <Field label="Aspect ratio" help="Uses your first active image generation connector. Each image costs money.">
@@ -505,9 +525,10 @@ function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string)
   );
 }
 
-function AccountPicker({
+export function AccountPicker({
   connector,
   required,
+  help,
   platforms,
   value,
   readOnly,
@@ -515,6 +536,8 @@ function AccountPicker({
 }: {
   connector: Connector;
   required: boolean;
+  /** Overrides the default explanation under the field. */
+  help?: string;
   platforms: Platform[];
   value: string[];
   readOnly?: boolean;
@@ -538,9 +561,10 @@ function AccountPicker({
       label="Accounts"
       required={required}
       help={
-        required
+        help ??
+        (required
           ? `${connector.name} posts to the accounts you pick; the post's platforms follow your choice.`
-          : `Optional. Platforms without a picked account use ${connector.name}'s channel mapping or first channel.`
+          : `Optional. Platforms without a picked account use ${connector.name}'s channel mapping or first channel.`)
       }
     >
       {accounts.loading && !accounts.data ? (

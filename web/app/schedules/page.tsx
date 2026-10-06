@@ -14,6 +14,7 @@ import {
   useAgents,
 } from "@/components/agents";
 import { useDialog } from "@/components/dialog";
+import { PublishTarget } from "@/components/publish-target";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -45,6 +46,8 @@ const blank = (): ScheduleInput => ({
   task_title: "",
   task_description: "",
   priority: "normal",
+  publisher_connector_id: null,
+  publish_accounts: [],
 });
 
 export default function SchedulesPage() {
@@ -243,6 +246,8 @@ function ScheduleModal({
               task_title: schedule.task_title,
               task_description: schedule.task_description,
               priority: schedule.priority,
+              publisher_connector_id: schedule.publisher_connector_id ?? null,
+              publish_accounts: schedule.publish_accounts ?? [],
             }
           : blank(),
       );
@@ -369,6 +374,19 @@ function ScheduleModal({
             ))}
           </Select>
         </Field>
+        <div className="sm:col-span-2">
+          <PublishTarget
+            publisherId={form.publisher_connector_id}
+            accounts={form.publish_accounts}
+            onChange={(pub, accts) =>
+              setForm((f) => ({
+                ...f,
+                publisher_connector_id: pub,
+                publish_accounts: accts,
+              }))
+            }
+          />
+        </div>
         <div className="flex items-end">
           <Toggle
             checked={form.is_active}

@@ -14,6 +14,7 @@ import (
 	"github.com/j75689/cueflow/internal/agent"
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -414,9 +415,11 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	}
 	d := drafts[0]
 	taskID := e.task.ID
+	publisher, accounts := e.c.publishDefaults(ctx, e.task, d.Platform)
 	post, err := e.c.store.CreatePost(ctx, store.NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
+		PublisherConnectorID: publisher, Accounts: accounts,
 		SourceContext: map[string]any{"task": e.task.Number, "agent": e.agent.Name, "urls": a.SourceURLs},
 	}, domain.ActorAgent, true)
 	if err != nil {
@@ -429,6 +432,45 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		msg += " Warnings: " + strings.Join(post.Warnings, "; ")
 	}
 	return msg, nil
+}
+
+// publishDefaults returns the task's publisher and the default accounts that are on platform.
+// Accounts are filtered through the publisher's account list; if it cannot be read, all are kept
+// and the reviewer can fix them.
+func (c *Crew) publishDefaults(ctx context.Context, t *store.Task, platform string) (*uuid.UUID, []string) {
+	if t.PublisherConnectorID == nil {
+		return nil, nil
+	}
+	if len(t.PublishAccounts) == 0 {
+		return t.PublisherConnectorID, nil
+	}
+	inst, _, err := c.hub.Instance(ctx, *t.PublisherConnectorID, true)
+	if err != nil {
+		return t.PublisherConnectorID, t.PublishAccounts
+	}
+	defer hub.Close(inst)
+	al, ok := inst.(connector.AccountLister)
+	if !ok {
+		return t.PublisherConnectorID, nil
+	}
+	lctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	list, err := al.ListAccounts(lctx)
+	if err != nil {
+		c.logger.Warn("list publisher accounts", "err", err)
+		return t.PublisherConnectorID, t.PublishAccounts
+	}
+	on := map[string]string{}
+	for _, a := range list {
+		on[a.ID] = a.Platform
+	}
+	var out []string
+	for _, id := range t.PublishAccounts {
+		if on[id] == platform {
+			out = append(out, id)
+		}
+	}
+	return t.PublisherConnectorID, out
 }
 
 func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
@@ -628,6 +670,7 @@ func toolCreateSubtask(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 	t, err := e.c.store.CreateTask(ctx, store.NewTask{
 		Title: a.Title, Description: a.Description, Priority: a.Priority, Status: store.TaskTodo,
 		AssigneeAgentID: &assignee.ID, CreatedBy: "agent", CreatorAgentID: &creator, ParentID: &parent,
+		PublisherConnectorID: e.task.PublisherConnectorID, PublishAccounts: e.task.PublishAccounts,
 	})
 	if err != nil {
 		return "", err

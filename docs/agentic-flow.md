@@ -229,6 +229,14 @@ Rules:
 - Validation: a valid 5-field cron or a descriptor such as `@daily`; consecutive firings must be ≥ 5 minutes apart (checked over the next 5 firings), so an agent cannot create an every-minute schedule. On a validation error the error is returned to the agent so it can correct itself.
 - `Run now` creates one task immediately.
 
+### Publishing defaults
+
+A schedule (or a task) can name a publisher and accounts (`publisher_connector_id`,
+`publish_accounts`). Tasks created by the schedule copy them, subtasks inherit them from their parent,
+and every draft an agent writes for such a task starts with that publisher and the accounts that are on
+the draft's platform. Drafts still wait for a human in Review; the defaults only save picking the
+target each time.
+
 ## 10. Guardrails and limits
 
 | Item | Limit / behavior | Where |

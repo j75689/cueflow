@@ -24,6 +24,7 @@ import {
 import { RunStatusBadge, StatusBadge } from "@/components/badges";
 import { TagInput } from "@/components/inputs";
 import { useDialog } from "@/components/dialog";
+import { PublishTarget } from "@/components/publish-target";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -1090,6 +1091,19 @@ function Sidebar({
               </>
             )}
           </dl>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Publishing" />
+        <div className="px-4 py-3">
+          <PublishTarget
+            publisherId={t.publisher_connector_id ?? null}
+            accounts={t.publish_accounts ?? []}
+            onChange={(pub, accts) =>
+              onPatch({ publisher_connector_id: pub, publish_accounts: accts })
+            }
+          />
         </div>
       </Card>
 
