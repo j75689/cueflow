@@ -5,7 +5,7 @@
 // CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
 // service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
 //   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_post {parts:[{text, image_urls?, images_base64?}], accounts[], scheduled_at?, topic?, link?}
+//   - create_post {parts:[{text, image_urls?, images_base64?, video_urls?}], accounts[], scheduled_at?, topic?, link?}
 //     (several parts make a Threads reply chain; on Instagram they become one caption and carousel)
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
@@ -53,6 +53,8 @@ func init() {
 				Help: "Service token allowed by the CueSocial Access application (CF-Access-Client-Id)"},
 			{Key: "cf_client_secret", Label: "Cloudflare Access client secret", Type: connector.FieldPassword, Secret: true,
 				Help: "CF-Access-Client-Secret of the same service token"},
+			{Key: "public_media_base_url", Label: "Public media URL", Type: connector.FieldString, Placeholder: "https://media.example.com",
+				Help: "Public https address where CueSocial can fetch videos stored in CueFlow (e.g. a Cloudflare Tunnel that exposes only /media/). Needed to publish videos; images are uploaded directly"},
 		},
 		DefaultName: func(cfg connector.Config) string {
 			if u, err := url.Parse(cfg.String("endpoint_url")); err == nil && u.Host != "" {
@@ -64,8 +66,9 @@ func init() {
 }
 
 type Publisher struct {
-	opts mcpx.Options
-	now  func() time.Time
+	opts        mcpx.Options
+	now         func() time.Time
+	publicMedia string // base URL CueSocial can fetch stored videos from
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -73,7 +76,7 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	if id := cfg.String("cf_client_id"); id != "" {
 		opts.Headers = map[string]string{"CF-Access-Client-Id": id, "CF-Access-Client-Secret": cfg.String("cf_client_secret")}
 	}
-	return &Publisher{opts: opts, now: time.Now}, nil
+	return &Publisher{opts: opts, now: time.Now, publicMedia: strings.TrimRight(strings.TrimSpace(cfg.String("public_media_base_url")), "/")}, nil
 }
 
 type account struct {
@@ -199,6 +202,7 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		byID[a.ID] = a
 	}
 	platforms := map[string]bool{}
+	tags := map[bool]bool{} // is test account -> seen
 	for _, id := range req.Accounts {
 		a, ok := byID[id]
 		if !ok {
@@ -208,9 +212,13 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 			return nil, fmt.Errorf("account %s is on %s, which is not one of this post's platforms", a.label(), a.Platform)
 		}
 		platforms[a.Platform] = true
+		tags[a.Tag == "test"] = true
+	}
+	if tags[true] && tags[false] {
+		return nil, errors.New("CueSocial never mixes test accounts with real ones in one post: pick only test accounts or only real ones")
 	}
 
-	parts, err := partsFor(ctx, req, platforms)
+	parts, err := partsFor(ctx, req, platforms, p.publicMedia)
 	if err != nil {
 		return nil, err
 	}
@@ -234,17 +242,18 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 // CueSocial's limits (see its MCP instructions).
 const (
 	maxParts            = 10
-	threadsMaxImages    = 20
-	instagramMaxImages  = 10
+	threadsMaxMedia     = 20
+	instagramMaxMedia   = 10
 	maxImageBytes       = 8 << 20
 	threadsMaxChars     = 500
 	instagramMaxCaption = 2200
 )
 
 // partsFor builds create_post's parts: CueFlow's thread parts in order, hashtags after the last
-// part, and every image on the first part (a carousel on Instagram, an album on Threads). Images
-// CueFlow stores are uploaded as base64; linked images are fetched by CueSocial.
-func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool) ([]map[string]any, error) {
+// part, and every image and video on the first part (an album on Threads; a carousel on Instagram,
+// or a reel when it is a single video). Images CueFlow stores are uploaded as base64; videos and
+// linked images are fetched by CueSocial, so stored videos are linked through publicMedia.
+func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool, publicMedia string) ([]map[string]any, error) {
 	texts := append([]string{}, req.Parts...)
 	if len(texts) == 0 {
 		texts = []string{""}
@@ -268,15 +277,29 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 		}
 	}
 
-	var urls, b64 []string
+	var urls, b64, videos []string
 	for i, u := range req.MediaURLs {
-		if i < len(req.Media) && req.Media[i].Stored {
+		u = strings.TrimSpace(u)
+		stored := i < len(req.Media) && req.Media[i].Stored
+		switch {
+		case isVideoURL(u) && stored:
+			if publicMedia == "" {
+				return nil, fmt.Errorf("media %d is a video stored in CueFlow; CueSocial fetches videos itself, so set the connector's public media URL", i+1)
+			}
+			pu, err := url.Parse(u)
+			if err != nil {
+				return nil, fmt.Errorf("media %d: %w", i+1, err)
+			}
+			videos = append(videos, publicMedia+pu.Path)
+		case isVideoURL(u):
+			if !strings.HasPrefix(u, "https://") {
+				return nil, fmt.Errorf("CueSocial fetches videos itself and needs a public https URL, got %q", u)
+			}
+			videos = append(videos, u)
+		case stored:
 			data, mt, err := req.Media[i].Load(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("load image %d: %w", i+1, err)
-			}
-			if strings.HasPrefix(mt, "video/") {
-				return nil, fmt.Errorf("media %d is a video; this CueSocial connector can only publish images so far", i+1)
 			}
 			if mt != "image/jpeg" && mt != "image/png" {
 				return nil, fmt.Errorf("image %d is %s; CueSocial accepts JPEG or PNG", i+1, mt)
@@ -285,37 +308,49 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 				return nil, fmt.Errorf("image %d is larger than CueSocial's 8 MB limit", i+1)
 			}
 			b64 = append(b64, base64.StdEncoding.EncodeToString(data))
-			continue
+		default:
+			if !strings.HasPrefix(u, "https://") {
+				return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
+			}
+			urls = append(urls, u)
 		}
-		u = strings.TrimSpace(u)
-		if !strings.HasPrefix(u, "https://") {
-			return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
-		}
-		urls = append(urls, u)
 	}
-	images := len(urls) + len(b64)
-	if platforms["instagram"] && images == 0 {
-		return nil, errors.New("Instagram needs at least one image: add one, or untick the Instagram accounts")
+	media := len(urls) + len(b64) + len(videos)
+	if platforms["instagram"] && media == 0 {
+		return nil, errors.New("Instagram needs at least one image or video: add one, or untick the Instagram accounts")
 	}
-	if platforms["instagram"] && images > instagramMaxImages {
-		return nil, fmt.Errorf("Instagram carousels take at most %d images; this post has %d", instagramMaxImages, images)
+	if platforms["instagram"] && media > instagramMaxMedia {
+		return nil, fmt.Errorf("Instagram posts take at most %d images and videos; this post has %d", instagramMaxMedia, media)
 	}
-	if platforms["threads"] && images > threadsMaxImages {
-		return nil, fmt.Errorf("Threads posts take at most %d images; this post has %d", threadsMaxImages, images)
+	if platforms["threads"] && media > threadsMaxMedia {
+		return nil, fmt.Errorf("Threads posts take at most %d images and videos; this post has %d", threadsMaxMedia, media)
 	}
 
 	parts := make([]map[string]any, len(texts))
 	for i, t := range texts {
 		parts[i] = map[string]any{"text": t}
 	}
-	// CueSocial puts a part's linked images before its uploaded ones.
+	// Within a part CueSocial orders linked images, uploaded images, then videos.
 	if len(urls) > 0 {
 		parts[0]["image_urls"] = urls
 	}
 	if len(b64) > 0 {
 		parts[0]["images_base64"] = b64
 	}
+	if len(videos) > 0 {
+		parts[0]["video_urls"] = videos
+	}
 	return parts, nil
+}
+
+// isVideoURL recognizes video links by extension (CueFlow serves stored videos as /media/{id}.mp4).
+func isVideoURL(u string) bool {
+	pu, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	p := strings.ToLower(pu.Path)
+	return strings.HasSuffix(p, ".mp4") || strings.HasSuffix(p, ".mov")
 }
 
 const threadsMaxTopic = 50
@@ -340,7 +375,7 @@ func extras(req connector.PublishRequest, parts []map[string]any) (string, strin
 		}
 		textOnly := false
 		for _, p := range parts {
-			if p["image_urls"] == nil && p["images_base64"] == nil {
+			if p["image_urls"] == nil && p["images_base64"] == nil && p["video_urls"] == nil {
 				textOnly = true
 			}
 		}

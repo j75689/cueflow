@@ -47,6 +47,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 				{"id": "th1", "platform": "threads", "username": "brand", "tag": "brand"},
 				{"id": "th2", "platform": "threads", "username": "me"},
 				{"id": "ig1", "platform": "instagram", "username": "brand.ig"},
+				{"id": "th9", "platform": "threads", "username": "sandbox", "tag": "test"},
 			}}), nil
 		})
 	srv.AddTool(&mcp.Tool{Name: "create_post", InputSchema: map[string]any{"type": "object"}},
@@ -115,14 +116,14 @@ func TestTestAndAccounts(t *testing.T) {
 	f := &fakeCueSocial{createStatus: "published"}
 	p := newPublisher(t, f)
 	res, _ := p.Test(context.Background())
-	if !res.OK || !strings.Contains(res.Message, "3 accounts") || !strings.Contains(res.Message, "threads @brand") {
+	if !res.OK || !strings.Contains(res.Message, "4 accounts") || !strings.Contains(res.Message, "threads @brand") {
 		t.Fatalf("test: %+v", res)
 	}
 	if f.headers.Get("CF-Access-Client-Id") != "cid" || f.headers.Get("CF-Access-Client-Secret") != "csecret" {
 		t.Fatalf("access headers not sent: %v", f.headers)
 	}
 	accts, err := p.ListAccounts(context.Background())
-	if err != nil || len(accts) != 3 || accts[2] != (connector.Account{ID: "ig1", Platform: "instagram", Name: "@brand.ig"}) {
+	if err != nil || len(accts) != 4 || accts[2] != (connector.Account{ID: "ig1", Platform: "instagram", Name: "@brand.ig"}) {
 		t.Fatalf("accounts: %+v %v", accts, err)
 	}
 }
@@ -334,5 +335,40 @@ func TestTopicAndLink(t *testing.T) {
 	ok.MediaURLs = []string{"https://cdn.example.com/a.png"}
 	if _, err := p.Publish(context.Background(), ok); err != nil {
 		t.Fatalf("link on a text-only part: %v", err)
+	}
+}
+
+func TestStoredVideoGoesByPublicURL(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	ts := f.server(t)
+	mk := func(public string) *Publisher {
+		inst, _ := New(connector.Config{"endpoint_url": ts.URL, "public_media_base_url": public}, connector.Env{HTTPClient: ts.Client()})
+		return inst.(*Publisher)
+	}
+	r := req("ig1")
+	r.Platforms = []string{"instagram"}
+	r.MediaURLs = []string{"http://cueflow:3000/media/abc.mp4"}
+	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0], Stored: true,
+		Load: func(context.Context) ([]byte, string, error) { t.Fatal("videos must not be loaded"); return nil, "", nil }}}
+	if _, err := mk("").Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), "public media URL") {
+		t.Fatalf("no public URL: %v", err)
+	}
+	if _, err := mk("https://media.example.com/").Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
+	if v := part["video_urls"].([]any); len(v) != 1 || v[0] != "https://media.example.com/media/abc.mp4" {
+		t.Fatalf("video_urls: %v", part)
+	}
+}
+
+func TestTestAndRealAccountsDontMix(t *testing.T) {
+	f := &fakeCueSocial{createStatus: "published"}
+	p := newPublisher(t, f)
+	if _, err := p.Publish(context.Background(), req("th1", "th9")); err == nil || !strings.Contains(err.Error(), "never mixes test accounts") {
+		t.Fatalf("mixed accounts: %v", err)
+	}
+	if _, err := p.Publish(context.Background(), req("th9")); err != nil {
+		t.Fatalf("test account alone: %v", err)
 	}
 }
