@@ -143,6 +143,8 @@ func serve() error {
 		logger.Warn("clean stale runs", "err", err)
 	}
 	broker := events.NewBroker()
+	broker.Attach(pool, logger)
+	go broker.Run(ctx)
 	h := hub.New(st, logger)
 	runner := pipeline.NewRunner(ctx, st, h, broker, logger, cfg.PublicURL)
 	worker := dispatch.NewWorker(st, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
