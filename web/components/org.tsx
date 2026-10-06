@@ -258,7 +258,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
               </Button>
             </div>
           </Field>
-          <Checkbox checked={seed} onChange={setSeed} label="Start with the default crew (Chief, Researcher, Writer, Editor)" />
+          <Checkbox checked={seed} onChange={setSeed} label="Start with a Chief agent" />
         </form>
       </div>
     </Modal>

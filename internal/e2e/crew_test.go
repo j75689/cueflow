@@ -98,13 +98,19 @@ func crewSetup(t *testing.T) (*env, map[string]*store.Agent) {
 	if _, err := e.store.CreateConnector(ctx, "LLM", "script_llm", true, map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	// Seed the default team the same way the server does on first start.
+	// Seed Chief the same way the server does on first start, then add the specialists.
 	org, err := e.store.DefaultOrg(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := crew.SeedDefaults(ctx, e.store, org.ID); err != nil {
-		t.Fatal(err)
+	if n, err := crew.SeedDefaults(ctx, e.store, org.ID); err != nil || n != 1 {
+		t.Fatalf("seed: %d %v", n, err)
+	}
+	for _, a := range testSpecialists() {
+		a.OrgID = org.ID
+		if _, err := e.store.CreateAgent(ctx, a); err != nil {
+			t.Fatal(err)
+		}
 	}
 	agents, _ := e.store.ListAgents(ctx, org.ID)
 	bySlug := map[string]*store.Agent{}

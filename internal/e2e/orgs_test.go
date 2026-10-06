@@ -41,7 +41,7 @@ func TestOrgsIsolateBoards(t *testing.T) {
 	}
 	var devAgents []store.Agent
 	e.do("GET", "/agents?org="+dev.ID.String(), nil, &devAgents)
-	if len(devAgents) != 5 { // the seeded starter team + Coder
+	if len(devAgents) != 2 { // the seeded Chief + Coder
 		t.Fatalf("dev agents: %d", len(devAgents))
 	}
 

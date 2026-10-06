@@ -24,7 +24,7 @@ first one is the default org.
 
 ### `POST /api/v1/orgs`
 `{"name":"CueFlow Dev","slug":"cueflow-dev","seed_agents":true}`. `slug` is optional (derived from the name);
-`seed_agents` creates the starter crew (Chief, Researcher, Writer, Editor). `201` with the org.
+`seed_agents` creates the starter Chief agent. `201` with the org.
 
 ### `PATCH /api/v1/orgs/{id}`
 `{"name":"...","slug":"..."}`, either field optional.

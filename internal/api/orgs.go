@@ -31,7 +31,7 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) {
 type orgBody struct {
 	Name *string `json:"name"`
 	Slug *string `json:"slug"`
-	// SeedAgents creates the starter team (Chief, Researcher, Writer, Editor) in a new org.
+	// SeedAgents creates the starter Chief agent in a new org.
 	SeedAgents bool `json:"seed_agents"`
 }
 
