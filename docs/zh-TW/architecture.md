@@ -326,7 +326,7 @@ flowchart LR
 
 ### 8.1 雲端部署（Cloud Run + Cloud Tasks + Cloud Scheduler）
 
-同一個執行檔與映像，加上 `CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external` 即為雲端模式（設定腳本與完整指南見 `deploy/cloudrun/`）。程序內不輪詢也不排程，所以沒有請求時可縮到 0，也能多實例並行：
+同一個執行檔與映像，加上 `CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external` 即為雲端模式（指南見 `deploy/cloudrun/`，一次性設定見 `scripts/setup-gcp.sh`，部署使用 anyship）。程序內不輪詢也不排程，所以沒有請求時可縮到 0，也能多實例並行：
 
 ```
  Cloud Scheduler ── 每分鐘 ──► POST /internal/tick
