@@ -202,6 +202,9 @@ Local policy wins: the runner's own `runner.json` can only narrow what the serve
 which command to run, which ACP login to use), and `cueflow runner status` checks the connection. Revoking a runner in
 the dashboard stops it at once. Details and an example: [docs/api.md](docs/api.md#runners).
 
+To keep the agent away from your own logins, run the runner in a container with its own Claude token, a GitHub token
+of its own and a clean work directory: [deploy/runner](deploy/runner/README.md).
+
 An agent can also drive itself: give it the **External (self-driven)** runtime, create an agent token on its
 edit page, and connect any MCP client to `/mcp` with it. The agent claims its own tasks (`claim_task`) and
 works them with the same tools. See [`docs/api.md`](docs/api.md#runners).

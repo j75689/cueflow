@@ -153,6 +153,8 @@ agent CLI（Claude Code、Codex⋯），agent 仍然透過 CueFlow 的工具作�
 
 本機政策優先：Runner 自己的 `runner.json` 只能縮小伺服器的要求（允許的 preset、禁用網路、要執行的指令、ACP 登入方式），`cueflow runner status` 可檢查連線，在後台撤銷 Runner 會立即讓它停止。細節與範例見 [docs/api.md](docs/api.md#runners)（英文）。
 
+想讓 agent 碰不到你自己的登入，可以把 Runner 放進容器：它只拿到專屬的 Claude token、另給的 GitHub token 和乾淨的工作目錄，見 [deploy/runner](deploy/runner/README.md)（英文）。
+
 Agent 也可以完全自己控制：把它的 Runtime 設為 **External (self-driven)**，在 agent 編輯頁建立 agent token，再用任何
 MCP client 帶著 token 連 `/mcp`。Agent 用 `claim_task` 領自己的任務，並使用同一套工具。詳見 [`docs/api.md`](docs/api.md#runners)。
 

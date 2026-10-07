@@ -3,9 +3,11 @@
 # Images (targets):
 #   slim         default. CueFlow only (distroless). Built-in agents and LLM connectors.
 #   agents       + Node.js and the ACP adapters for Claude Code and Codex (external agents).
+#   runner       agents + git and gh, started as `cueflow runner run` (deploy/runner).
 #
 #   docker build -t cueflow:slim .
 #   docker build --target agents -t cueflow:agents .
+#   docker build --target runner -t cueflow:runner .
 
 # 1. Dashboard (Next.js static export)
 FROM node:22-alpine AS web
@@ -47,7 +49,25 @@ USER nonroot:nonroot
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD ["/usr/local/bin/cueflow", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/cueflow"]
 
-# 4. slim (default, last stage): distroless, no Node.js and no external agents.
+# 4. runner: a machine that works agents' tasks (see deploy/runner). It adds git and gh so the agent
+#    can clone, push a branch and open a pull request with the token it is given (GH_TOKEN), and
+#    nothing else of the host: the work directory and the runner credentials are volumes.
+FROM agents AS runner
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git gh openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system credential.helper '!gh auth git-credential' \
+ && git config --system --add safe.directory '*' \
+ && mkdir -p /work /config && chown nonroot:nonroot /work /config
+ENV CUEFLOW_RUNNER_CONFIG=/config/runner.json
+WORKDIR /work
+USER nonroot:nonroot
+HEALTHCHECK NONE
+ENTRYPOINT ["/usr/local/bin/cueflow", "runner"]
+CMD ["run"]
+
+# 5. slim (default, last stage): distroless, no Node.js and no external agents.
 FROM gcr.io/distroless/static-debian12:nonroot AS slim
 COPY --from=build /out/ /usr/local/bin/
 ENV CUEFLOW_ADDR=0.0.0.0:3000
