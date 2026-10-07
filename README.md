@@ -3,10 +3,10 @@
 **Open-source, self-hosted Agent Ops Console for social media.** CueFlow wakes up on a schedule,
 collects material (RSS, mailboxes, web search), has an LLM write platform-specific drafts, puts every
 draft in front of a human reviewer, and only then publishes it through [Postiz](https://github.com/gitroomhq/postiz-app)
-over the Model Context Protocol (MCP). No public IP, domain or webhook required: it runs on a NAS,
-a home lab or a laptop with Docker.
+over the Model Context Protocol (MCP). Run it at home (a NAS, a home lab or a laptop with Docker, no public IP,
+domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
 
-Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md)
+Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md) · Cloud deployment: [deploy/cloudrun](deploy/cloudrun/README.md)
 
 ```
  Cron ─▶ Ingest (RSS · IMAP · Search) ─▶ Agent (LLM tool loop) ─▶ PENDING_REVIEW
@@ -61,7 +61,14 @@ sends them to Postiz.
 - **Everything is a connector plugin.** Publishers, sources, search engines, LLMs and notifiers implement
   small Go interfaces and self-register with a config schema; the UI renders their forms automatically.
   See [docs/connectors.md](docs/connectors.md).
-- **Zero public exposure.** Outbound polling only; the server binds to `127.0.0.1:3000`.
+- **Private by default.** At home it only makes outbound connections and binds to `127.0.0.1:3000`. In the
+  cloud the dashboard sits behind a login (Cloudflare Access) and every machine-to-machine call carries a
+  Google-signed identity.
+- **Runs anywhere.** Docker Compose on your own hardware, or Cloud Run with Cloud Tasks and Cloud Scheduler
+  doing the work and the clock, so nothing runs between jobs. Agents can also run on your own machines
+  ([Runners](#run-agents-on-your-own-machine-runners)).
+- **Media stays out of the way.** Images and videos live in the database, on disk or in Google Cloud Storage,
+  are served with signed URLs, and old unused ones can be deleted automatically.
 - **Secrets encrypted at rest** with AES-256-GCM (bound to the connector row).
 - **Crash-safe publishing.** Dispatch uses leases; a worker that dies mid-publish leaves the post `FAILED`
   with a "check before retrying" note instead of silently double-posting.
@@ -126,7 +133,7 @@ Then:
 4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
    show the reason and a **Retry** button.
 
-### Images
+### Docker image variants
 
 | `CUEFLOW_IMAGE_TARGET` | Contents |
 |---|---|
@@ -150,6 +157,20 @@ docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 
 Create a *Postiz (MCP)* connector with endpoint `http://mock-postiz:4007/api/mcp` and API key `dev-key`.
 Received posts are listed at <http://localhost:4008/posts>.
+
+### Images and videos
+
+Posts reference media as `/media/{id}` (images up to 10 MB; MP4 up to 100 MB). Upload from the editor, generate
+with an image connector, or have an agent attach what a tool produced (for example a rendered Reel).
+
+- **Where bytes live**: `CUEFLOW_MEDIA_STORAGE` is empty (the database), `file:///data/media` or `gcs://bucket/prefix`.
+  `cueflow media migrate --to <target>` moves existing media; URLs do not change.
+- **Deleting**: `DELETE /api/v1/media/{id}` removes the item and its file, and answers `409` while a post that is
+  not yet published or rejected still uses it. `cueflow media prune --older-than 90d [--dry-run]` does the same
+  for everything old and unused; `CUEFLOW_MEDIA_RETENTION_DAYS` runs it on a schedule in cloud mode.
+- **Big files from a trusted renderer**: a service with its own Google identity can write a video straight into
+  the bucket's `uploads/` area and have CueFlow adopt it with `POST /internal/media/register`, so the bytes never
+  pass through CueFlow ([docs/api.md](docs/api.md#media)).
 
 ### Control CueFlow from other agents (MCP)
 
@@ -190,12 +211,26 @@ An agent can also drive itself: give it the **External (self-driven)** runtime, 
 edit page, and connect any MCP client to `/mcp` with it. The agent claims its own tasks (`claim_task`) and
 works them with the same tools. See [`docs/api.md`](docs/api.md#runners).
 
-### Remote access
+### Run it on Google Cloud
+
+The same binary runs on Cloud Run with Supabase (PostgreSQL), Cloud Storage for media, Cloud Tasks for background
+work and Cloud Scheduler for the clock (`CUEFLOW_QUEUE=cloudtasks`, `CUEFLOW_TICK=external`). The service scales to
+zero between jobs. Dashboard login is Cloudflare Access (the service verifies the Access token itself);
+runners, MCP clients and other machines use their own tokens on the service URL. Helper services such as SearXNG,
+a news-trends MCP server or the Reels renderer run as private Cloud Run services and are called with CueFlow's
+Google identity (a connector option). `scripts/setup-gcp.sh` prepares the project; infrastructure manifests live in
+your own deployment repository. Step by step: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+
+### Remote access (Docker)
 
 Ports are bound to localhost on purpose. To review from your phone, use an SSH tunnel
 (`ssh -L 3000:localhost:3000 nas`) or a VPN such as Tailscale, and set `CUEFLOW_ADMIN_TOKEN`.
 
 ## Configuration
+
+Environment variables; the Docker defaults are in `deploy/.env.example`.
+
+### Core
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -206,25 +241,45 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
-| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
-| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
-| `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished post uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
-| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
+| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
+| `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
+
+### Publishing and scheduling
+
+| Variable | Default | Purpose |
+|---|---|---|
 | `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |
-| `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
+
+### Agents
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
+| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
+
+### Media
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
+| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
+| `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished post uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
+| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
+
+### Cloud mode
+
+| Variable | Default | Purpose |
+|---|---|---|
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](deploy/cloudrun/README.md)) |
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
 | `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | Cloudflare Access (Zero Trust) login for the dashboard: your team domain and the application's AUD tag. Both or neither. Requests with a valid Access JWT are accepted like the admin token; see [`deploy/cloudrun`](deploy/cloudrun/README.md) |
-| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
-| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
-| `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
-| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
 
 ### Rotating the secret key
 
@@ -260,20 +315,29 @@ make build                        # bin/cueflow with the dashboard embedded
 ### Layout
 
 ```
-cmd/cueflow            server binary (serve | migrate | genkey | healthcheck)
+cmd/cueflow            the binary (serve | migrate | genkey | healthcheck | rotate-key | runner | media | mcp-bridge)
 cmd/mock-postiz-mcp    Postiz MCP stand-in for development
 internal/domain        post state machine, platform rules
 internal/connector     plugin registry, interfaces, config specs
 internal/connectors/*  built-in plugins (postiz, cuesocial, rss, imap, searxng, tavily, openai, anthropic, smtp)
 internal/agent         pipeline draft generator (LLM tool loop)
 internal/crew          agent team runner: task claiming, tools, delegation, default roles
+internal/acpdrive      drives external agents over ACP (used by the server and by runners)
+internal/runner*       Runners: registration, job queue and the runner-side client
+internal/jobs          background work (in-process, or Cloud Tasks in cloud mode)
+internal/events        in-process and cross-instance event broker (PostgreSQL LISTEN/NOTIFY)
+internal/blob          media bytes: database, disk or Google Cloud Storage (signed URLs)
+internal/media         type and size checks, upload and generation
+internal/internalauth  Google ID-token checks for /internal/* and the media register call
+internal/cfaccess      Cloudflare Access login verification
 internal/pipeline      ingest -> generate -> store -> notify
 internal/dispatch      publish worker (the only caller of publishers)
 internal/scheduler     cron heartbeat
 internal/store         PostgreSQL repositories; migrations in internal/db/migrations
 internal/api           REST + SSE (docs/api.md), serves the embedded UI
 web/                   Next.js + Tailwind dashboard (static export)
-deploy/                docker-compose.yml and .env.example
+deploy/                docker-compose.yml, .env.example, and the Cloud Run guide (deploy/cloudrun)
+scripts/               setup-gcp.sh: prepares a Google Cloud project
 ```
 
 ## Documentation
@@ -283,6 +347,7 @@ deploy/                docker-compose.yml and .env.example
 - [REST API](docs/api.md)
 - [Writing a connector plugin](docs/connectors.md)
 - [Prompt templates](docs/prompt-templates.md)
+- [Deploying on Google Cloud Run](deploy/cloudrun/README.md)
 - Traditional Chinese docs: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
 ## License
