@@ -41,14 +41,14 @@ flowchart LR
 
 ## 3. 預設團隊
 
-第一次啟動且尚無任何 agent 時，系統會自動建立以下四個角色（`internal/crew/defaults.go`），之後都可以在 UI 修改或新增：
+第一次啟動且尚無任何 agent 時，系統只會自動建立一個角色：Chief（`internal/crew/defaults.go`），可以在 UI 修改；其餘的隊友由你自己新增（下表是常見的搭配）：
 
 | 角色 | slug | 能力 | 職責 |
 |---|---|---|---|
-| 🧭 Chief（總管） | `chief` | planning, delegation, memory, research, sources | 對外窗口：理解需求、拆解、委派、設定排程、彙整回報；回合上限 16 |
-| 🔎 Researcher（研究員） | `researcher` | research, sources, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
-| ✍️ Writer（文案） | `writer` | drafting, imaging, research, sources, memory | 依平台風格寫草稿（預設 Threads + Instagram） |
-| 🧐 Editor（編輯） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
+| 🧭 Chief（總管，自動建立） | `chief` | planning, delegation, memory, research, sources, drafting | 對外窗口：理解需求、拆解、委派給你新增的 agent（沒有合適的就自己做）、設定排程、彙整回報；回合上限 16 |
+| 🔎 Researcher（研究員，常見搭配） | `researcher` | research, sources, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
+| ✍️ Writer（文案，常見搭配） | `writer` | drafting, imaging, research, sources, memory | 依平台風格寫草稿 |
+| 🧐 Editor（編輯，常見搭配） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
 
 預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設英文 `en`）；想讓 agent 用繁體中文工作，把該角色的 Language 改成 `zh-TW` 即可。
 

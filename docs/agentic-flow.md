@@ -42,14 +42,14 @@ flowchart LR
 
 ## 3. Default team
 
-On first start, when no agents exist, the system creates these four roles (`internal/crew/defaults.go`). All of them can be edited in the UI, and you can add more:
+On first start, when no agents exist, the system creates a single agent, the Chief (`internal/crew/defaults.go`). It can be edited in the UI, and you add the rest of the team yourself (the roles below are typical choices):
 
 | Role | slug | Capabilities | Responsibility |
 |---|---|---|---|
-| 🧭 Chief | `chief` | planning, delegation, memory, research, sources | The front desk: understands requests, breaks them down, delegates, sets up schedules, reports back; turn limit 16 |
-| 🔎 Researcher | `researcher` | research, sources, memory | Gathers and verifies information, produces summaries with sources |
-| ✍️ Writer | `writer` | drafting, imaging, research, sources, memory | Writes drafts in each platform's style (Threads + Instagram by default) |
-| 🧐 Editor | `editor` | drafting, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
+| 🧭 Chief (created for you) | `chief` | planning, delegation, memory, research, sources, drafting | The front desk: understands requests, breaks them down, delegates to the agents you add (or does the work itself when none fits), sets up schedules, reports back; turn limit 16 |
+| 🔎 Researcher (typical) | `researcher` | research, sources, memory | Gathers and verifies information, produces summaries with sources |
+| ✍️ Writer (typical) | `writer` | drafting, imaging, research, sources, memory | Writes drafts in each platform's style |
+| 🧐 Editor (typical) | `editor` | drafting, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
 
 The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `en`).
 

@@ -27,10 +27,10 @@ actually does the work, but on a board you can watch:
   Drag a card to *To do* with an agent assigned and it starts working. Each task has a thread: the
   agent's progress, tool calls, questions and result. Reply to continue, or start with `@writer` to hand
   it to another agent.
-- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. Defaults:
-  🧭 Chief (plans and delegates), 🔎 Researcher (research with sources), ✍️ Writer (platform drafts),
-  🧐 Editor (reviews and revises drafts). Agents write in their configured language (default English).
-  Add your own.
+- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. A new install has one:
+  🧭 Chief, who plans, delegates to the agents you add, and does the work itself when nobody fits. Add your
+  own (a writer, a researcher, an editor...) and edit any of them. Agents write in their configured language
+  (default English).
 - **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
 - **External agents (ACP)**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or Goose
   instead of the built-in LLM loop, over the [Agent Client Protocol](https://agentclientprotocol.com). Add an
