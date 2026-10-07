@@ -1,8 +1,8 @@
 # CueFlow
 
-> English: [README.md](README.md)
+> English: [README.md](README.md) · 雲端部署：[deploy/cloudrun](deploy/cloudrun/README.md)
 
-**開源、可自託管的社群 Agent 運營控制台。** CueFlow 會定時喚醒，從 RSS、信箱、網路搜尋收集素材，讓 LLM 依各平台風格寫出草稿，每一篇都先交給人審核，核准後才透過 Model Context Protocol (MCP) 交給 [Postiz](https://github.com/gitroomhq/postiz-app) 發布。不需要 Public IP、網域或 Webhook，家裡的 NAS、Home Lab 或筆電上的 Docker 就能跑。
+**開源、可自託管的社群 Agent 運營控制台。** CueFlow 會定時喚醒，從 RSS、信箱、網路搜尋收集素材，讓 LLM 依各平台風格寫出草稿，每一篇都先交給人審核，核准後才透過 Model Context Protocol (MCP) 交給 [Postiz](https://github.com/gitroomhq/postiz-app) 發布。可以在自己的機器上跑（家裡的 NAS、Home Lab 或筆電上的 Docker，不需要 Public IP、網域或 Webhook），也能部署到 Google Cloud Run，沒工作時縮到零。
 
 ```
  Cron ─▶ 收集（RSS · IMAP · 搜尋）─▶ Agent（LLM 工具迴圈）─▶ PENDING_REVIEW
@@ -19,7 +19,7 @@ CueFlow 內建一組可以用自然語言交代事情的 agent，像聊天機器
 - **Board（看板）**：每個需求都是一張任務卡，依序經過 Backlog → 待辦 → 進行中 → 等待中 → 待確認 → 完成。把指派了 agent 的卡片拖到「待辦」，它就會開始工作。每個任務都有一條對話串，記錄 agent 的進度、工具呼叫、提問與成果；回覆就能讓它繼續，用 `@writer` 開頭則可以把任務轉給另一個 agent。
 - **Agents（角色）**：每個角色有自己的人設、能力、LLM、資料來源與記憶。預設有四位：🧭 Chief（總管：規劃與委派）、🔎 Researcher（研究員：附來源的研究）、✍️ Writer（文案：各平台草稿）、🧐 Editor（編輯：檢查與修稿）。預設的名稱與指示是英文，但它們回覆與寫稿用的語言由各自的 `language` 設定決定（預設英文 `en`，要用繁體中文請改成 `zh-TW`）。也可以自己新增角色。
 - **Schedules（排程）**：定時為 agent 建立任務；agent 也能自己建立排程，最密每 5 分鐘一次。
-- **外部 agent（ACP）**：agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行任務，透過 [Agent Client Protocol](https://agentclientprotocol.com) 溝通，取代內建的 LLM 迴圈。新增一個「External agent (ACP)」runtime connector，再把它設為 agent 的 *Runtime* 即可。外部 agent 透過每次執行專屬的 MCP 端點使用 CueFlow 的工具；shell、改檔、讀取本機檔案一律拒絕，寫的草稿一樣要進審核。用 Claude Code 時可以使用 Claude 訂閱方案：執行 `claude setup-token`，把產生的 token 貼進 connector（預設的 Docker 映像已內建 Claude Code 與 Codex 的橋接器）。
+- **外部 agent（ACP）**：agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行任務，透過 [Agent Client Protocol](https://agentclientprotocol.com) 溝通，取代內建的 LLM 迴圈。新增一個「External agent (ACP)」runtime connector，再把它設為 agent 的 *Runtime* 即可。它透過每次執行專屬的 MCP 端點使用 CueFlow 的工具；shell 與檔案存取一律拒絕，寫的草稿一樣要進審核。用 Claude Code 時可以使用 Claude 訂閱方案（`claude setup-token`，把 token 貼進 connector）。
 
 | 能力 | 工具 |
 |---|---|
@@ -35,9 +35,11 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 ## 特色
 
 - **從架構上保證人工審核。** 貼文遵循嚴格的狀態機 `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED`（另有 `FAILED → QUEUED` 手動重試），每次變動都寫入稽核紀錄，包含審核者修改前後的差異。
-- **Agent 無法發文。** 沒有任何 agent 工具能發文；發布器也被包了一層，除非發布 worker 針對「那一篇已核准的貼文」授權，否則 `Publish` 一律失敗（FR-4.2）。
+- **Agent 無法發文。** 沒有任何 agent 工具能發文；發布器也被包了一層，除非發布 worker 針對「那一篇已核准的貼文」授權，否則 `Publish` 一律失敗。
 - **一切都是 connector 插件。** 發布器、資料來源、搜尋引擎、LLM、通知都實作簡單的 Go 介面，並附設定 schema 自行註冊，UI 會自動產生設定表單。見 [docs/connectors.md](docs/connectors.md)（英文）。
-- **不對外開放。** 只做主動輪詢；伺服器只綁 `127.0.0.1:3000`。
+- **預設私有。** 在自己機器上只做主動連線，伺服器只綁 `127.0.0.1:3000`；在雲端，儀表板放在登入（Cloudflare Access）後面，機器之間的呼叫都帶 Google 簽發的身分。
+- **哪裡都能跑。** 自己的硬體用 Docker Compose；或 Cloud Run 搭配 Cloud Tasks 與 Cloud Scheduler 負責工作與時鐘，沒工作時不佔資源。Agent 也能跑在你自己的機器上（[Runner](#在自己的機器上跑-agentrunner)）。
+- **媒體不礙事。** 圖片與影片可放資料庫、磁碟或 Google Cloud Storage，用簽名網址提供，沒在用的舊檔可以自動清掉。
 - **機密加密儲存。** 使用 AES-256-GCM，並綁定 connector 那一列資料。
 - **發布不怕當機。** 發布使用租約；worker 若在發布途中掛掉，貼文會標成 `FAILED` 並提醒「重試前請先確認平台」，而不是默默重複發文。
 - **單一 binary。** Go 的 API、排程與 worker，加上內嵌的 Next.js 控制台。
@@ -61,10 +63,10 @@ Agent 永遠不會發文。它們寫的草稿和其他貼文一樣會進 **Revie
 | Anthropic Claude | API key · OAuth access token（自動加上必要的 OAuth beta header）· 給閘道用的一般 Bearer token · 指定 `ant auth login` 設定檔 · 或全部留空，使用伺服器環境（`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_PROFILE`、預設設定檔） |
 | Amazon Bedrock 上的 Claude | Bedrock API key · AWS access key + secret（+ session token）· AWS profile · 或留空，使用預設的 AWS 憑證鏈（環境變數、`~/.aws`、IAM role） |
 | Google Vertex AI 上的 Claude | 服務帳號金鑰 JSON · 或留空，使用 Application Default Credentials |
-| Google Vertex AI 上的 Gemini | 同上：服務帳號金鑰，或 Application Default Credentials（例如本機 `gcloud auth application-default login` 的登入）。需要已開啟計費的 GCP 專案；費用由 GCP 計算，不吃 Gemini / Google AI 訂閱額度 |
-| OpenAI 相容 | API key（Bearer；Azure 用 `api-key` header）· 給閘道用的自訂 header · 本機服務不需要。預設值：OpenAI、**OpenRouter**（已預填網址與來源標示 header；使用 `sk-or-...` key，模型名稱如 `anthropic/claude-opus-4.8`）、**Azure OpenAI**（v1 endpoint，或填 API version 走舊版 deployments endpoint）、DeepSeek、Ollama、vLLM、LocalAI |
+| Google Vertex AI 上的 Gemini | 同上（例如 `gcloud auth application-default login`）。需要已開啟計費的 GCP 專案；費用由 GCP 計算，不吃 Google AI 訂閱額度 |
+| OpenAI 相容 | API key（Bearer；Azure 用 `api-key` header）· 給閘道用的自訂 header · 本機服務不需要。預設值：OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI |
 
-在 UI 填的憑證會依 connector 分別加密保存，優先於伺服器層級的環境變數。用 Docker 時若要改用環境變數或憑證檔，請在 `deploy/.env` 設定，並參考 `deploy/docker-compose.yml` 裡註解掉的 `volumes:` 範例（掛載 `~/.config/anthropic`、`~/.aws`、`~/.config/gcloud` 或 GCP 服務帳號金鑰）。
+在 UI 填的憑證會依 connector 分別加密保存，優先於伺服器環境變數。Docker 想改用環境變數或憑證檔，見 `deploy/.env.example` 與 `deploy/docker-compose.yml` 裡註解掉的 `volumes:` 範例。
 
 ## 快速開始（Docker）
 
@@ -103,8 +105,7 @@ docker compose up -d
 
 ### 網頁搜尋
 
-compose 內含一個 SearXNG（請在 `deploy/.env` 設定 `SEARXNG_SECRET`）。在 CueFlow 新增 *SearXNG* connector，
-URL 填 `http://searxng:8080`；沒有指定搜尋 connector 的 agent 會使用第一個啟用中的。SearXNG 本身的頁面在 <http://localhost:8888>。
+compose 內含 SearXNG（請在 `deploy/.env` 設定 `SEARXNG_SECRET`）。新增 *SearXNG* connector，URL 填 `http://searxng:8080`；沒有指定搜尋 connector 的 agent 會使用第一個啟用中的。
 
 ### 不接 Postiz 先試用
 
@@ -114,6 +115,14 @@ docker compose --profile mock up -d cueflow cueflow-db mock-postiz
 ```
 
 建立一個 *Postiz (MCP)* connector，endpoint 填 `http://mock-postiz:4007/api/mcp`，API key 填 `dev-key`。收到的貼文會列在 <http://localhost:4008/posts>。
+
+### 圖片與影片
+
+貼文用 `/media/{id}` 引用媒體（圖片最大 10 MB；MP4 最大 100 MB）。可以在編輯器上傳、用圖片生成 connector 產生，或讓 agent 附上工具的產物（例如渲染好的 Reel）。
+
+- **位元組放哪**：`CUEFLOW_MEDIA_STORAGE` 留空（資料庫）、`file:///data/media` 或 `gcs://bucket/prefix`。`cueflow media migrate --to <target>` 搬移既有媒體，網址不變。
+- **刪除**：`DELETE /api/v1/media/{id}` 刪除該項目與檔案；只要還有尚未發布或退回的貼文在用，就回 `409`。`cueflow media prune --older-than 90d [--dry-run]` 一次清掉所有舊的、沒人用的；雲端模式可用 `CUEFLOW_MEDIA_RETENTION_DAYS` 讓它定時執行。
+- **受信任的渲染服務傳大檔**：有自己 Google 身分的服務可以把影片直接寫進 bucket 的 `uploads/`，再呼叫 `POST /internal/media/register` 讓 CueFlow 收編，位元組不經過 CueFlow（[docs/api.md](docs/api.md#media)，英文）。
 
 ### 讓其他 agent 操作 CueFlow（MCP）
 
@@ -142,19 +151,24 @@ agent CLI（Claude Code、Codex⋯），agent 仍然透過 CueFlow 的工具作�
    ```
 3. 在 **Connectors** 新增 **Runner pool**（標籤 `claude-code`），再把它選為 agent 的 *Runtime*。
 
-本機政策優先：Runner 的 `runner.json`（Linux 在 `~/.config/cueflow/`、macOS 在 `~/Library/Application Support/cueflow/`，或用 `CUEFLOW_RUNNER_CONFIG` 指定）可以限制 `allow_presets`、設定 `deny_web`、把 preset 對應到 `commands`
-路徑、為各 preset 指定 ACP 的 `auth_methods`，並用 `env` 提供憑證，伺服器無法放寬任何一項。
-例如 Google Antigravity 的官方 ACP 伺服器（取自 [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)）可寫成
-`"commands": {"custom": "/path/to/agy_acp_server.par"}, "auth_methods": {"custom": "oauth-personal"}`，並把 agent 的 Runner pool 設為 `custom` preset。`cueflow runner status` 可檢查連線；在後台撤銷 Runner 會立即讓它停止。
+本機政策優先：Runner 自己的 `runner.json` 只能縮小伺服器的要求（允許的 preset、禁用網路、要執行的指令、ACP 登入方式），`cueflow runner status` 可檢查連線，在後台撤銷 Runner 會立即讓它停止。細節與範例見 [docs/api.md](docs/api.md#runners)（英文）。
 
 Agent 也可以完全自己控制：把它的 Runtime 設為 **External (self-driven)**，在 agent 編輯頁建立 agent token，再用任何
 MCP client 帶著 token 連 `/mcp`。Agent 用 `claim_task` 領自己的任務，並使用同一套工具。詳見 [`docs/api.md`](docs/api.md#runners)。
 
-### 遠端存取
+### 部署到 Google Cloud
+
+同一個 binary 可以跑在 Cloud Run：Supabase（PostgreSQL）、Cloud Storage 放媒體、Cloud Tasks 派送背景工作、Cloud Scheduler 當時鐘（`CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external`），沒工作時縮到零。儀表板用 Cloudflare Access 登入（服務自己驗證 Access token）；Runner、MCP client 等機器用服務網址和各自的 token。SearXNG、news-trends MCP、Reels 渲染器這類輔助服務跑成私有的 Cloud Run 服務，用 CueFlow 的 Google 身分呼叫（connector 的一個選項）。`scripts/setup-gcp.sh` 會準備專案；基礎設施的 manifest 放在你自己的部署 repo。步驟見 [deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
+
+### 遠端存取（Docker）
 
 Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ssh -L 3000:localhost:3000 nas`）或 Tailscale 等 VPN，並設定 `CUEFLOW_ADMIN_TOKEN`。
 
 ## 設定
+
+環境變數；Docker 的預設值在 `deploy/.env.example`。
+
+### 基本
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
@@ -165,25 +179,45 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
-| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
-| `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫、`file:///data/media` 或 `gcs://bucket/prefix`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
-| `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成貼文使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
-| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
+| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
+| `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
+| `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序的資料庫連線上限（小型資料庫建議每個實例約 5） |
+
+### 發布與排程
+
+| 環境變數 | 預設值 | 用途 |
+|---|---|---|
 | `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |
-| `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
+
+### Agent
+
+| 環境變數 | 預設值 | 用途 |
+|---|---|---|
+| `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
+| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
+
+### 媒體
+
+| 環境變數 | 預設值 | 用途 |
+|---|---|---|
+| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
+| `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫、`file:///data/media` 或 `gcs://bucket/prefix`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
+| `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成貼文使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
+| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
+
+### 雲端模式
+
+| 環境變數 | 預設值 | 用途 |
+|---|---|---|
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` 以 Cloud Tasks 派送背景工作（雲端模式，見 [`deploy/cloudrun`](deploy/cloudrun/README.md)） |
 | `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |
 | `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | 以 Cloudflare Access（Zero Trust）登入儀表板：填 team domain 與應用程式的 AUD。兩者要一起設或都不設。帶有效 Access JWT 的請求等同 admin token，見 [`deploy/cloudrun`](deploy/cloudrun/README.md) |
-| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
-| `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序的資料庫連線上限（小型資料庫建議每個實例約 5） |
-| `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
-| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
 
 ### 更換加密金鑰
 
@@ -220,6 +254,7 @@ make build                        # 產生內嵌控制台的 bin/cueflow
 - [整體架構設計](docs/zh-TW/architecture.md)
 - [Agentic flow 設計](docs/zh-TW/agentic-flow.md)
 - [Prompt 範本](docs/zh-TW/prompt-templates.md)
+- [部署到 Google Cloud Run](deploy/cloudrun/README.md)（英文）
 - 英文文件：[REST API](docs/api.md) · [Connector 插件開發](docs/connectors.md)
 
 ## 授權

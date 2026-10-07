@@ -368,6 +368,15 @@ Local policy always wins: the runner's own config (`allow_presets`, `deny_web`, 
 the server asks for, and shell/file tools are refused as for any external agent. If no runner takes a job within
 `queue_timeout_minutes`, or a runner stops heartbeating, the task fails with that reason.
 
+The runner's `runner.json` (Linux `~/.config/cueflow/`, macOS `~/Library/Application Support/cueflow/`, or
+`CUEFLOW_RUNNER_CONFIG`) can restrict `allow_presets`, set `deny_web`, map a preset to a `commands` path, pick an
+ACP `auth_methods` entry per preset and provide credentials in `env`; the server cannot widen any of it. For
+example, Google Antigravity's official ACP server (from the
+[ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)) is
+`"commands": {"custom": "/path/to/agy_acp_server.par"}, "auth_methods": {"custom": "oauth-personal"}`, with the
+agent's runner pool set to the `custom` preset. `cueflow runner status` checks the connection; revoking a runner in
+the dashboard stops it at once.
+
 ---
 
 ## Media
