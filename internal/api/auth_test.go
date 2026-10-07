@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,45 @@ func TestMachineURL(t *testing.T) {
 	}
 	if got := (&Server{PublicURL: "https://people.example", DirectURL: "https://direct.example"}).machineURL(); got != "https://direct.example" {
 		t.Errorf("DirectURL wins: %q", got)
+	}
+}
+
+// With Access configured the dashboard's pages need a login too, so the run.app address shows
+// nothing to a visitor; without Access they stay open, as before.
+func TestUIGuard(t *testing.T) {
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := cfaccess.NewWithKeys(testTeam, &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&k.PublicKey}}, testAud)
+	page := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("dashboard")) })
+
+	get := func(h http.Handler, mut func(*http.Request)) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/board/", nil)
+		if mut != nil {
+			mut(r)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	guarded := (&Server{Access: access, PublicURL: "https://people.example"}).uiGuard(page)
+
+	if w := get(guarded, nil); w.Code != http.StatusForbidden || w.Body.String() == "dashboard" ||
+		!strings.Contains(w.Body.String(), "https://people.example") {
+		t.Errorf("signed out: %d %q", w.Code, w.Body.String())
+	}
+	if w := get(guarded, func(r *http.Request) { r.Header.Set(cfaccess.HeaderJWT, accessToken(t, k, "another-app")) }); w.Code != http.StatusForbidden {
+		t.Errorf("a login for another application must not open the pages: %d", w.Code)
+	}
+	if w := get(guarded, func(r *http.Request) { r.Header.Set(cfaccess.HeaderJWT, accessToken(t, k, testAud)) }); w.Code != http.StatusOK || w.Body.String() != "dashboard" {
+		t.Errorf("signed in: %d %q", w.Code, w.Body.String())
+	}
+	if w := get(guarded, func(r *http.Request) { r.Header.Set("Authorization", "Bearer s3cret") }); w.Code != http.StatusForbidden {
+		t.Errorf("the admin token opens the API, not the pages: %d", w.Code)
+	}
+	open := (&Server{}).uiGuard(page)
+	if w := get(open, nil); w.Code != http.StatusOK {
+		t.Errorf("without Access the pages stay open: %d", w.Code)
 	}
 }
