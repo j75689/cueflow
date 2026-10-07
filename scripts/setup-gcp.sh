@@ -6,8 +6,10 @@
 #   CLOUDSDK_ACTIVE_CONFIG_NAME=anyship-e2e scripts/setup-gcp.sh glosscue-ai-route asia-east1
 #
 # Creates: the APIs, the service account the service runs as, the media bucket, the Cloud Tasks
-# queue, the permissions between them, and the Artifact Registry remote repository "ghcr" if
-# it is missing (Cloud Run pulls ghcr.io images through it).
+# queue, the permissions between them, the Artifact Registry remote repository "ghcr" if
+# it is missing (Cloud Run pulls ghcr.io images through it), the private repository "apps" for
+# images that must not be public, and the account of the reels renderer (it may only create files
+# under uploads/ in the media bucket, which a lifecycle rule empties after a day).
 # Does NOT create: the database (Supabase, see deploy/cloudrun/README.md), the service itself, the
 # secrets, or the Scheduler job (all in IaC-deployments/cueflow/anyship.yaml).
 #
@@ -23,6 +25,8 @@ QUEUE=${QUEUE:-cueflow}
 CONCURRENCY=${CONCURRENCY:-3}
 SA_NAME=${SA_NAME:-cueflow-run}
 SA="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
+RENDER_SA_NAME=${RENDER_SA_NAME:-cueflow-render}
+RENDER_SA="${RENDER_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 g() { gcloud --project "$PROJECT" --quiet "$@"; }
 
@@ -48,6 +52,29 @@ g storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1 \
        --public-access-prevention
 g storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member "serviceAccount:${SA}" --role roles/storage.objectAdmin >/dev/null
+
+# The renderer writes finished videos straight into the bucket's uploads/ area and then asks CueFlow
+# to adopt them (POST /internal/media/register). It can create objects there and nothing else: it
+# cannot read, overwrite or delete anything. CueFlow's own account moves them into the media store.
+echo "== renderer account $RENDER_SA"
+g iam service-accounts describe "$RENDER_SA" >/dev/null 2>&1 \
+  || g iam service-accounts create "$RENDER_SA_NAME" --display-name "CueFlow reels renderer"
+g storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member "serviceAccount:${RENDER_SA}" --role roles/storage.objectCreator \
+  --condition="title=uploads-only,expression=resource.name.startsWith(\"projects/_/buckets/${BUCKET}/objects/uploads/\")" >/dev/null
+# Files nobody registered (refused, or the call failed) go away after a day; any other rule stays.
+echo "== lifecycle: uploads/ expires after 1 day"
+LC=$(mktemp)
+g storage buckets describe "gs://${BUCKET}" --format=json | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+rules = (b.get("lifecycle_config") or b.get("lifecycle") or {}).get("rule", [])
+mine = {"action": {"type": "Delete"}, "condition": {"age": 1, "matchesPrefix": ["uploads/"]}}
+rules = [r for r in rules if r.get("condition", {}).get("matchesPrefix") != ["uploads/"]] + [mine]
+json.dump({"rule": rules}, sys.stdout)
+' >"$LC"
+g storage buckets update "gs://${BUCKET}" --lifecycle-file="$LC" >/dev/null
+rm -f "$LC"
 
 echo "== permissions of the service account"
 # Put work on the queue.
@@ -76,6 +103,11 @@ if ! g artifacts repositories describe ghcr --location "$REGION" >/dev/null 2>&1
   g artifacts repositories create ghcr --location "$REGION" --repository-format docker \
     --mode remote-repository --remote-repo-config-desc "ghcr.io" --remote-docker-repo https://ghcr.io
 fi
+
+echo "== Artifact Registry repository \"apps\" (private images)"
+g artifacts repositories describe apps --location "$REGION" >/dev/null 2>&1 \
+  || g artifacts repositories create apps --location "$REGION" --repository-format docker \
+       --description "Private images, e.g. the reels renderer"
 
 cat <<EOF
 
