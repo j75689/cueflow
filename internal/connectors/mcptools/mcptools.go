@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/googleid"
 	"github.com/j75689/cueflow/internal/mcpx"
 )
 
@@ -33,6 +34,8 @@ func init() {
 			{Key: "auth_token", Label: "Bearer token", Type: connector.FieldPassword, Secret: true,
 				Help: "Sent as Authorization: Bearer <token>"},
 			{Key: "headers", Label: "Extra headers", Type: connector.FieldKV},
+			{Key: "google_identity", Label: "Sign requests with CueFlow's Google identity", Type: connector.FieldBool,
+				Help: "For a private Cloud Run service: each request carries an ID token of the account CueFlow runs as (it needs roles/run.invoker on that service); the bearer token above still goes in Authorization. Off for anything else"},
 			{Key: "command", Label: "Command (stdio)", Type: connector.FieldString, Placeholder: "npx",
 				Help: "Runs inside the CueFlow container; npx needs the agents image"},
 			{Key: "args", Label: "Arguments (stdio)", Type: connector.FieldStringList},
@@ -87,6 +90,13 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		}
 	} else if o.Endpoint == "" {
 		return nil, fmt.Errorf("mcp server: a server URL is required")
+	}
+	if cfg.Bool("google_identity") && o.Transport != mcpx.TransportStdio {
+		c, err := googleid.Client(context.Background(), httpClient, o.Endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("mcp server: %w", err)
+		}
+		o.HTTPClient = c
 	}
 	for k, v := range cfg.KV("headers") {
 		o.Headers[k] = v

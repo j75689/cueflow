@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/googleid"
 )
 
 func init() {
@@ -23,6 +24,8 @@ func init() {
 			{Key: "language", Label: "Language", Type: connector.FieldString, Default: "auto"},
 			{Key: "time_range", Label: "Time range", Type: connector.FieldSelect, Options: []string{"", "day", "week", "month", "year"}, Default: "week"},
 			{Key: "categories", Label: "Categories", Type: connector.FieldString, Default: "general,news"},
+			{Key: "google_identity", Label: "Sign requests with CueFlow's Google identity", Type: connector.FieldBool,
+				Help: "For a private Cloud Run service: each request carries an ID token of the account CueFlow runs as (it needs roles/run.invoker on that service). Off for anything else"},
 		},
 	}, New)
 }
@@ -33,12 +36,21 @@ type Searcher struct {
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
+	base := strings.TrimRight(cfg.String("endpoint_url"), "/")
+	client := env.HTTPClient
+	if cfg.Bool("google_identity") {
+		c, err := googleid.Client(context.Background(), client, base)
+		if err != nil {
+			return nil, fmt.Errorf("searxng: %w", err)
+		}
+		client = c
+	}
 	return &Searcher{
-		base:       strings.TrimRight(cfg.String("endpoint_url"), "/"),
+		base:       base,
 		lang:       cfg.String("language"),
 		timeRange:  cfg.String("time_range"),
 		categories: cfg.String("categories"),
-		http:       env.HTTPClient,
+		http:       client,
 	}, nil
 }
 
