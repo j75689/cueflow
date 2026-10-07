@@ -31,10 +31,33 @@ type Sink interface {
 	System(ctx context.Context, text string)
 }
 
+// ShellRule is the line of CueFlow's prompt that tells an external agent it has no shell. A runner
+// whose owner allowed the shell swaps it for ShellRuleAllowed (see hostPrompt).
+const ShellRule = `- Do all task work through the "cueflow" tools. Shell commands, file edits and local file access are
+  not available and will be refused; do not try them.`
+
+// ShellRuleAllowed replaces ShellRule on a runner that allows the shell.
+const ShellRuleAllowed = `- Do the task's work on this machine: you may run shell commands, edit files and use git and gh in your
+  working directory, with the credentials this machine gives you. Report through the "cueflow" tools:
+  cueflow.add_comment for progress, and finish with cueflow.complete_task (or cueflow.ask_human). Never print tokens.`
+
+// hostPrompt adapts the prompt to what the machine allows.
+func hostPrompt(prompt string, allowHost bool) string {
+	if !allowHost {
+		return prompt
+	}
+	return strings.Replace(prompt, ShellRule, ShellRuleAllowed, 1)
+}
+
 type Params struct {
 	Launch     connector.RuntimeLaunch
 	AuthMethod string
 	AllowWeb   bool
+	// AllowHost lets the agent use its own tools on this machine: shell, file reads and edits. Only the
+	// machine's owner decides this (the runner's allow_shell); it is never taken from the server.
+	AllowHost bool
+	// Dir is the agent's working directory. Empty means a fresh temporary one, removed afterwards.
+	Dir string
 	// MCPURL is CueFlow's per-run tool server.
 	MCPURL string
 	Prompt string
@@ -131,18 +154,21 @@ type Result struct {
 // Run drives the agent to completion, cancellation or timeout. It always returns a Result.
 func Run(ctx context.Context, p Params) Result {
 	var res Result
-	dir, err := os.MkdirTemp("", "cueflow-agent-*")
-	if err != nil {
-		res.Err = err
-		return res
+	dir := p.Dir
+	if dir == "" {
+		var err error
+		if dir, err = os.MkdirTemp("", "cueflow-agent-*"); err != nil {
+			res.Err = err
+			return res
+		}
+		defer os.RemoveAll(dir)
 	}
-	defer os.RemoveAll(dir)
 
 	timeout := p.Launch.Timeout
 	if timeout <= 0 {
 		timeout = 20 * time.Minute
 	}
-	client := &client{sink: p.Sink, allowWeb: p.AllowWeb}
+	client := &client{sink: p.Sink, allowWeb: p.AllowWeb, allowHost: p.AllowHost}
 	proc, err := acpx.Start(p.Launch, dir, client)
 	if err != nil {
 		res.Err = err
@@ -208,7 +234,7 @@ func Run(ctx context.Context, p Params) Result {
 	}
 	done := make(chan result, 1)
 	go func() {
-		resp, err := proc.Conn.Prompt(context.WithoutCancel(runCtx), acp.PromptRequest{SessionId: sess.SessionId, Prompt: []acp.ContentBlock{acp.TextBlock(p.Prompt)}})
+		resp, err := proc.Conn.Prompt(context.WithoutCancel(runCtx), acp.PromptRequest{SessionId: sess.SessionId, Prompt: []acp.ContentBlock{acp.TextBlock(hostPrompt(p.Prompt, p.AllowHost))}})
 		done <- result{resp, err}
 	}()
 
@@ -264,8 +290,9 @@ wait:
 // activity to the sink and decides permission requests.
 type client struct {
 	acpx.RejectingClient
-	sink     Sink
-	allowWeb bool
+	sink      Sink
+	allowWeb  bool
+	allowHost bool
 
 	mu        sync.Mutex
 	session   string
@@ -326,7 +353,10 @@ func hostTouching(kind acp.ToolKind) bool {
 // allowedTool decides whether a permission request is for one of CueFlow's own tools (or a
 // harmless kind). The "cueflow_" naming is not a documented convention, so it is only trusted for
 // tools that do not claim to touch the host.
-func allowedTool(title string, kind acp.ToolKind, allowWeb bool) bool {
+func allowedTool(title string, kind acp.ToolKind, allowWeb, allowHost bool) bool {
+	if allowHost {
+		return true // the machine's owner chose to let the agent work here
+	}
 	if isCueflowTool(title) {
 		underscoreOnly := strings.HasPrefix(strings.ToLower(title), ServerName+"_")
 		if !underscoreOnly || !hostTouching(kind) {
@@ -401,7 +431,8 @@ func toolOutputText(tu *acp.SessionToolCallUpdate) string {
 
 // RequestPermission is the external agent's sandbox policy: CueFlow's MCP tools are allowed (they
 // carry their own checks and can never publish); web fetch/search and thinking are allowed when
-// enabled; everything touching the host (shell, file reads/edits, deletes, moves) is refused.
+// enabled; everything touching the host (shell, file reads/edits, deletes, moves) is refused, unless
+// the machine's owner allowed it (allowHost).
 func (a *client) RequestPermission(ctx context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	title := ""
 	if p.ToolCall.Title != nil {
@@ -416,7 +447,7 @@ func (a *client) RequestPermission(ctx context.Context, p acp.RequestPermissionR
 	if p.ToolCall.Kind != nil {
 		kind = *p.ToolCall.Kind
 	}
-	if allowedTool(title, kind, a.allowWeb) {
+	if allowedTool(title, kind, a.allowWeb, a.allowHost) {
 		if out, ok := acpx.AllowOutcome(p.Options); ok {
 			return acp.RequestPermissionResponse{Outcome: out}, nil
 		}

@@ -26,6 +26,17 @@ Your own `gh` / Claude / SSH logins on the host stay out of reach.
 5. Under **Connectors** add a **Runner pool** (label `claude-code`) and give the agent that runtime. Stop any other
    runner that is registered for the same pool, or they will share the tasks.
 
+## Coding agents and the shell
+
+A runner normally refuses everything an agent does on the machine except CueFlow's own tools. This one sets
+`CUEFLOW_RUNNER_ALLOW_SHELL=true` (or `"allow_shell": true` in `runner.json`, or `register --allow-shell`), so the
+agent may run commands and edit files, working in `/work`. Only the machine's owner can turn this on: the server cannot
+ask for it, and every job this runner takes gets it, so give the pool to coding agents only.
+
+The agent can read the container's environment, so `GH_TOKEN` and the Claude token are exposed to whatever it runs.
+It also reads issues and code written by others, which may try to steer it. That is why the token is limited to the
+repositories and permissions the work needs and the container has nothing else in it.
+
 ## What it limits
 
 | | |

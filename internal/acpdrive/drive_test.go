@@ -1,6 +1,7 @@
 package acpdrive
 
 import (
+	"strings"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -27,9 +28,38 @@ func TestAllowedTool(t *testing.T) {
 		{"lookalike prefix", "mycueflow_complete_task", acp.ToolKindOther, false, false},
 	}
 	for _, c := range cases {
-		if got := allowedTool(c.title, c.kind, c.allowWeb); got != c.want {
+		if got := allowedTool(c.title, c.kind, c.allowWeb, false); got != c.want {
 			t.Errorf("%s: allowedTool(%q, %s) = %v, want %v", c.name, c.title, c.kind, got, c.want)
 		}
+	}
+}
+
+// A machine whose owner allowed the shell lets the agent use its own tools; nothing else changes.
+func TestAllowedToolOnAMachineThatAllowsTheShell(t *testing.T) {
+	for _, c := range []struct {
+		title string
+		kind  acp.ToolKind
+	}{
+		{"git push origin agent/x", acp.ToolKindExecute},
+		{"Edit main.go", acp.ToolKindEdit},
+		{"Read main.go", acp.ToolKindRead},
+		{"Delete tmp", acp.ToolKindDelete},
+		{"mcp__cueflow__complete_task", acp.ToolKindOther},
+	} {
+		if !allowedTool(c.title, c.kind, false, true) {
+			t.Errorf("%q (%s) must be allowed when the machine allows the shell", c.title, c.kind)
+		}
+	}
+}
+
+func TestHostPrompt(t *testing.T) {
+	p := "intro\n" + ShellRule + "\nrest"
+	if got := hostPrompt(p, false); got != p {
+		t.Errorf("without the shell the prompt must not change:\n%s", got)
+	}
+	got := hostPrompt(p, true)
+	if strings.Contains(got, "will be refused") || !strings.Contains(got, ShellRuleAllowed) || !strings.HasSuffix(got, "\nrest") {
+		t.Errorf("with the shell the rule must be swapped:\n%s", got)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,6 +53,11 @@ type Config struct {
 	Env map[string]string `json:"env,omitempty"`
 	// DenyWeb refuses the agent's web fetch/search tools whatever the server asks for.
 	DenyWeb bool `json:"deny_web,omitempty"`
+	// AllowShell lets agents run shell commands and edit files on this machine, working in the directory
+	// the runner was started in (for coding agents). Off by default, and only this file or
+	// CUEFLOW_RUNNER_ALLOW_SHELL can turn it on: the server cannot ask for it. Give it a runner of its
+	// own, in a container, with credentials limited to what the agent needs.
+	AllowShell bool `json:"allow_shell,omitempty"`
 }
 
 // DefaultConfigPath is cueflow/runner.json under the OS user config dir (macOS: ~/Library/Application
@@ -84,6 +90,15 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.Concurrency < 1 {
 		c.Concurrency = 1
+	}
+	// For a container, where the setting belongs next to the rest of its definition rather than in a
+	// file the registration wrote.
+	if v := os.Getenv("CUEFLOW_RUNNER_ALLOW_SHELL"); v != "" {
+		allow, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("CUEFLOW_RUNNER_ALLOW_SHELL=%q: want true or false", v)
+		}
+		c.AllowShell = allow
 	}
 	return &c, nil
 }
@@ -121,6 +136,7 @@ func register(args []string, version string) error {
 	conc := fs.Int("concurrency", 1, "jobs to run at once")
 	presets := fs.String("allow-presets", "", "comma-separated agent presets this machine may run (default: all)")
 	denyWeb := fs.Bool("deny-web", false, "never let agents use web fetch/search on this machine")
+	allowShell := fs.Bool("allow-shell", false, "let agents run shell commands and edit files here (coding agents); use a dedicated, isolated runner")
 	cfgPath := fs.String("config", DefaultConfigPath(), "where to save the runner credentials")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -139,7 +155,7 @@ func register(args []string, version string) error {
 		return err
 	}
 	c.Token, c.RunnerID, c.Name, c.Concurrency = resp.Token, resp.RunnerID, resp.Name, max(*conc, 1)
-	c.AllowPresets, c.DenyWeb = splitList(*presets), *denyWeb
+	c.AllowPresets, c.DenyWeb, c.AllowShell = splitList(*presets), *denyWeb, *allowShell
 	if err := c.Save(*cfgPath); err != nil {
 		return err
 	}
@@ -161,6 +177,9 @@ func status(args []string) error {
 	fmt.Printf("runner %q (%s)\nserver  %s\nconcurrency %d\n", c.Name, c.RunnerID, c.URL, c.Concurrency)
 	if len(c.AllowPresets) > 0 {
 		fmt.Printf("allowed presets: %s\n", strings.Join(c.AllowPresets, ", "))
+	}
+	if c.AllowShell {
+		fmt.Println("shell: allowed (agents may run commands and edit files here)")
 	}
 	hc := &http.Client{Timeout: 5 * time.Second}
 	resp, err := hc.Get(c.URL + "/api/v1/health")
@@ -423,8 +442,14 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 			hint = "set the agent's credentials in this runner's environment (e.g. CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY)"
 		}
 	}
+	dir := "" // a fresh temporary directory, unless the agent may work here
+	if r.cfg.AllowShell {
+		if wd, err := os.Getwd(); err == nil {
+			dir = wd
+		}
+	}
 	return acpdrive.Run(ctx, acpdrive.Params{
-		Launch: launch, AuthMethod: auth, AllowWeb: allowWeb,
+		Launch: launch, AuthMethod: auth, AllowWeb: allowWeb, AllowHost: r.cfg.AllowShell, Dir: dir,
 		MCPURL: r.cfg.URL + job.MCPPath, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
 		Model: cmp.Or(r.cfg.Models[job.Preset], job.Model),
 	})

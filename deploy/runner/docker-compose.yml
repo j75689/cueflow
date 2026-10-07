@@ -13,6 +13,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # This runner is for coding agents: they may run commands and edit files, in /work, inside this
+      # container. Nothing outside the container is reachable; the credentials are the two in .env.
+      CUEFLOW_RUNNER_ALLOW_SHELL: "true"
       GIT_AUTHOR_NAME: ${GIT_NAME:-CueFlow agent}
       GIT_COMMITTER_NAME: ${GIT_NAME:-CueFlow agent}
       GIT_AUTHOR_EMAIL: ${GIT_EMAIL:?set GIT_EMAIL in .env}

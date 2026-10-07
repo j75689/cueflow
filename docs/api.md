@@ -370,7 +370,10 @@ the server asks for, and shell/file tools are refused as for any external agent.
 
 The runner's `runner.json` (Linux `~/.config/cueflow/`, macOS `~/Library/Application Support/cueflow/`, or
 `CUEFLOW_RUNNER_CONFIG`) can restrict `allow_presets`, set `deny_web`, map a preset to a `commands` path, pick an
-ACP `auth_methods` entry per preset and provide credentials in `env`; the server cannot widen any of it. For
+ACP `auth_methods` entry per preset and provide credentials in `env`; the server cannot widen any of it. For a
+coding agent, `allow_shell: true` (or `register --allow-shell`, or `CUEFLOW_RUNNER_ALLOW_SHELL=true`) lets agents
+run commands and edit files in the directory the runner was started in; it is off by default and applies to every job
+the runner takes, so give it a runner of its own in a container ([deploy/runner](../deploy/runner/README.md)). For
 example, Google Antigravity's official ACP server (from the
 [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)) is
 `"commands": {"custom": "/path/to/agy_acp_server.par"}, "auth_methods": {"custom": "oauth-personal"}`, with the

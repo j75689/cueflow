@@ -23,8 +23,7 @@ operations console. Your tools for this task are provided by the MCP server name
 (e.g. cueflow.create_post_draft, cueflow.add_comment, cueflow.ask_human, cueflow.complete_task).
 
 Rules for this environment:
-- Do all task work through the "cueflow" tools. Shell commands, file edits and local file access are
-  not available and will be refused; do not try them.
+` + acpdrive.ShellRule + `
 - Web fetch/search tools may be available for research.
 - You cannot publish to social media. Drafts go to a human review queue.
 - Finish by calling cueflow.complete_task with a concise summary, or cueflow.ask_human if you need a decision.
