@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 
 	"github.com/j75689/cueflow/internal/connector"
@@ -84,5 +85,30 @@ func TestGoogleIdentityUnavailable(t *testing.T) {
 	if _, err := New(connector.Config{"transport": "stdio", "command": "true", "google_identity": true},
 		connector.Env{HTTPClient: http.DefaultClient}); err != nil {
 		t.Fatalf("stdio must ignore google_identity: %v", err)
+	}
+}
+
+// GitHub's MCP server asks the client to mirror annotated parameters (x-mcp-header) into
+// Mcp-Param-* headers and answers 400 without them. The SDK only knows which ones from a
+// tools/list on the same session, so a call on a fresh session must list first.
+func TestCallToolSendsMirroredParamHeaders(t *testing.T) {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gh", Version: "test"}, nil)
+	schema := map[string]any{"type": "object", "properties": map[string]any{
+		"owner": map[string]any{"type": "string", "x-mcp-header": "Owner"}}}
+	srv.AddTool(&mcp.Tool{Name: "issue_read", InputSchema: schema},
+		func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "read"}}}, nil
+		})
+	ts := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}))
+	t.Cleanup(ts.Close)
+
+	inst, err := New(connector.Config{"endpoint_url": ts.URL, "transport": "streamable_http"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, isErr, err := inst.(*Server).CallTool(context.Background(), "issue_read", []byte(`{"owner":"j75689"}`))
+	if err != nil || isErr || text != "read" {
+		t.Fatalf("call: %q %v %v", text, isErr, err)
 	}
 }
