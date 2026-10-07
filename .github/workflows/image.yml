@@ -1,0 +1,48 @@
+# Builds the slim container image on GitHub's runners and pushes it to GitHub Packages
+# (ghcr.io/j75689/cueflow). Cloud Run pulls it through an Artifact Registry remote repository
+# (see scripts/setup-gcp.sh), which can only read PUBLIC packages: after the first push, set the
+# package to public in GitHub (Packages -> cueflow -> Package settings -> Change visibility).
+# The image holds the compiled server and dashboard, no secrets.
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          # The slim target is the last stage of the Dockerfile (no agent CLIs: the cloud runs
+          # agents on runners).
+          target: slim
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

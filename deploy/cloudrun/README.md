@@ -1,119 +1,135 @@
 # Deploying CueFlow on Google Cloud Run
 
-Serverless layout: Cloud Run (scale to zero) + Supabase Postgres + a GCS bucket for media + Cloud Tasks
-(work delivery) + Cloud Scheduler (the one-minute clock). Everything below uses `asia-northeast1`
-(Tokyo). `setup.sh` and `deploy.sh` in this directory perform steps 2 to 7; read them before running.
+Serverless layout: Cloud Run (scales to zero) + Supabase Postgres + a GCS bucket for media + Cloud
+Tasks (work delivery) + Cloud Scheduler (the one-minute clock). How it works inside:
+[`docs/architecture.md` §8.1](../../docs/architecture.md).
 
-## 1. Database: Supabase (Tokyo)
+The work is split so that each tool does what it is good at:
 
-1. Create a Supabase project in the Tokyo region.
-2. Connect through the **session pooler on port 5432**, not the transaction pooler (6543): CueFlow uses
-   prepared statements, advisory locks and `FOR UPDATE SKIP LOCKED`, which need session semantics.
-   Connection string: `postgres://postgres.<ref>:<password>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`.
-3. Keep the pool small: `CUEFLOW_DB_MAX_CONNS=5` (3 instances at most x 5 stays inside the free tier limits).
-4. Free tier projects are **paused after 7 days without activity**. The one-minute tick keeps it
-   active, but if you scale the scheduler down or disable it, expect a paused database; restore it
-   from the Supabase dashboard.
+| Piece | Made by |
+| --- | --- |
+| Container image `ghcr.io/j75689/cueflow` | `.github/workflows/image.yml` on every push to `main` |
+| APIs, service account, media bucket, Cloud Tasks queue, permissions, `ghcr` proxy repository | `scripts/setup-gcp.sh` (this repo; read it, run it yourself, safe to run again) |
+| Cloud Run service, its secrets, the Scheduler tick | [anyship](https://github.com/j75689/anyship) (v0.4+) from `cueflow/anyship.yaml` in the IaC-deployments repo |
+| Database | Supabase, by hand (below) |
+| Custom domain, Cloudflare Access | by hand (below), optional |
 
-## 2. Project, APIs, service accounts
+The manifest is not in this repo: it holds real project ids and URLs, which live in the deployments
+repo. It deploys with `scripts/deploy.sh cueflow main --yes` there.
 
-`setup.sh` enables the APIs and creates three service accounts:
+## 1. Publish the image
 
-| Account | Purpose | Roles |
-| --- | --- | --- |
-| `cueflow-run` | Cloud Run runtime identity | `storage.objectAdmin` on the bucket, `cloudtasks.enqueuer`, `secretmanager.secretAccessor` on the four secrets, `iam.serviceAccountTokenCreator` on itself (keyless signed URLs), `iam.serviceAccountUser` on `cueflow-tasks` |
-| `cueflow-tasks` | signs the OIDC token on each Cloud Tasks delivery | none (identity only) |
-| `cueflow-scheduler` | signs the OIDC token of the Scheduler tick | none (identity only) |
+Push to `main`; `image.yml` builds the **slim** image (no agent CLIs: the cloud runs agents on
+[Runners](../../README.md#run-agents-on-your-own-machine-runners) or as self-driven agents) and
+pushes `ghcr.io/j75689/cueflow:main`.
 
-## 3. GCS bucket
+Cloud Run reads ghcr.io through an Artifact Registry remote repository that has no credentials, so
+**the package must be public**: after the first push open GitHub, *Packages → cueflow → Package
+settings → Change visibility → Public*. The image contains the compiled server and the dashboard
+and no secrets, but it does mean the binary is downloadable by anyone while the source stays private.
 
-`setup.sh` creates `gs://$BUCKET` (uniform access, public access prevention on). Media is served
-through the app (or short-lived signed URLs), never publicly.
+## 2. Database: Supabase
 
-## 4. Secrets (Secret Manager)
+1. Create a project. Pick the region closest to Cloud Run (the manifest uses `asia-east1`; Tokyo or
+   Singapore are the nearest Supabase regions, and every query pays that distance).
+2. In *Project settings → Data API*: turn **off** *Enable Data API* and *Automatically expose new
+   tables*, and turn **on** *Enable automatic RLS*. CueFlow talks to Postgres directly and never
+   uses the REST API, and its tables hold encrypted connector secrets.
+3. Use the **session pooler on port 5432**, not the transaction pooler (6543): CueFlow uses prepared
+   statements, `LISTEN/NOTIFY` and `FOR UPDATE SKIP LOCKED`, which need session semantics. The
+   connection string looks like
+   `postgres://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+   Connect as the `postgres` role (it owns the tables, so RLS does not apply to it).
+4. `CUEFLOW_DB_MAX_CONNS=5` per instance (set in the manifest) keeps three instances inside the
+   free tier's connection limit.
+5. Free projects are **paused after 7 days without activity**. The one-minute tick counts as activity;
+   if you ever disable it, expect a paused database.
 
-`setup.sh` creates empty secrets; add the values:
+## 3. Google Cloud, once
 
-```bash
-printf '%s' "$(openssl rand -hex 32)"   | gcloud secrets versions add CUEFLOW_SECRET_KEY --data-file=-
-printf '%s' "$DATABASE_URL"             | gcloud secrets versions add DATABASE_URL --data-file=-
-printf '%s' "$(openssl rand -hex 24)"   | gcloud secrets versions add CUEFLOW_ADMIN_TOKEN --data-file=-
-printf '%s' "$(openssl rand -hex 24)"   | gcloud secrets versions add CUEFLOW_MCP_TOKEN --data-file=-
+```sh
+CLOUDSDK_ACTIVE_CONFIG_NAME=<your gcloud configuration> scripts/setup-gcp.sh <project> asia-east1
 ```
 
-If you are migrating an existing install, `CUEFLOW_SECRET_KEY` must be the **same key** the old
-database was encrypted with, otherwise stored credentials cannot be decrypted.
+It enables the APIs and creates the `cueflow-run` service account (it runs the service, signs the
+Cloud Tasks deliveries and is the identity of the Scheduler tick), the media bucket
+(`<project>-cueflow-media`, public access prevented), the `cueflow` queue (concurrency 3) and the
+`ghcr` remote repository if missing, and grants the account only what it needs: enqueue tasks, manage
+objects in that bucket, act as itself for ID tokens and signed URLs.
 
-## 5. Cloud Tasks queue
+## 4. Secrets and the first deploy
 
-`setup.sh` creates `cueflow-work` with `--max-concurrent-dispatches` equal to
-`CUEFLOW_AGENT_CONCURRENCY` (default 3) so the queue, not the instance count, bounds parallel agent
-runs. Each task carries a 30 minute `dispatchDeadline` (the maximum), and the service is deployed
-with `--timeout 1800` so a long agent run is not cut off.
+anyship stores four secrets in Secret Manager as `cueflow-<NAME>`. Two it generates once
+(`CUEFLOW_ADMIN_TOKEN`, `CUEFLOW_MCP_TOKEN`); two you provide, **from your own terminal, never
+through chat**:
 
-## 6. Cloud Run service
-
-```bash
-cp env.example env.yaml   # convert to a YAML map (KEY: "value"), plain env vars only
-./deploy.sh
+```sh
+read -rs v && printf %s "$v" | gcloud --project <project> secrets create cueflow-DATABASE_URL --data-file=- ; unset v
+read -rs v && printf %s "$v" | gcloud --project <project> secrets create cueflow-CUEFLOW_SECRET_KEY --data-file=- ; unset v
 ```
 
-`deploy.sh` builds the slim image with Cloud Build and runs `gcloud run deploy` with
-`--min-instances 0 --max-instances 3`, the secrets mounted from Secret Manager and the runtime
-account. The service allows unauthenticated invocation at the Cloud Run layer; the app enforces auth
-itself (Google ID tokens on `/internal/*`, bearer tokens on `/api/runner` and `/mcp`).
+`CUEFLOW_SECRET_KEY` is 32 bytes as 64 hex characters or base64 (`cueflow genkey`). If you restore an
+existing database, it must be the **same key** the data was encrypted with, otherwise every stored
+connector credential is unreadable. Keep a copy somewhere outside the database.
 
-Environment variables (see `env.example`):
+Then, in the IaC-deployments repo:
 
-```
-CUEFLOW_QUEUE=cloudtasks
-CUEFLOW_TICK=external
-CUEFLOW_MEDIA_STORAGE=gcs://BUCKET/PREFIX
-CUEFLOW_TASKS_QUEUE=projects/P/locations/asia-northeast1/queues/cueflow-work
-CUEFLOW_TASKS_TARGET_URL=https://<service>-<hash>-an.a.run.app
-CUEFLOW_TASKS_SERVICE_ACCOUNT=cueflow-tasks@P.iam.gserviceaccount.com
-CUEFLOW_INTERNAL_SERVICE_ACCOUNTS=cueflow-tasks@P...,cueflow-scheduler@P...
-CUEFLOW_DB_MAX_CONNS=5
+```sh
+scripts/deploy.sh cueflow main --dry-run   # checks the login, the project, the APIs and the image
+scripts/deploy.sh cueflow main --yes
 ```
 
-## 7. Cloud Scheduler tick
+`/api/v1/health` is the startup probe: a revision that cannot reach the database never gets traffic
+and the previous one keeps serving. The service is public at the Cloud Run layer; the app enforces
+auth itself: `CUEFLOW_ADMIN_TOKEN` for the dashboard and API, Google ID tokens (only from
+`cueflow-run`) on `/internal/*`, and bearer tokens on `/api/runner/*` and `/mcp*`.
 
-Once the service has a URL, re-run `SERVICE_URL=https://... ./setup.sh`. It creates the
-`cueflow-tick` job: every minute, `POST $SERVICE_URL/internal/tick`, authenticated with an OIDC token
-of `cueflow-scheduler` and audience `$SERVICE_URL`. With `CUEFLOW_TICK=external` no in-process
-loops run, so this job is the only clock (cron posts, schedules, retries, digests).
+Open the service URL, enter the admin token when asked, and check *Connectors* and *Runners*.
 
-## 8. Cloudflare Access
+## 5. Moving an existing install
 
-Put the custom hostname behind Cloudflare Access for the dashboard, with **bypass** policies for the
-paths that authenticate themselves:
+1. Stop the old server, or make it read-only, for a consistent snapshot.
+2. Database: `pg_dump --no-owner --no-acl "$OLD_DATABASE_URL" | psql "$SUPABASE_SESSION_POOLER_URL"`.
+3. Put the old `CUEFLOW_SECRET_KEY` in Secret Manager (step 4).
+4. Media: `DATABASE_URL=... CUEFLOW_SECRET_KEY=... CUEFLOW_MEDIA_STORAGE=gcs://<bucket> cueflow media migrate --to gcs://<bucket>`
+   copies the bytes to GCS and updates each row's storage tag. It needs credentials that can write the bucket.
+5. Deploy, check `/api/v1/health`, then sign in.
 
-- `/api/runner/*` (runner agent token)
-- `/mcp*` (MCP token)
-- `/media/*` (media URLs fetched by social platforms)
-- `/internal/*` (Google OIDC; Cloud Tasks and Scheduler call the `run.app` URL directly, so this
-  only matters if you point `CUEFLOW_TASKS_TARGET_URL` at the Cloudflare hostname)
+Things that do **not** carry over by themselves:
 
-Set `CUEFLOW_PUBLIC_URL` to the Cloudflare hostname.
+- Connectors that point at services on your own machine or Docker network (`http://reels-render:8090`,
+  `http://news-trends:8080`, a local SearXNG) cannot be reached from Cloud Run: deploy those services too
+  (each as its own Cloud Run service) or repoint the connectors.
+- Agents with an `acp_agent` runtime run an agent CLI on the CueFlow host, which the slim image lacks.
+  Give them a `runner_pool` runtime (your own machine runs the agent) or switch them to the built-in loop.
+- Runners must be re-registered against the new URL (`cueflow runner register --url ...`).
 
-## 9. Migrating an existing install
+## 6. Custom domain and Cloudflare Access (optional)
 
-1. Stop the old server (or make it read-only) to get a consistent snapshot.
-2. Database: `pg_dump --no-owner --no-acl "$OLD_DATABASE_URL" | psql "$SUPABASE_DIRECT_URL"`
-   (use the direct 5432 connection or the session pooler). Keep the same `CUEFLOW_SECRET_KEY`.
-3. Media: `cueflow media migrate --to gcs://BUCKET/PREFIX` copies media bytes to GCS and updates
-   each row's storage tag.
-4. Deploy, check `/healthz`, then switch DNS / the Cloudflare origin.
+Cloud Run's `*.run.app` URL works as is. To put a domain and Cloudflare Access in front, serve the
+dashboard through Access and **bypass** the paths that authenticate themselves:
 
-## 10. Backups
+- `/api/runner/*` (runner tokens), `/mcp*` (MCP and agent tokens), `/media/*` (fetched by social platforms),
+- `/internal/*` only if `CUEFLOW_TASKS_TARGET_URL` points at the Cloudflare hostname (Cloud Tasks and
+  Scheduler call the `run.app` URL directly, and the Scheduler audience is that URL).
 
-Supabase free tier has no point-in-time restore. Run a daily dump to GCS, for example from Cloud
-Run Jobs or any machine with credentials:
+Keep `CUEFLOW_TASKS_TARGET_URL` and the Scheduler URL on the `run.app` address: the Google ID token's
+audience must equal it. Set `CUEFLOW_PUBLIC_URL` to the hostname people use (it appears in links and
+runner registration commands).
 
-```bash
+## 7. Backups
+
+Supabase's free tier has no point-in-time restore. Dump daily to a bucket, from any machine with the
+credentials or a scheduled job:
+
+```sh
 pg_dump --format=custom "$DATABASE_URL" | gcloud storage cp - "gs://$BACKUP_BUCKET/cueflow-$(date +%F).dump"
 ```
 
-Give the backup bucket a lifecycle rule (for example delete after 30 days) and trigger the job from
-a second Cloud Scheduler entry. Keep a copy of `CUEFLOW_SECRET_KEY` somewhere outside the database:
-a backup is useless without it.
+Give the backup bucket a lifecycle rule (for example delete after 30 days).
+
+## Costs and limits
+
+At low traffic Cloud Run, Cloud Tasks and Cloud Scheduler stay in their free tiers; the bucket costs
+cents; Supabase Free is $0. The service scales to zero but keeps an instance while a request is open,
+and the dashboard's live-update stream is a request: leave the dashboard open and the instance stays up.
