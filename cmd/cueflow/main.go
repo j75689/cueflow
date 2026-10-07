@@ -223,6 +223,7 @@ func serve() error {
 			jobs.KindDispatch: func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
 			jobs.KindPipeline: sched.HandlePipeline,
 			jobs.KindSchedule: sched.HandleSchedule,
+			jobs.KindApproval: team.RunApproval,
 		}
 		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
 		if len(cfg.MediaRegisterAccounts) > 0 {

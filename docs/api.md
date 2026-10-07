@@ -294,7 +294,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 | POST | `/tasks/{id}/cancel` | | stop the running agent (→ `WAITING_HUMAN`) |
 | GET | `/tasks/{id}/runs` | | → `[AgentRun]` newest first |
 | GET | `/tasks/{id}/approvals` | | → `[ToolApproval]` oldest first: `{"id","task_id","agent_id","connector_id","server_name","tool","arguments":{},"status":"pending|approved|rejected","result","is_error","note","created_at","decided_at"}` |
-| POST | `/tasks/{id}/approvals/{approvalId}` | `{decision:"approve"|"reject", note?}` | approve runs the tool now and posts its result to the thread; either way the agent resumes once nothing is pending. `400` if already decided |
+| POST | `/tasks/{id}/approvals/{approvalId}` | `{decision:"approve"|"reject", note?}` | approve answers at once (the approval has an empty `result` until the call finishes) and the tool runs out of band (a queued `approval` job in the cloud, a goroutine otherwise) and posts its result to the thread, so a render that takes minutes does not hold the request; either way the agent resumes once nothing is pending. `400` if already decided |
 
 `TaskMessage`: `{"id","task_id","seq","author_type":"human|agent|system|tool","agent_id":"uuid|null",
 "agent":{"name","avatar","slug"}|null,"kind":"message|tool_call|tool_result|status|question|result","content":"...",
