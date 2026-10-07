@@ -365,7 +365,8 @@ reverse proxy that guards the admin API must let this path through. A runner spe
 | POST | `/jobs/{id}/complete` | `{stop_reason, final_text, agent_name, tool_calls, input_tokens, output_tokens, error, timed_out, canceled}` → `{"accepted":bool}` |
 
 Local policy always wins: the runner's own config (`allow_presets`, `deny_web`, `commands`) can only narrow what
-the server asks for, and shell/file tools are refused as for any external agent. If no runner takes a job within
+the server asks for, and shell/file tools are refused as for any external agent, unless the machine's owner set
+`allow_shell` (below). If no runner takes a job within
 `queue_timeout_minutes`, or a runner stops heartbeating, the task fails with that reason.
 
 The runner's `runner.json` (Linux `~/.config/cueflow/`, macOS `~/Library/Application Support/cueflow/`, or
