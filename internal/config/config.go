@@ -68,6 +68,11 @@ type Config struct {
 	// DirectURL is how machines reach this server (runners, MCP clients, publishers fetching media):
 	// they cannot log in through a browser-oriented gate such as Cloudflare Access. Default PublicURL.
 	DirectURL string
+	// MediaRetentionDays, when positive, deletes media older than that many days which no unfinished
+	// post uses (checked by the external clock; locally use `cueflow media prune`).
+	MediaRetentionDays int
+	// MediaRegisterAccounts may call /internal/media/register (the Reels renderer's service account).
+	MediaRegisterAccounts []string
 	// DBMaxConns caps this process's connection pool (0 = driver default). Set it low (e.g. 5) in
 	// the cloud so several instances stay under a small database's connection limit.
 	DBMaxConns int
@@ -115,6 +120,15 @@ func Load() (*Config, error) {
 		}
 	}
 	c.DBMaxConns = envInt("CUEFLOW_DB_MAX_CONNS", 0)
+	c.MediaRetentionDays = envInt("CUEFLOW_MEDIA_RETENTION_DAYS", 0)
+	for _, e := range strings.Split(os.Getenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS"), ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			c.MediaRegisterAccounts = append(c.MediaRegisterAccounts, e)
+		}
+	}
+	if len(c.MediaRegisterAccounts) > 0 && c.Tick != "external" {
+		return nil, errors.New("CUEFLOW_MEDIA_REGISTER_ACCOUNTS only applies in cloud mode (CUEFLOW_TICK=external)")
+	}
 	if c.Queue != "local" && c.Queue != "cloudtasks" {
 		return nil, fmt.Errorf("CUEFLOW_QUEUE must be local or cloudtasks, got %q", c.Queue)
 	}

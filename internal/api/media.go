@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/internalauth"
 	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -102,4 +104,38 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// ServeContent answers Range requests, which video players use to seek.
 	http.ServeContent(w, r, "", time.Time{}, rc)
+}
+
+// registerMedia adopts a file the Reels renderer left in the bucket's staging area (see
+// blob.StagingPrefix): POST /internal/media/register {"object":"uploads/<file>"}. The caller proves
+// who it is with a Google ID token (MediaRegisterAuth); the video itself never passes through here.
+func (s *Server) registerMedia(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Object string `json:"object"`
+	}
+	if err := decode(r, &req); err != nil {
+		s.fail(w, err)
+		return
+	}
+	by, _, _ := strings.Cut(internalauth.EmailFrom(r.Context()), "@")
+	m, err := s.Store.AdoptMedia(r.Context(), req.Object, by, media.SniffHead)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
+}
+
+// deleteMedia removes a media item and its file; 409 while an unfinished post uses it.
+func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(strings.TrimSuffix(chi.URLParam(r, "id"), ".mp4"))
+	if err != nil {
+		s.fail(w, &store.ValidationError{Msg: "bad media id"})
+		return
+	}
+	if err := s.Store.DeleteMedia(r.Context(), id); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

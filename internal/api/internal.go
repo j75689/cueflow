@@ -17,9 +17,16 @@ import (
 
 // internalRoutes mounts the endpoints behind auth.
 func (s *Server) internalRoutes(r chi.Router) {
-	r.Use(s.InternalAuth)
-	r.Post("/tick", s.tick)
-	r.Post("/work/{kind}/{id}", s.work)
+	if s.InternalAuth != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(s.InternalAuth)
+			r.Post("/tick", s.tick)
+			r.Post("/work/{kind}/{id}", s.work)
+		})
+	}
+	if s.MediaRegisterAuth != nil {
+		r.With(s.MediaRegisterAuth).Post("/media/register", s.registerMedia)
+	}
 }
 
 func (s *Server) tick(w http.ResponseWriter, r *http.Request) {

@@ -14,12 +14,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -222,6 +224,10 @@ func serve() error {
 			jobs.KindPipeline: sched.HandlePipeline,
 			jobs.KindSchedule: sched.HandleSchedule,
 		}
+		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
+		if len(cfg.MediaRegisterAccounts) > 0 {
+			apiSrv.MediaRegisterAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.MediaRegisterAccounts))
+		}
 		apiSrv.Tick = func(ctx context.Context) error {
 			return errors.Join(sched.Tick(ctx), team.Sweep(ctx), worker.Sweep(ctx))
 		}
@@ -356,14 +362,12 @@ func rotateKey(dryRun bool) error {
 	return nil
 }
 
-// mediaCmd handles `cueflow media migrate --to LOCATION` (LOCATION: file:///dir, or db).
+// mediaCmd handles `cueflow media migrate --to LOCATION` (file:///dir, gcs://bucket, or db) and
+// `cueflow media prune --older-than 90d [--dry-run]`.
 func mediaCmd(args []string) error {
-	if len(args) < 3 || args[0] != "migrate" || args[1] != "--to" {
-		return errors.New("usage: cueflow media migrate --to file:///dir|db")
-	}
-	dst, err := blob.Parse(args[2])
-	if err != nil {
-		return err
+	const usage = "usage: cueflow media migrate --to file:///dir|gcs://bucket|db\n       cueflow media prune --older-than 90d [--dry-run]"
+	if len(args) == 0 {
+		return errors.New(usage)
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -380,16 +384,61 @@ func mediaCmd(args []string) error {
 		return err
 	}
 	st := store.New(pool, box)
-	// Rows already moved elsewhere stay readable only through the configured backend.
 	cur, err := blob.Parse(cfg.MediaStorage)
 	if err != nil {
 		return err
 	}
-	st.SetBlobs(cur)
-	if dst != nil && cur != nil && dst.Kind() == cur.Kind() {
-		st.SetBlobs(dst)
+	st.SetBlobs(cur) // rows already moved elsewhere stay readable only through the configured backend
+
+	switch args[0] {
+	case "migrate":
+		if len(args) < 3 || args[1] != "--to" {
+			return errors.New(usage)
+		}
+		dst, err := blob.Parse(args[2])
+		if err != nil {
+			return err
+		}
+		if dst != nil && cur != nil && dst.Kind() == cur.Kind() {
+			st.SetBlobs(dst)
+		}
+		n, err := st.MigrateMedia(ctx, dst)
+		fmt.Printf("moved %d media item(s)\n", n)
+		return err
+	case "prune":
+		fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+		olderThan := fs.String("older-than", "", "delete media older than this, e.g. 90d, 36h")
+		dry := fs.Bool("dry-run", false, "only count what would be deleted")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		age, err := parseAge(*olderThan)
+		if err != nil {
+			return err
+		}
+		n, err := st.PruneMedia(ctx, age, *dry)
+		verb := "deleted"
+		if *dry {
+			verb = "would delete"
+		}
+		fmt.Printf("%s %d media item(s) older than %s that no unfinished post uses\n", verb, n, *olderThan)
+		return err
 	}
-	n, err := st.MigrateMedia(ctx, dst)
-	fmt.Printf("moved %d media item(s)\n", n)
-	return err
+	return errors.New(usage)
+}
+
+// parseAge reads "90d", "12h" or any time.ParseDuration value.
+func parseAge(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("--older-than %q: want a positive number of days, e.g. 90d", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("--older-than is required, e.g. 90d or 36h (got %q)", s)
+	}
+	return d, nil
 }

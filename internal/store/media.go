@@ -217,3 +217,109 @@ func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
 	}
 	return moved, nil
 }
+
+// ErrMediaInUse means a post that is still going to be reviewed or published uses the media.
+var ErrMediaInUse = errors.New("media is used by a post that is not finished")
+
+// inUseSQL is true when some unfinished post (anything but PUBLISHED or REJECTED: a FAILED post can
+// be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
+const inUseSQL = `SELECT EXISTS (SELECT 1 FROM posts p, unnest(p.media_urls) AS u
+	WHERE p.status NOT IN ('PUBLISHED','REJECTED') AND u LIKE '%/media/' || $1::text || '%')`
+
+// AdoptMedia takes over a file a trusted writer left in the bucket's staging area: it checks what
+// the file is (validate gets its first bytes and size, and returns the MIME type), moves it into the
+// media store and records it. The bytes never pass through this process.
+func (s *Store) AdoptMedia(ctx context.Context, staged, createdBy string, validate func(head []byte, size int64) (string, error)) (*Media, error) {
+	a, ok := s.blobs.(blob.Adopter)
+	if !ok {
+		return nil, invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
+	}
+	st, err := a.Stat(ctx, staged)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, invalid("no such staged file: " + staged)
+	}
+	if err != nil {
+		return nil, invalid(err.Error())
+	}
+	mt, err := validate(st.Head, st.Size)
+	if err != nil {
+		return nil, invalid(err.Error())
+	}
+	id := uuid.New()
+	if err := a.Adopt(ctx, staged, id.String()); err != nil {
+		return nil, err
+	}
+	m := &Media{ID: id, MimeType: mt, SizeBytes: int(st.Size), Source: "upload", CreatedBy: createdBy}
+	_, err = s.pool.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, created_by, storage)
+		VALUES ($1,$2,NULL,$3,$4,'',$5,$6)`, id, mt, st.Size, m.Source, createdBy, s.blobs.Kind())
+	if err != nil {
+		_ = s.blobs.Delete(ctx, id.String()) // do not leave an object no row points to
+		return nil, err
+	}
+	return m, nil
+}
+
+// DeleteMedia removes a media item: its row and its bytes. It refuses (ErrMediaInUse) while an
+// unfinished post still uses it.
+func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
+	_, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	var used bool
+	if err := s.pool.QueryRow(ctx, inUseSQL, id.String()).Scan(&used); err != nil {
+		return err
+	}
+	if used {
+		return ErrMediaInUse
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM media WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if kind != blob.KindDB {
+		if b, err := s.blobFor(kind); err == nil {
+			if err := b.Delete(ctx, id.String()); err != nil {
+				return fmt.Errorf("media %s removed, but its file could not be deleted: %w", id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// PruneMedia deletes media created more than olderThan ago that no unfinished post uses. With
+// dryRun it only counts. It returns how many items it deleted (or would delete).
+func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun bool) (int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT m.id FROM media m
+		WHERE m.created_at < NOW() - make_interval(secs => $1)
+		  AND NOT EXISTS (SELECT 1 FROM posts p, unnest(p.media_urls) AS u
+			WHERE p.status NOT IN ('PUBLISHED','REJECTED') AND u LIKE '%/media/' || m.id::text || '%')
+		ORDER BY m.created_at`, olderThan.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || dryRun {
+		return len(ids), err
+	}
+	n := 0
+	for _, id := range ids {
+		switch err := s.DeleteMedia(ctx, id); {
+		case err == nil:
+			n++
+		case errors.Is(err, ErrMediaInUse), errors.Is(err, domain.ErrNotFound):
+			// became used, or already gone, since the list was read
+		default:
+			return n, err
+		}
+	}
+	return n, nil
+}

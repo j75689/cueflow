@@ -81,6 +81,9 @@ type Scheduler struct {
 	Queue jobs.Queue
 	// External marks that an outside clock calls Tick; there is no in-process cron.
 	External bool
+	// MediaRetention, when positive, makes Tick delete media older than that which no unfinished
+	// post uses.
+	MediaRetention time.Duration
 
 	// OnTaskSpawned is called after a schedule creates a task (main wires it to the crew).
 	OnTaskSpawned func(ctx context.Context, t *store.Task)
@@ -280,6 +283,13 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		}
 	}
 	_ = s.store.PurgeRunTokens(ctx)
+	if s.MediaRetention > 0 {
+		if n, err := s.store.PruneMedia(ctx, s.MediaRetention, false); err != nil {
+			s.logger.Warn("prune old media", "err", err)
+		} else if n > 0 {
+			s.logger.Info("deleted old media", "count", n)
+		}
+	}
 	return nil
 }
 

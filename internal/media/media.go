@@ -78,14 +78,22 @@ func Sniff(data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", errors.New("file is empty")
 	}
-	mt := http.DetectContentType(data)
+	return SniffHead(data[:min(len(data), 512)], int64(len(data)))
+}
+
+// SniffHead is Sniff for a file that is not in memory: its first bytes and its size are enough.
+func SniffHead(head []byte, size int64) (string, error) {
+	if size == 0 || len(head) == 0 {
+		return "", errors.New("file is empty")
+	}
+	mt := http.DetectContentType(head)
 	switch {
 	case slices.Contains(imageTypes, mt):
-		if len(data) > MaxImageBytes {
+		if size > MaxImageBytes {
 			return "", fmt.Errorf("image is larger than %d MB", MaxImageBytes>>20)
 		}
 	case IsVideo(mt):
-		if len(data) > MaxVideoBytes {
+		if size > MaxVideoBytes {
 			return "", fmt.Errorf("video is larger than %d MB", MaxVideoBytes>>20)
 		}
 	default:

@@ -60,8 +60,11 @@ type Server struct {
 	// Cloud deployment: when InternalAuth is set, /internal/tick and /internal/work/{kind}/{id}
 	// are served behind it (Cloud Scheduler and Cloud Tasks call them with Google ID tokens).
 	InternalAuth func(http.Handler) http.Handler
-	Handlers     jobs.Handlers
-	Tick         func(context.Context) error
+	// MediaRegisterAuth guards POST /internal/media/register, which only the Reels renderer's account
+	// may call (not the Cloud Tasks / Scheduler accounts InternalAuth lets in).
+	MediaRegisterAuth func(http.Handler) http.Handler
+	Handlers          jobs.Handlers
+	Tick              func(context.Context) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -149,6 +152,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Post("/media", s.uploadMedia)
 		r.Post("/media/generate", s.generateMedia)
+		r.Delete("/media/{id}", s.deleteMedia)
 
 		r.Get("/schedules", s.listSchedules)
 		r.Post("/schedules", s.createSchedule)
@@ -161,7 +165,7 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
-	if s.InternalAuth != nil {
+	if s.InternalAuth != nil || s.MediaRegisterAuth != nil {
 		r.Route("/internal", s.internalRoutes)
 	}
 	// Runners authenticate with their own tokens, not the admin token.
@@ -371,6 +375,8 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, store.ErrMediaInUse):
+		writeError(w, http.StatusConflict, "in_use", "a post that is not yet published or rejected still uses this media; remove it from the post first")
 	case errors.Is(err, domain.ErrVersionConflict):
 		writeError(w, http.StatusConflict, "version_conflict", "the post was changed by someone else; reload and try again")
 	case errors.As(err, &te):

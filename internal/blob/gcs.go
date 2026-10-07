@@ -32,8 +32,9 @@ type GCS struct {
 }
 
 var (
-	_ Store  = (*GCS)(nil)
-	_ Signer = (*GCS)(nil)
+	_ Store   = (*GCS)(nil)
+	_ Signer  = (*GCS)(nil)
+	_ Adopter = (*GCS)(nil)
 )
 
 // NewGCS connects with application default credentials (or STORAGE_EMULATOR_HOST). prefix may be
@@ -248,5 +249,64 @@ func (r *gcsReader) dropReader() {
 
 func (r *gcsReader) Close() error {
 	r.dropReader()
+	return nil
+}
+
+// stagedObject checks a staging name ("uploads/<file>", one level, no tricks) and returns its handle.
+// Staged files live at the bucket's top level, outside this store's prefix.
+func (g *GCS) stagedObject(name string) (*storage.ObjectHandle, error) {
+	file, ok := strings.CutPrefix(name, StagingPrefix)
+	if !ok || file == "" || strings.ContainsAny(file, `/\`) || file == "." || file == ".." {
+		return nil, fmt.Errorf("blob: %q is not a staged file (expected %s<file>)", name, StagingPrefix)
+	}
+	return g.client.Bucket(g.bucket).Object(name), nil
+}
+
+// Stat reads a staged file's size and first bytes.
+func (g *GCS) Stat(ctx context.Context, name string) (*Staged, error) {
+	o, err := g.stagedObject(name)
+	if err != nil {
+		return nil, err
+	}
+	attrs, err := o.Attrs(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	st := &Staged{Size: attrs.Size}
+	if attrs.Size == 0 {
+		return st, nil
+	}
+	r, err := o.NewRangeReader(ctx, 0, min(attrs.Size, 512))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	st.Head, err = io.ReadAll(r)
+	return st, err
+}
+
+// Adopt copies a staged file to id inside this store (a copy inside Google Storage: the bytes do not
+// travel) and then deletes the staged one.
+func (g *GCS) Adopt(ctx context.Context, name, id string) error {
+	src, err := g.stagedObject(name)
+	if err != nil {
+		return err
+	}
+	dst, err := g.object(id)
+	if err != nil {
+		return err
+	}
+	if _, err := dst.CopierFrom(src).Run(ctx); err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := src.Delete(ctx); err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return err
+	}
 	return nil
 }

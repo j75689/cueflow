@@ -36,6 +36,26 @@ type Signer interface {
 	SignedURL(ctx context.Context, id string, ttl time.Duration, mimeType string) (string, error)
 }
 
+// StagingPrefix is where a trusted outside writer (the Reels renderer) leaves a finished file for the
+// server to adopt; a bucket lifecycle rule deletes whatever is never adopted.
+const StagingPrefix = "uploads/"
+
+// Staged describes a file waiting in the staging area.
+type Staged struct {
+	Size int64
+	// Head is the first bytes of the file (up to 512), enough to tell what kind of file it is.
+	Head []byte
+}
+
+// Adopter is implemented by backends where another party can drop a file and ask the server to take
+// it over without the bytes passing through the server.
+type Adopter interface {
+	// Stat reports a staged file; name is "uploads/<file>".
+	Stat(ctx context.Context, name string) (*Staged, error)
+	// Adopt moves a staged file into the store under id and removes the staged copy.
+	Adopt(ctx context.Context, name, id string) error
+}
+
 // ErrNotFound means the backend has no bytes for that id.
 var ErrNotFound = errors.New("blob: not found")
 
