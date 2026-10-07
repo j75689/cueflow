@@ -376,11 +376,16 @@ Images stored by CueFlow. Posts reference them in `media_urls` as `/media/{id}`.
 default; set `CUEFLOW_MEDIA_STORAGE=file:///data/media` to keep new media on disk, and move existing media with
 `cueflow media migrate --to file:///data/media` (or `--to db` to move it back). The URLs do not change.
 
+Old media can be pruned: `cueflow media prune --older-than 90d [--dry-run]` deletes media older than that which no unfinished post uses. With `CUEFLOW_MEDIA_RETENTION_DAYS` set (and `CUEFLOW_TICK=external`) the same pruning runs on every tick.
+
+**Registering a file written straight to the bucket** (GCS storage only): a trusted service (the reels renderer) writes `gs://<bucket>/uploads/<file>` itself and then calls `POST /internal/media/register` with `{"object":"uploads/<file>"}` and a Google ID token (audience = the CueFlow URL) of an account listed in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`. CueFlow checks the type and size from the first bytes, moves the object into the media store inside Google Storage (the bytes do not pass through CueFlow) and answers `201` like `POST /media`. `400` for a missing object, a name outside `uploads/`, or a file that is not a supported image or MP4; `401/403` for a bad token. Give the bucket a lifecycle rule that deletes `uploads/` after a day to clean up refused files.
+
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | POST | `/media` | multipart field `file` | PNG, JPEG, WebP or GIF up to 10 MB, or MP4 up to 100 MB → `201 {"id","url","mime_type","size_bytes","source":"upload","prompt":""}`; `url` is `/media/{id}` for images and `/media/{id}.mp4` for videos |
 | POST | `/media/generate` | `{prompt, aspect?, connector_id?}` | `aspect` one of `1:1`, `4:5`, `3:4`, `9:16`, `16:9`, `4:3` (default `1:1`); `connector_id` defaults to the first active `image` connector (`400` if there is none). `502 upstream_error` when the provider fails. Same response with `"source":"generated"` |
 | GET | `/media/{id}` | | Outside `/api/v1` and without auth (publishers fetch it); the random id is the capability. Long-lived cache headers; Range requests supported (video seeking) |
+| DELETE | `/media/{id}` | | Removes the row and its file (`{id}` may end in `.mp4`) → `204`. `409 in_use` while a post that is not `PUBLISHED` or `REJECTED` still lists it in `media_urls`; `404` when unknown |
 
 ---
 

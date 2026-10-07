@@ -85,6 +85,7 @@ type env struct {
 	crew   *crew.Crew
 	sched  *scheduler.Scheduler
 	api    *httptest.Server
+	server *api.Server
 	mock   *postizmock.Server
 }
 
@@ -121,11 +122,12 @@ func setup(t *testing.T) *env {
 	mockSrv := httptest.NewServer(mock.Handler())
 	t.Cleanup(mockSrv.Close)
 
-	apiSrv := httptest.NewServer((&api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
-		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken}).Handler())
+	server := &api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
+		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken}
+	apiSrv := httptest.NewServer(server.Handler())
 	t.Cleanup(apiSrv.Close)
 
-	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, mock: mock}
+	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
 	t.Setenv("POSTIZ_URL", mockSrv.URL)
 	return e
 }
@@ -468,4 +470,11 @@ func TestRejectWithoutReason(t *testing.T) {
 	if code := e.do("POST", "/posts/"+b.ID.String()+"/reject", map[string]any{"reason": " off-brand "}, &got); code != 200 || got.ReviewNote != "off-brand" {
 		t.Fatalf("reject with reason: %d %q", code, got.ReviewNote)
 	}
+}
+
+// apiHandler is a second front end over the same server, after tweak (for routes setup leaves off).
+func (e *env) apiHandler(tweak func(*api.Server)) http.Handler {
+	s := *e.server
+	tweak(&s)
+	return s.Handler()
 }

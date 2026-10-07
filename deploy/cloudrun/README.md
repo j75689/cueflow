@@ -157,3 +157,12 @@ Give the backup bucket a lifecycle rule (for example delete after 30 days).
 At low traffic Cloud Run, Cloud Tasks and Cloud Scheduler stay in their free tiers; the bucket costs
 cents; Supabase Free is $0. The service scales to zero but keeps an instance while a request is open,
 and the dashboard's live-update stream is a request: leave the dashboard open and the instance stays up.
+
+## Renderers that write to the bucket
+
+A service that produces big files (the reels renderer) should not push them through CueFlow. Give it its own
+service account with `roles/storage.objectCreator` on the bucket, let it write `uploads/<uuid>.mp4`, then have
+it call `POST /internal/media/register` with a Google ID token (audience = the CueFlow service URL). Put that
+account in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`, and add a bucket lifecycle rule that deletes `uploads/` objects
+after one day (they are only there until registered). Set `CUEFLOW_MEDIA_RETENTION_DAYS` to have old, unused
+media pruned on every tick. See `docs/api.md`.
