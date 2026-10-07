@@ -183,5 +183,11 @@ func (s *Server) CallTool(ctx context.Context, name string, args json.RawMessage
 		return "", false, err
 	}
 	defer cs.Close()
+	// Servers such as GitHub's want parameters mirrored into Mcp-Param-* headers (x-mcp-header in
+	// the tool's schema). The client only knows which from a tools/list on this same session.
+	// A failed listing is not fatal: the call may still work, and its own error is the useful one.
+	if s.opts.Transport != mcpx.TransportStdio {
+		_, _ = mcpx.ListTools(ctx, cs)
+	}
 	return mcpx.CallText(ctx, cs, name, args)
 }
