@@ -276,7 +276,7 @@ func (s *Server) createAgentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": t.ID, "name": t.Name, "token": plain, "created_at": t.CreatedAt,
-		"mcp_url": strings.TrimRight(s.PublicURL, "/") + MCPPath})
+		"mcp_url": strings.TrimRight(s.machineURL(), "/") + MCPPath})
 }
 
 func (s *Server) revokeAgentToken(w http.ResponseWriter, r *http.Request) {

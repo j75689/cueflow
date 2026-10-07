@@ -53,7 +53,7 @@ func (s *Server) createRegistration(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	url := strings.TrimRight(s.PublicURL, "/")
+	url := strings.TrimRight(s.machineURL(), "/")
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token": token, "expires_at": exp, "url": url,
 		"command": fmt.Sprintf("cueflow runner register --url %s --token %s --name <name>", url, token),
