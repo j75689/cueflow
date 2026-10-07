@@ -62,9 +62,11 @@ g iam service-accounts describe "$RENDER_SA" >/dev/null 2>&1 \
 g storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member "serviceAccount:${RENDER_SA}" --role roles/storage.objectCreator \
   --condition="title=uploads-only,expression=resource.name.startsWith(\"projects/_/buckets/${BUCKET}/objects/uploads/\")" >/dev/null
-# Gemini text-to-speech runs on Vertex AI.
-g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:${RENDER_SA}" \
-  --role roles/aiplatform.user --condition=None >/dev/null
+# Gemini text-to-speech runs on Vertex AI and bills the project (GOOGLE_CLOUD_QUOTA_PROJECT).
+for role in roles/aiplatform.user roles/serviceusage.serviceUsageConsumer; do
+  g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:${RENDER_SA}" \
+    --role "$role" --condition=None >/dev/null
+done
 # Files nobody registered (refused, or the call failed) go away after a day; any other rule stays.
 echo "== lifecycle: uploads/ expires after 1 day"
 LC=$(mktemp)
