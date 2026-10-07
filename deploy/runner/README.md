@@ -41,6 +41,7 @@ repositories and permissions the work needs and the container has nothing else i
 
 | | |
 |---|---|
+| Claude Code settings | `claude-settings.json` is mounted read-only as its managed settings: no `Co-Authored-By` on commits and no footer on pull requests. Edit it and `docker compose up -d --force-recreate` |
 | Credentials | only `.env`: the Claude token and `GH_TOKEN` (`gh` and `git push` use it; `.env` is never copied into the image) |
 | Files | `/work` (volume) and `/config` (volume); the root file system is read-only and the home directory is a tmpfs |
 | Process | non-root, no capabilities, no new privileges, 4 GB memory, 512 processes |

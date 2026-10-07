@@ -23,6 +23,8 @@ services:
     volumes:
       - config:/config # runner.json: the credentials this runner got when it registered
       - work:/work     # what the agents clone and edit; `docker compose down -v` wipes it
+      # Claude Code's managed settings: no "Co-Authored-By" on commits and no footer on pull requests.
+      - ./claude-settings.json:/etc/claude-code/managed-settings.json:ro
     tmpfs:
       - /tmp
       - /home/nonroot:uid=65532,gid=65532,mode=0700 # Claude Code's own state, gone on restart
