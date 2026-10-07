@@ -218,6 +218,8 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
+| `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | Cloudflare Access (Zero Trust) login for the dashboard: your team domain and the application's AUD tag. Both or neither. Requests with a valid Access JWT are accepted like the admin token; see [`deploy/cloudrun`](deploy/cloudrun/README.md) |
+| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
 | `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |

@@ -11,7 +11,8 @@ func base(t *testing.T) {
 	t.Setenv("CUEFLOW_SECRET_KEY", strings.Repeat("ab", 32))
 	for _, k := range []string{"CUEFLOW_QUEUE", "CUEFLOW_TICK", "CUEFLOW_TASKS_QUEUE", "CUEFLOW_TASKS_TARGET_URL",
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
-		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS"} {
+		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
+		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD"} {
 		t.Setenv(k, "")
 	}
 }
@@ -84,5 +85,43 @@ func TestCloudRunPortSetsTheListenAddress(t *testing.T) {
 	c, err = Load()
 	if err != nil || c.Addr != "127.0.0.1:9999" {
 		t.Fatalf("an explicit address wins over PORT: %v %v", c, err)
+	}
+}
+
+func TestCloudflareAccessNeedsBothSettings(t *testing.T) {
+	base(t)
+	t.Setenv("CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "acme.cloudflareaccess.com")
+	if _, err := Load(); err == nil {
+		t.Error("a team domain without an audience must be refused")
+	}
+	base(t)
+	t.Setenv("CUEFLOW_CF_ACCESS_AUD", "aud")
+	if _, err := Load(); err == nil {
+		t.Error("an audience without a team domain must be refused")
+	}
+	base(t)
+	t.Setenv("CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "acme.cloudflareaccess.com")
+	t.Setenv("CUEFLOW_CF_ACCESS_AUD", "aud")
+	c, err := Load()
+	if err != nil || c.CFAccessTeamDomain == "" || c.CFAccessAudience != "aud" {
+		t.Fatalf("both set: %+v %v", c, err)
+	}
+}
+
+func TestDirectURLDefaultsToPublicAndFeedsMedia(t *testing.T) {
+	base(t)
+	t.Setenv("CUEFLOW_PUBLIC_URL", "https://people.example/")
+	c, err := Load()
+	if err != nil || c.DirectURL != "https://people.example" || c.MediaBaseURL != "https://people.example" {
+		t.Fatalf("defaults: direct=%q media=%q %v", c.DirectURL, c.MediaBaseURL, err)
+	}
+	t.Setenv("CUEFLOW_DIRECT_URL", "https://direct.example/")
+	c, err = Load()
+	if err != nil || c.DirectURL != "https://direct.example" || c.MediaBaseURL != "https://direct.example" {
+		t.Fatalf("direct URL: direct=%q media=%q %v", c.DirectURL, c.MediaBaseURL, err)
+	}
+	t.Setenv("CUEFLOW_MEDIA_BASE_URL", "https://media.example")
+	if c, _ := Load(); c.MediaBaseURL != "https://media.example" {
+		t.Errorf("an explicit media URL wins: %q", c.MediaBaseURL)
 	}
 }

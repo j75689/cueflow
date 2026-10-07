@@ -177,6 +177,8 @@ Port 刻意只綁 localhost。想用手機審核的話，請用 SSH tunnel（`ss
 | `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |
+| `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | 以 Cloudflare Access（Zero Trust）登入儀表板：填 team domain 與應用程式的 AUD。兩者要一起設或都不設。帶有效 Access JWT 的請求等同 admin token，見 [`deploy/cloudrun`](deploy/cloudrun/README.md) |
+| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
 | `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序的資料庫連線上限（小型資料庫建議每個實例約 5） |
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |

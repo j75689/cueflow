@@ -8,6 +8,12 @@ Auth: if the server was started with `CUEFLOW_ADMIN_TOKEN`, every `/api/*` reque
 `Authorization: Bearer <token>` (the SSE endpoint also accepts `?token=<token>`). The UI stores the token
 in `localStorage["cueflow.token"]` and shows a token prompt on a `401`.
 
+With `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` and `CUEFLOW_CF_ACCESS_AUD` set, a request is also accepted when it carries a
+valid Cloudflare Access JWT for that application (the `Cf-Access-Jwt-Assertion` header, or the `CF_Authorization`
+cookie a signed-in browser sends): the token or the login is enough, either one. A JWT for another application,
+another team, or an expired one is refused. `/api/v1/health`, `/api/runner/*`, `/mcp*`, `/media/*` and `/internal/*`
+are not affected: they are open or authenticate themselves.
+
 Orgs: agents, tasks, schedules, pipelines, posts and runs belong to an org. List and create endpoints for
 them take `?org=<id or slug>`; without it they use the default org (the oldest). An unknown org is a
 `400 invalid_argument`. Endpoints that address one item by id work in any org. Connectors, source items,

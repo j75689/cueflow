@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/cfaccess"
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/domain"
@@ -47,8 +48,14 @@ type Server struct {
 	AdminToken string
 	// MCPToken enables the operator MCP endpoint (CUEFLOW_MCP_TOKEN); empty disables it.
 	MCPToken string
-	// PublicURL is how runners reach this server; it goes into registration commands.
+	// PublicURL is how people reach this server (links in emails).
 	PublicURL string
+	// DirectURL is how machines reach it (runner registration commands, MCP setup commands); empty
+	// means PublicURL. They differ when browsers go through a login gate such as Cloudflare Access.
+	DirectURL string
+	// Access, when set, lets requests through that carry a valid Cloudflare Access JWT, as an
+	// alternative to the admin token.
+	Access *cfaccess.Verifier
 
 	// Cloud deployment: when InternalAuth is set, /internal/tick and /internal/work/{kind}/{id}
 	// are served behind it (Cloud Scheduler and Cloud Tasks call them with Google ID tokens).
@@ -182,23 +189,49 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 	})
 }
 
-// auth enforces CUEFLOW_ADMIN_TOKEN when configured.
+// auth enforces the admin token (CUEFLOW_ADMIN_TOKEN) and/or Cloudflare Access login when
+// configured. Either is enough: browsers log in through Access, scripts send the token.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.AdminToken == "" || r.URL.Path == "/api/v1/health" {
+		if (s.AdminToken == "" && s.Access == nil) || r.URL.Path == "/api/v1/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if tok == "" && r.URL.Path == "/api/v1/events" {
-			tok = r.URL.Query().Get("token")
+		if s.Access != nil {
+			email, err := s.Access.Verify(r)
+			if err == nil {
+				s.Logger.Debug("cloudflare access login", "user", email, "path", r.URL.Path)
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !errors.Is(err, cfaccess.ErrNoToken) {
+				s.Logger.Warn("rejected Cloudflare Access token", "err", err)
+			}
 		}
-		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.AdminToken)) != 1 {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid admin token")
-			return
+		if s.AdminToken != "" {
+			tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if tok == "" && r.URL.Path == "/api/v1/events" {
+				tok = r.URL.Query().Get("token")
+			}
+			if subtle.ConstantTimeCompare([]byte(tok), []byte(s.AdminToken)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
-		next.ServeHTTP(w, r)
+		msg := "missing or invalid admin token"
+		if s.Access != nil {
+			msg = "sign in through Cloudflare Access, or send the admin token"
+		}
+		writeError(w, http.StatusUnauthorized, "unauthorized", msg)
 	})
+}
+
+// machineURL is the address runners and MCP clients should use.
+func (s *Server) machineURL() string {
+	if s.DirectURL != "" {
+		return s.DirectURL
+	}
+	return s.PublicURL
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

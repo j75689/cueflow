@@ -61,6 +61,13 @@ type Config struct {
 	// InternalServiceAccounts are the service account emails allowed to call /internal/*
 	// (Cloud Tasks and Cloud Scheduler identities).
 	InternalServiceAccounts []string
+	// CFAccessTeamDomain and CFAccessAudience turn on Cloudflare Access login: requests carrying a
+	// valid Access JWT for that application are accepted like requests with the admin token.
+	CFAccessTeamDomain string
+	CFAccessAudience   string
+	// DirectURL is how machines reach this server (runners, MCP clients, publishers fetching media):
+	// they cannot log in through a browser-oriented gate such as Cloudflare Access. Default PublicURL.
+	DirectURL string
 	// DBMaxConns caps this process's connection pool (0 = driver default). Set it low (e.g. 5) in
 	// the cloud so several instances stay under a small database's connection limit.
 	DBMaxConns int
@@ -88,7 +95,13 @@ func Load() (*Config, error) {
 	if os.Getenv("CUEFLOW_ADDR") == "" && os.Getenv("PORT") != "" {
 		c.Addr = "0.0.0.0:" + os.Getenv("PORT") // Cloud Run tells the container its port this way
 	}
-	c.MediaBaseURL = env("CUEFLOW_MEDIA_BASE_URL", c.PublicURL)
+	c.DirectURL = strings.TrimRight(env("CUEFLOW_DIRECT_URL", c.PublicURL), "/")
+	c.MediaBaseURL = env("CUEFLOW_MEDIA_BASE_URL", c.DirectURL)
+	c.CFAccessTeamDomain = strings.TrimSpace(os.Getenv("CUEFLOW_CF_ACCESS_TEAM_DOMAIN"))
+	c.CFAccessAudience = strings.TrimSpace(os.Getenv("CUEFLOW_CF_ACCESS_AUD"))
+	if (c.CFAccessTeamDomain == "") != (c.CFAccessAudience == "") {
+		return nil, errors.New("Cloudflare Access login needs both CUEFLOW_CF_ACCESS_TEAM_DOMAIN and CUEFLOW_CF_ACCESS_AUD")
+	}
 	c.MediaStorage = env("CUEFLOW_MEDIA_STORAGE", "")
 	c.Queue = env("CUEFLOW_QUEUE", "local")
 	c.Tick = env("CUEFLOW_TICK", "internal")

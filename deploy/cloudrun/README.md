@@ -104,18 +104,41 @@ Things that do **not** carry over by themselves:
   Give them a `runner_pool` runtime (your own machine runs the agent) or switch them to the built-in loop.
 - Runners must be re-registered against the new URL (`cueflow runner register --url ...`).
 
-## 6. Custom domain and Cloudflare Access (optional)
+## 6. Login with Cloudflare Access (Zero Trust)
 
-Cloud Run's `*.run.app` URL works as is. To put a domain and Cloudflare Access in front, serve the
-dashboard through Access and **bypass** the paths that authenticate themselves:
+Without this the dashboard asks for `CUEFLOW_ADMIN_TOKEN`. With it, people sign in on Cloudflare's
+login page (your email, Google, a one-time PIN...) and the dashboard opens without a token.
 
-- `/api/runner/*` (runner tokens), `/mcp*` (MCP and agent tokens), `/media/*` (fetched by social platforms),
-- `/internal/*` only if `CUEFLOW_TASKS_TARGET_URL` points at the Cloudflare hostname (Cloud Tasks and
-  Scheduler call the `run.app` URL directly, and the Scheduler audience is that URL).
+How it fits together:
 
-Keep `CUEFLOW_TASKS_TARGET_URL` and the Scheduler URL on the `run.app` address: the Google ID token's
-audience must equal it. Set `CUEFLOW_PUBLIC_URL` to the hostname people use (it appears in links and
-runner registration commands).
+```
+browser ─► your domain ─► Cloudflare Access (login) ─► Worker ─► Cloud Run service
+                                                                  └ checks the Access JWT itself
+machines (runners, MCP clients, social platforms) ─► the run.app URL directly (their own tokens)
+```
+
+1. **A hostname** on a Cloudflare zone, served by a small Worker that forwards to the service
+   (`cueflow/edge/` in the IaC-deployments repo, the same shape as CueSocial's).
+2. **An Access application** for that hostname in Zero Trust → Access → Applications, with an Allow
+   policy for the people who may sign in. Note its **Application Audience (AUD) tag** and your team
+   domain (`<team>.cloudflareaccess.com`).
+3. **Tell the service** (in the manifest's `env`):
+   - `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` and `CUEFLOW_CF_ACCESS_AUD`: the service then accepts requests that
+     carry a valid Access JWT for that application, **or** the admin token (scripts keep working).
+   - `CUEFLOW_PUBLIC_URL`: the Access hostname, for links people click (emails, the dashboard).
+   - `CUEFLOW_DIRECT_URL`: the `run.app` URL, for what machines use: runner registration commands, the
+     MCP setup command shown for agent tokens, and the URL publishers fetch media from.
+     Leave `CUEFLOW_TASKS_TARGET_URL` on the `run.app` URL too (Cloud Tasks and Scheduler call it
+     directly, and their token audience must match it exactly).
+
+Why the service checks the JWT itself: the `run.app` address stays public and does not pass through
+Cloudflare, so trusting "it came through Access" would let anyone skip the login. Requests to
+`/api/v1/*` without a valid Access JWT still need the admin token; `/api/runner/*`, `/mcp*`, `/media/*`
+and `/internal/*` have their own tokens and never needed Access, which is why machines use the direct URL
+and no bypass rules are needed in Cloudflare.
+
+If the Access session expires while the dashboard is open, requests fail until you reload the page
+(Cloudflare answers with a redirect to its login).
 
 ## 7. Backups
 

@@ -29,6 +29,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/blob"
+	"github.com/j75689/cueflow/internal/cfaccess"
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/crew"
@@ -196,7 +197,11 @@ func serve() error {
 	}
 	apiSrv := &api.Server{
 		Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
-		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL,
+		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
+	}
+	if cfg.CFAccessTeamDomain != "" {
+		apiSrv.Access = cfaccess.New(ctx, cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
+		logger.Info("Cloudflare Access login enabled", "team", cfg.CFAccessTeamDomain)
 	}
 	if cfg.Queue == "cloudtasks" {
 		q, err := cloudtasks.New(cloudtasks.Config{Queue: cfg.TasksQueue, TargetURL: cfg.TasksTargetURL,
