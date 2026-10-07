@@ -173,7 +173,7 @@ func (s *Server) Handler() http.Handler {
 	r.Handle(MCPPath, s.mcpHandler())
 	// Stored images, public by unguessable id so publishers can fetch them.
 	r.Get(media.PathPrefix+"{file}", s.serveMedia)
-	r.Handle("/*", webui.Handler())
+	r.Handle("/*", s.uiGuard(webui.Handler()))
 	return r
 }
 
@@ -223,6 +223,25 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			msg = "sign in through Cloudflare Access, or send the admin token"
 		}
 		writeError(w, http.StatusUnauthorized, "unauthorized", msg)
+	})
+}
+
+// uiGuard keeps the dashboard's pages behind Cloudflare Access when it is configured. The service's
+// own run.app address does not pass through Access, so without this anyone could load the pages
+// there. They hold no data (the API needs the token or a login), but there is no reason to show them.
+func (s *Server) uiGuard(next http.Handler) http.Handler {
+	if s.Access == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := s.Access.Verify(r); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintf(w, "Sign in through Cloudflare Access: %s\n", s.PublicURL)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

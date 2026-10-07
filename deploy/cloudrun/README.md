@@ -132,8 +132,9 @@ machines (runners, MCP clients, social platforms) ─► the run.app URL directl
      directly, and their token audience must match it exactly).
 
 Why the service checks the JWT itself: the `run.app` address stays public and does not pass through
-Cloudflare, so trusting "it came through Access" would let anyone skip the login. Requests to
-`/api/v1/*` without a valid Access JWT still need the admin token; `/api/runner/*`, `/mcp*`, `/media/*`
+Cloudflare, so trusting "it came through Access" would let anyone skip the login. The dashboard's pages
+require the login too, so the `run.app` address shows a visitor only "sign in through Cloudflare Access".
+Requests to `/api/v1/*` without a valid Access JWT still need the admin token; `/api/runner/*`, `/mcp*`, `/media/*`
 and `/internal/*` have their own tokens and never needed Access, which is why machines use the direct URL
 and no bypass rules are needed in Cloudflare.
 
