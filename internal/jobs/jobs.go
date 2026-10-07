@@ -31,10 +31,12 @@ const (
 	KindPipeline Kind = "pipeline"
 	// KindSchedule creates the task of a recurring task schedule; id is the schedule id.
 	KindSchedule Kind = "schedule"
+	// KindApproval makes one approved tool call; id is the approval id.
+	KindApproval Kind = "approval"
 )
 
 // Kinds lists every kind the server handles.
-var Kinds = []Kind{KindCrew, KindDispatch, KindPipeline, KindSchedule}
+var Kinds = []Kind{KindCrew, KindDispatch, KindPipeline, KindSchedule, KindApproval}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {

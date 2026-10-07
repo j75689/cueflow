@@ -542,7 +542,7 @@ function ApprovalCard({
     setBusy(decision);
     try {
       await api.decideApproval(m.task_id, approval.id, decision, note);
-      toast.success(decision === "approve" ? `${tool} ran` : "Rejected");
+      toast.success(decision === "approve" ? `${tool} approved, running` : "Rejected");
       onDecided();
     } catch (e) {
       toast.error(e);
@@ -612,7 +612,11 @@ function ApprovalCard({
                 className="text-emerald-700 hover:underline dark:text-emerald-400"
                 onClick={() => setShowResult((v) => !v)}
               >
-                {approval?.is_error ? "Approved · failed" : "Approved · ran"}{" "}
+                {approval?.is_error
+                  ? "Approved · failed"
+                  : approval?.result
+                    ? "Approved · ran"
+                    : "Approved · running…"}{" "}
                 {showResult ? "▾" : "▸"}
               </button>
               {showResult && (

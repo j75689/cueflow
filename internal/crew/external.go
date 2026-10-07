@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -165,37 +167,81 @@ func (c *Crew) DecideApproval(ctx context.Context, taskID, approvalID uuid.UUID,
 	if !claimed {
 		return nil, &store.ValidationError{Msg: "this call was already " + ap.Status}
 	}
+	if approve {
+		// The call can take minutes (a render): the decision is recorded and the answer returned now,
+		// and the call runs from the queue (or a goroutine without one).
+		c.startApproval(approvalID)
+		return c.store.GetToolApproval(ctx, approvalID)
+	}
 	noteText := ""
 	if n := strings.TrimSpace(note); n != "" {
 		noteText = fmt.Sprintf(" Their note: %q.", n)
 	}
-	if approve {
-		text, isErr := "", false
-		if ap.ConnectorID == nil {
-			text, isErr = "the tool server was deleted", true
-		} else {
-			var cerr error
-			text, isErr, cerr = c.callExternal(context.WithoutCancel(ctx), *ap.ConnectorID, ap.Tool, ap.Arguments)
-			if cerr != nil {
-				text, isErr = cerr.Error(), true
-			}
-		}
-		if r := []rune(text); len(r) > maxToolResult {
-			text = string(r[:maxToolResult]) + "… (truncated)"
-		}
-		_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
-		outcome := "It ran and returned"
-		if isErr {
-			outcome = "It ran but failed with"
-		}
-		c.system(ctx, taskID, fmt.Sprintf("A human approved the call to %s on %s.%s %s:\n%s\nDo not call it again for this request.",
-			ap.Tool, ap.ServerName, noteText, outcome, clip(text, 4000)))
-	} else {
-		c.system(ctx, taskID, fmt.Sprintf("A human rejected the call to %s on %s.%s Do not retry it; continue without it or ask the human.",
-			ap.Tool, ap.ServerName, noteText))
-	}
+	c.system(ctx, taskID, fmt.Sprintf("A human rejected the call to %s on %s.%s Do not retry it; continue without it or ask the human.",
+		ap.Tool, ap.ServerName, noteText))
 	c.resumeAfterApproval(ctx, taskID)
 	return c.store.GetToolApproval(ctx, approvalID)
+}
+
+// startApproval runs an approved call out of band: as a queued job in the cloud (a request that
+// answers a browser would be cut off by the proxy long before a render ends), else in a goroutine.
+func (c *Crew) startApproval(id uuid.UUID) {
+	if c.Queue != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := c.Queue.Enqueue(ctx, jobs.KindApproval, id, 0); err != nil {
+			// Better a slow answer than a call nobody will ever make.
+			c.logger.Error("enqueue approved call, running it here", "approval", id, "err", err)
+			_ = c.RunApproval(context.WithoutCancel(ctx), id)
+		}
+		return
+	}
+	go func() { _ = c.RunApproval(context.Background(), id) }()
+}
+
+// RunApproval is the jobs.KindApproval handler: it makes an approved tool call, records the result
+// in the thread and resumes the agent once no other approval is pending. A call that already has a
+// result (a duplicate delivery) or is not approved is left alone.
+func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
+	ap, err := c.store.GetToolApproval(ctx, approvalID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if ap.Status != "approved" || ap.Result != "" {
+		return nil
+	}
+	noteText := ""
+	if n := strings.TrimSpace(ap.Note); n != "" {
+		noteText = fmt.Sprintf(" Their note: %q.", n)
+	}
+	text, isErr := "", false
+	if ap.ConnectorID == nil {
+		text, isErr = "the tool server was deleted", true
+	} else {
+		var cerr error
+		text, isErr, cerr = c.callExternal(ctx, *ap.ConnectorID, ap.Tool, ap.Arguments)
+		if cerr != nil {
+			text, isErr = cerr.Error(), true
+		}
+	}
+	if r := []rune(text); len(r) > maxToolResult {
+		text = string(r[:maxToolResult]) + "… (truncated)"
+	}
+	if text == "" {
+		text = "(no output)" // an empty result would read as "still running"
+	}
+	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
+	outcome := "It ran and returned"
+	if isErr {
+		outcome = "It ran but failed with"
+	}
+	c.system(ctx, ap.TaskID, fmt.Sprintf("A human approved the call to %s on %s.%s %s:\n%s\nDo not call it again for this request.",
+		ap.Tool, ap.ServerName, noteText, outcome, clip(text, 4000)))
+	c.resumeAfterApproval(ctx, ap.TaskID)
+	return nil
 }
 
 func (c *Crew) resumeAfterApproval(ctx context.Context, taskID uuid.UUID) {
@@ -204,8 +250,8 @@ func (c *Crew) resumeAfterApproval(ctx context.Context, taskID uuid.UUID) {
 		return
 	}
 	for _, a := range all {
-		if a.Status == "pending" {
-			return // wait for every decision before resuming
+		if a.Status == "pending" || (a.Status == "approved" && a.Result == "") {
+			return // wait for every decision, and every approved call, before resuming
 		}
 	}
 	t, err := c.store.GetTask(ctx, taskID)

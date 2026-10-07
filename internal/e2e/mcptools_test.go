@@ -6,11 +6,15 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -131,9 +135,22 @@ func TestMCPToolPermissionsAndApproval(t *testing.T) {
 
 	path := "/tasks/" + task.ID.String() + "/approvals/" + approvals[0].ID.String()
 	var decided store.ToolApproval
-	if code := e.do("POST", path, map[string]any{"decision": "approve"}, &decided); code != 200 || decided.Status != "approved" ||
-		!strings.Contains(decided.Result, "page created") {
+	if code := e.do("POST", path, map[string]any{"decision": "approve"}, &decided); code != 200 || decided.Status != "approved" {
 		t.Fatalf("approve: %d %+v", code, decided)
+	}
+	// The call runs out of band: the answer does not wait for it.
+	for i := 0; i < 100 && created.Load() == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+	}
+	for i := 0; i < 100; i++ {
+		e.do("GET", "/tasks/"+task.ID.String()+"/approvals", nil, &approvals)
+		if approvals[0].Result != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(approvals[0].Result, "page created") {
+		t.Fatalf("result after approval: %+v", approvals[0])
 	}
 	if code := e.do("POST", path, map[string]any{"decision": "reject"}, nil); code != 400 {
 		t.Fatalf("second decision accepted: %d", code)
@@ -145,5 +162,60 @@ func TestMCPToolPermissionsAndApproval(t *testing.T) {
 	got, _ = e.store.GetTask(ctx, task.ID)
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "page created") {
 		t.Fatalf("resume after approval: %s %q", got.Status, got.Result)
+	}
+}
+
+type recordQueue struct {
+	mu   sync.Mutex
+	jobs []string
+}
+
+func (q *recordQueue) Enqueue(_ context.Context, kind jobs.Kind, id uuid.UUID, _ time.Duration) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.jobs = append(q.jobs, string(kind)+"/"+id.String())
+	return nil
+}
+
+// With a queue (the cloud), approving only records the decision and queues the call, so the
+// request that carries the answer is never held up by a long tool.
+func TestApprovedCallRunsFromTheQueue(t *testing.T) {
+	e, _ := crewSetup(t)
+	ctx := context.Background()
+	var created atomic.Int32
+	ts := notesServer(t, &created)
+	var conn store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Notes", "type": "mcp_server", "config": map[string]any{"endpoint_url": ts.URL}}, &conn)
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "x"}, &task)
+	ap, err := e.store.CreateToolApproval(ctx, &store.ToolApproval{TaskID: task.ID, ConnectorID: &conn.ID, ServerName: "Notes",
+		Tool: "create_page", Arguments: []byte(`{"title":"t"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := &recordQueue{}
+	e.crew.Queue = q
+	t.Cleanup(func() { e.crew.Queue = nil })
+
+	var decided store.ToolApproval
+	if code := e.do("POST", "/tasks/"+task.ID.String()+"/approvals/"+ap.ID.String(), map[string]any{"decision": "approve"}, &decided); code != 200 ||
+		decided.Status != "approved" || decided.Result != "" {
+		t.Fatalf("approve: %d %+v", code, decided)
+	}
+	if len(q.jobs) != 1 || q.jobs[0] != "approval/"+ap.ID.String() || created.Load() != 0 {
+		t.Fatalf("queued %v, tool ran %d times", q.jobs, created.Load())
+	}
+	// The delivery runs the call; a duplicate delivery does nothing.
+	for range 2 {
+		if err := e.crew.RunApproval(ctx, ap.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := e.store.GetToolApproval(ctx, ap.ID)
+	if created.Load() != 1 || !strings.Contains(got.Result, "page created") || got.IsError {
+		t.Fatalf("ran %d times: %+v", created.Load(), got)
+	}
+	if err := e.crew.RunApproval(ctx, uuid.New()); err != nil {
+		t.Fatalf("unknown approval must be acknowledged: %v", err)
 	}
 }
