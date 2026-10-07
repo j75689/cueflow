@@ -16,7 +16,6 @@ import {
   AgentSelect,
   NewTaskModal,
   PRIORITIES,
-  PriorityDot,
   TASK_STATUS_LABEL,
   TaskStatusBadge,
   useAgents,
@@ -1031,7 +1030,7 @@ function Sidebar({
               onChange={(v) => void onPatch({ assignee_agent_id: v })}
             />
           </Field>
-          <Field label="Priority" right={<PriorityDot priority={t.priority} />}>
+          <Field label="Priority">
             <Select
               value={t.priority}
               onChange={(e) =>
