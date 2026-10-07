@@ -35,8 +35,8 @@ echo "== service account $SA"
 g iam service-accounts describe "$SA" >/dev/null 2>&1 \
   || g iam service-accounts create "$SA_NAME" --display-name "CueFlow runtime"
 
-# The private helper services (SearXNG, news-trends) run as an account that can do nothing but be
-# called and read its own secrets: no Vertex, no queue, no bucket.
+# Private helper services that CueFlow calls (deployed from the IaC repo) run as an account that can
+# do nothing but be called and read its own secrets: no Vertex, no queue, no bucket.
 HELPER_SA="${HELPER_SA_NAME:-cueflow-helper}@${PROJECT}.iam.gserviceaccount.com"
 echo "== helper service account $HELPER_SA"
 g iam service-accounts describe "$HELPER_SA" >/dev/null 2>&1 \
