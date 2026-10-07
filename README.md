@@ -34,10 +34,9 @@ actually does the work, but on a board you can watch:
 - **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
 - **External agents (ACP)**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or Goose
   instead of the built-in LLM loop, over the [Agent Client Protocol](https://agentclientprotocol.com). Add an
-  *External agent (ACP)* runtime connector and pick it as the agent's *Runtime*. The external agent gets
-  CueFlow's tools through a per-run MCP server; shell, file edits and local file access are refused, and its
-  drafts still go to Review. With Claude Code you can use a Claude subscription: run `claude setup-token` and
-  paste the token into the connector (the default Docker image ships the Claude Code and Codex adapters).
+  *External agent (ACP)* runtime connector and pick it as the agent's *Runtime*. It gets CueFlow's tools through a
+  per-run MCP server; shell and file access are refused, and its drafts still go to Review. With Claude Code you
+  can use a Claude subscription (`claude setup-token`, paste the token into the connector).
 
 | Capability | Tools |
 |---|---|
@@ -57,7 +56,7 @@ sends them to Postiz.
   `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED` (plus `FAILED → QUEUED` for manual retry).
   Every change is recorded in an audit log, including before/after diffs of reviewer edits.
 - **Agents cannot publish.** No agent tool can publish, and publishers are wrapped so `Publish` fails
-  unless the dispatch worker attached a grant for that exact, human-approved post (FR-4.2).
+  unless the dispatch worker attached a grant for that exact, human-approved post.
 - **Everything is a connector plugin.** Publishers, sources, search engines, LLMs and notifiers implement
   small Go interfaces and self-register with a config schema; the UI renders their forms automatically.
   See [docs/connectors.md](docs/connectors.md).
@@ -93,13 +92,12 @@ sends them to Postiz.
 | Anthropic Claude | API key · OAuth access token (adds the required OAuth beta header) · Bearer token for gateways · named `ant auth login` profile · or blank to use the server environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, the default profile) |
 | Claude on Amazon Bedrock | Bedrock API key · AWS access key + secret (+ session token) · AWS profile · or blank to use the default AWS credential chain (env vars, `~/.aws`, IAM role) |
 | Claude on Google Vertex AI | Service account key JSON · or blank to use Application Default Credentials |
-| Gemini on Google Vertex AI | Same as above: a service account key, or Application Default Credentials such as your local `gcloud auth application-default login`. Needs a GCP project with billing enabled; usage is billed by GCP, not by Gemini/Google AI subscriptions |
-| OpenAI-compatible | API key (Bearer; `api-key` header for Azure) · extra headers for gateways · none for local servers. Presets: OpenAI, **OpenRouter** (base URL and attribution headers preset; use an `sk-or-...` key and models like `anthropic/claude-opus-4.8`), **Azure OpenAI** (v1 endpoint, or the legacy deployments endpoint with an API version), DeepSeek, Ollama, vLLM, LocalAI |
+| Gemini on Google Vertex AI | Same as above (for example `gcloud auth application-default login`). Needs a GCP project with billing enabled; billed by GCP, not by Google AI subscriptions |
+| OpenAI-compatible | API key (Bearer; `api-key` header for Azure) · extra headers for gateways · none for local servers. Presets: OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI |
 
-Credentials entered in the UI are encrypted per connector and take precedence over server-wide environment
-variables. To use environment variables or credential files with Docker, set them in `deploy/.env` and see
-the commented `volumes:` example in `deploy/docker-compose.yml` (for `~/.config/anthropic`, `~/.aws`, `~/.config/gcloud`, or a
-GCP service account key).
+Credentials entered in the UI are encrypted per connector and win over server environment variables. For
+environment variables or credential files in Docker, see `deploy/.env.example` and the commented `volumes:` example
+in `deploy/docker-compose.yml`.
 
 ## Quick start (Docker)
 
@@ -144,9 +142,8 @@ Set it in `deploy/.env`, then `docker compose up -d --build`.
 
 ### Web search
 
-The compose file includes a SearXNG instance (set `SEARXNG_SECRET` in `deploy/.env`). In CueFlow add a
-*SearXNG* connector with URL `http://searxng:8080`; agents without a search connector of their own use
-the first active one. Its own page is at <http://localhost:8888>.
+The compose file includes SearXNG (set `SEARXNG_SECRET` in `deploy/.env`). Add a *SearXNG* connector with URL
+`http://searxng:8080`; agents without a search connector of their own use the first active one.
 
 ### Try it without Postiz
 
@@ -201,11 +198,9 @@ CueFlow or one running elsewhere.
    ```
 3. Under **Connectors**, add a **Runner pool** (label `claude-code`) and select it as an agent's *Runtime*.
 
-Local policy wins: the runner's `runner.json` (Linux `~/.config/cueflow/`, macOS `~/Library/Application Support/cueflow/`, or `CUEFLOW_RUNNER_CONFIG`) can restrict `allow_presets`, set `deny_web`, map a preset
-to a `commands` path, pick an ACP `auth_methods` entry per preset and provide credentials in `env`; the server cannot widen any of it.
-For example Google Antigravity's official ACP server (from the [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json))
-works as `"commands": {"custom": "/path/to/agy_acp_server.par"}, "auth_methods": {"custom": "oauth-personal"}`, with the agent's runner pool set to the `custom` preset. `cueflow runner status`
-checks the connection; revoking a runner in the dashboard stops it at once.
+Local policy wins: the runner's own `runner.json` can only narrow what the server asks for (allowed presets, no web,
+which command to run, which ACP login to use), and `cueflow runner status` checks the connection. Revoking a runner in
+the dashboard stops it at once. Details and an example: [docs/api.md](docs/api.md#runners).
 
 An agent can also drive itself: give it the **External (self-driven)** runtime, create an agent token on its
 edit page, and connect any MCP client to `/mcp` with it. The agent claims its own tasks (`claim_task`) and
