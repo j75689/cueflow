@@ -45,6 +45,14 @@ HELPER_SA="${HELPER_SA_NAME:-cueflow-helper}@${PROJECT}.iam.gserviceaccount.com"
 echo "== helper service account $HELPER_SA"
 g iam service-accounts describe "$HELPER_SA" >/dev/null 2>&1 \
   || g iam service-accounts create "${HELPER_SA%%@*}" --display-name "CueFlow helper services"
+# news-trends remembers which stories it gave out (7 days) in Firestore. datastore.user reads and
+# writes documents and can do nothing to the database itself. Old documents are deleted by a TTL on
+# their expire_at field, which is a property of the collection, not of this account.
+echo "== helper: Firestore documents, TTL on news_seen"
+g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:${HELPER_SA}" \
+  --role roles/datastore.user --condition=None >/dev/null
+g firestore fields ttls update expire_at --collection-group=news_seen --enable-ttl >/dev/null 2>&1 \
+  || echo "   (Firestore TTL not set: needs a (default) Firestore database)"
 
 echo "== media bucket gs://$BUCKET"
 g storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1 \
