@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,10 +114,19 @@ func TestGCSSignedURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"/b/media/x1", "X-Goog-Signature=", "X-Goog-Algorithm=GOOG4-RSA-SHA256", "response-content-type=image%2Fpng", "X-Goog-Expires=59"} {
+	for _, want := range []string{"/b/media/x1", "X-Goog-Signature=", "X-Goog-Algorithm=GOOG4-RSA-SHA256", "response-content-type=image%2Fpng"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("url missing %q: %s", want, u)
 		}
+	}
+	// The storage library counts the lifetime from the whole second the URL was signed in, so ten
+	// minutes comes out as 599 or 600 depending on the fraction of a second.
+	parsed, err := url.Parse(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := strconv.Atoi(parsed.Query().Get("X-Goog-Expires")); err != nil || n < 599 || n > 600 {
+		t.Errorf("X-Goog-Expires = %q, want 599 or 600: %s", parsed.Query().Get("X-Goog-Expires"), u)
 	}
 }
 
