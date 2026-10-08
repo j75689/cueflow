@@ -2,7 +2,15 @@
 
 > English: [README.md](README.md) · 雲端部署：[deploy/cloudrun](deploy/cloudrun/README.md)
 
-**開源、可自託管的社群 Agent 運營控制台。** CueFlow 會定時喚醒，從 RSS、信箱、網路搜尋收集素材，讓 LLM 依各平台風格寫出草稿，每一篇都先交給人審核，核准後才透過 Model Context Protocol (MCP) 交給 [Postiz](https://github.com/gitroomhq/postiz-app) 發布。可以在自己的機器上跑（家裡的 NAS、Home Lab 或筆電上的 Docker，不需要 Public IP、網域或 Webhook），也能部署到 Google Cloud Run，沒工作時縮到零。
+**開源、可自託管的 Agent 運營控制台。** 把任務交給看板上的一組 AI agent：它們用各自的工具完成任務，需要你決定時會來問，有風險的動作會等你核准。Agent 可以用內建的 LLM 迴圈，或把工作交給你自己機器上（*Runner*）的外部 agent（Claude Code、Codex、Gemini CLI⋯）；任何 [MCP](https://modelcontextprotocol.io) 伺服器都能當它的工具，每個工具可設為允許、需核准或禁止；任務可以定時重複。可以在自己的機器上跑（家裡的 NAS、Home Lab 或筆電上的 Docker，不需要 Public IP、網域或 Webhook），也能部署到 Google Cloud Run，沒工作時縮到零。
+
+```
+ 你 · 排程 · MCP client ─▶ 任務 ─▶ Agent ─▶ 工具（內建 · MCP 伺服器 · Runner 上自己的 CLI）
+                                     │
+                     需要你決定 / 有風險的工具呼叫 ─▶ 你在對話串裡核准 ─▶ 它繼續
+```
+
+內建一套**內容工作流程**當範例：agent 收集素材（RSS、信箱、網路搜尋），依各平台風格寫草稿，每一篇都先交給人審核，核准後才透過 MCP 交給 [Postiz](https://github.com/gitroomhq/postiz-app) 發布。沒有 `drafting` 能力的 agent 完全不會碰到這些。
 
 ```
  Cron ─▶ 收集（RSS · IMAP · 搜尋）─▶ Agent（LLM 工具迴圈）─▶ PENDING_REVIEW
@@ -19,7 +27,7 @@ CueFlow 內建一組可以用自然語言交代事情的 agent，像聊天機器
 - **Board（看板）**：每個需求都是一張任務卡，依序經過 Backlog → 待辦 → 進行中 → 等待中 → 待確認 → 完成。把指派了 agent 的卡片拖到「待辦」，它就會開始工作。每個任務都有一條對話串，記錄 agent 的進度、工具呼叫、提問與成果；回覆就能讓它繼續，用 `@writer` 開頭則可以把任務轉給另一個 agent。
 - **Agents（角色）**：每個角色有自己的人設、能力、LLM、資料來源與記憶。全新安裝只有一位：🧭 Chief（總管），負責規劃、委派給你新增的 agent，沒有合適的人選時自己動手。可以自己新增角色（文案、研究員、編輯⋯），每個角色都能修改。預設的名稱與指示是英文，回覆與寫稿用的語言由各自的 `language` 設定決定（預設英文 `en`，要用繁體中文請改成 `zh-TW`）。
 - **Schedules（排程）**：定時為 agent 建立任務；agent 也能自己建立排程，最密每 5 分鐘一次。
-- **外部 agent（ACP）**：agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行任務，透過 [Agent Client Protocol](https://agentclientprotocol.com) 溝通，取代內建的 LLM 迴圈。新增一個「External agent (ACP)」runtime connector，再把它設為 agent 的 *Runtime* 即可。它透過每次執行專屬的 MCP 端點使用 CueFlow 的工具；shell 與檔案存取一律拒絕，寫的草稿一樣要進審核。用 Claude Code 時可以使用 Claude 訂閱方案（`claude setup-token`，把 token 貼進 connector）。
+- **外部 agent（ACP）**：agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行任務，透過 [Agent Client Protocol](https://agentclientprotocol.com) 溝通，取代內建的 LLM 迴圈。新增一個「External agent (ACP)」runtime connector，再把它設為 agent 的 *Runtime* 即可。它透過每次執行專屬的 MCP 端點使用 CueFlow 的工具；shell 與檔案存取預設拒絕，除非 Runner 的擁有者允許（要當 coding agent 用請見 [deploy/runner](deploy/runner/README.md)，英文），寫的草稿一樣要進審核。用 Claude Code 時可以使用 Claude 訂閱方案（`claude setup-token`，把 token 貼進 connector）。
 
 | 能力 | 工具 |
 |---|---|

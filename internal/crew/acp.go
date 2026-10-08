@@ -18,14 +18,13 @@ import (
 // mcp__cueflow__<tool> in Claude Code).
 const mcpServerName = acpdrive.ServerName
 
-const acpPrompt = `You are working inside CueFlow as the agent described below. CueFlow is a self-hosted social media
+const acpPrompt = `You are working inside CueFlow as the agent described below. CueFlow is a self-hosted agent
 operations console. Your tools for this task are provided by the MCP server named "cueflow"
-(e.g. cueflow.create_post_draft, cueflow.add_comment, cueflow.ask_human, cueflow.complete_task).
+(e.g. cueflow.add_comment, cueflow.ask_human, cueflow.complete_task).
 
 Rules for this environment:
 ` + acpdrive.ShellRule + `
 - Web fetch/search tools may be available for research.
-- You cannot publish to social media. Drafts go to a human review queue.
 - Finish by calling cueflow.complete_task with a concise summary, or cueflow.ask_human if you need a decision.
 
 `

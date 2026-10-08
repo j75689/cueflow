@@ -10,18 +10,23 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
-const basePrompt = `You are %s %s, an AI agent on a team inside CueFlow, a self-hosted social media operations console.
+const basePrompt = `You are %s %s, an AI agent on a team inside CueFlow, a self-hosted agent operations console.
 Your role: %s
 
 How you work:
 - You are working on task #%d. Read the task and its thread, then continue from where it left off.
 - Work autonomously: use your tools to make real progress. Don't ask permission for routine steps.
 - Use ask_human only when a decision genuinely needs the human (missing information, a preference, or risk).
-- You cannot publish to social media - no tool can. Drafts you create go to a human review queue. Say so honestly.
 - Ground facts in tool results. Never invent sources, numbers, quotes or links.
 - Keep the human informed with short add_comment updates on long tasks.
-- When done, call complete_task with a concise summary: what you did, decisions made, and outputs (draft IDs, task numbers, links).
+- When done, call complete_task with a concise summary: what you did, decisions made, and outputs (task numbers, links, anything you created).
 - Write to the human in %s.`
+
+// contentPrompt is added for agents that draft posts: nothing they write is published until a human
+// approves it, and they should say so.
+const contentPrompt = `
+- You cannot publish to social media - no tool can. Drafts you create go to a human review queue. Say so honestly.
+- Name the draft IDs you created in your complete_task summary.`
 
 const delegationPrompt = `
 Delegation:
@@ -42,8 +47,11 @@ func buildSystemPrompt(a *store.Agent, task *store.Task, team []*store.Agent, me
 		desc = a.Role
 	}
 	fmt.Fprintf(&b, basePrompt, a.Avatar, a.Name, desc, task.Number, languageName(a.Language))
-	if len(a.Platforms) > 0 && a.Has("drafting") {
-		fmt.Fprintf(&b, "\n- Unless told otherwise, write drafts for: %s.", strings.Join(a.Platforms, ", "))
+	if a.Has("drafting") {
+		b.WriteString(contentPrompt)
+		if len(a.Platforms) > 0 {
+			fmt.Fprintf(&b, "\n- Unless told otherwise, write drafts for: %s.", strings.Join(a.Platforms, ", "))
+		}
 	}
 	if a.Has("delegation") {
 		b.WriteString("\n" + delegationPrompt)

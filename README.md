@@ -1,12 +1,23 @@
 # CueFlow
 
-**Open-source, self-hosted Agent Ops Console for social media.** CueFlow wakes up on a schedule,
-collects material (RSS, mailboxes, web search), has an LLM write platform-specific drafts, puts every
-draft in front of a human reviewer, and only then publishes it through [Postiz](https://github.com/gitroomhq/postiz-app)
-over the Model Context Protocol (MCP). Run it at home (a NAS, a home lab or a laptop with Docker, no public IP,
-domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
+**Open-source, self-hosted Agent Ops Console.** Give a team of AI agents tasks on a kanban board. They work
+the tasks with their own tools, ask you when they need a decision, and anything risky waits for your approval.
+An agent can run on a built-in LLM loop or hand the work to an external agent (Claude Code, Codex, Gemini CLI...)
+on a machine you own (a *runner*); any [MCP](https://modelcontextprotocol.io) server can be its tools, each tool set
+to allow, ask or deny; tasks can recur on a schedule. Run it at home (a NAS, a home lab or a laptop with Docker, no
+public IP, domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
 
 Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md) · Cloud deployment: [deploy/cloudrun](deploy/cloudrun/README.md)
+
+```
+ You · Schedule · MCP client ─▶ Task ─▶ Agent ─▶ tools (built-in · MCP servers · its own CLI on a runner)
+                                         │
+                       needs a decision / risky tool call ─▶ you approve in the thread ─▶ it continues
+```
+
+It ships with a **content workflow** as its built-in example: agents collect material (RSS, mailboxes, web
+search), write platform-specific drafts, a human reviews every draft, and only then it is published through
+[Postiz](https://github.com/gitroomhq/postiz-app) over MCP. Agents without the `drafting` capability never see any of it.
 
 ```
  Cron ─▶ Ingest (RSS · IMAP · Search) ─▶ Agent (LLM tool loop) ─▶ PENDING_REVIEW
@@ -35,7 +46,8 @@ actually does the work, but on a board you can watch:
 - **External agents (ACP)**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or Goose
   instead of the built-in LLM loop, over the [Agent Client Protocol](https://agentclientprotocol.com). Add an
   *External agent (ACP)* runtime connector and pick it as the agent's *Runtime*. It gets CueFlow's tools through a
-  per-run MCP server; shell and file access are refused, and its drafts still go to Review. With Claude Code you
+  per-run MCP server; shell and file access are refused unless the owner of the runner allows them (for a coding agent,
+see [deploy/runner](deploy/runner/README.md)), and its drafts still go to Review. With Claude Code you
   can use a Claude subscription (`claude setup-token`, paste the token into the connector).
 
 | Capability | Tools |

@@ -121,10 +121,10 @@ type mcpNoInput struct{}
 
 func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
-		Instructions: "CueFlow is a social-content studio run by a crew of AI agents on a kanban board. " +
+		Instructions: "CueFlow runs a crew of AI agents on a kanban board. " +
 			"Create tasks for agents, follow their progress, answer their questions and steer them with comments. " +
 			"Each org has its own crew and board: pass org (see list_orgs) to work outside the default org. " +
-			"Agents write drafts that a human reviews in the CueFlow dashboard; nothing here publishes.",
+			"Anything agents draft for publishing waits for a human to review it in the CueFlow dashboard; nothing here publishes.",
 	})
 	tool := func(name, desc string, readOnly bool) *mcp.Tool {
 		return &mcp.Tool{Name: name, Description: desc, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly}}
