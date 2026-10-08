@@ -13,7 +13,7 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// accountsPublisher plays a per-account publisher (like CueSocial): the first attempt reaches
+// accountsPublisher plays a per-account publisher (like the MCP publisher): the first attempt reaches
 // one account and fails the other; a retry with Previous finishes it.
 type accountsPublisher struct{}
 

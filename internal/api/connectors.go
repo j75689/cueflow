@@ -191,7 +191,7 @@ func (s *Server) connectorItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// connectorAccounts lists the accounts a per-account publisher (e.g. CueSocial) can post to.
+// connectorAccounts lists the accounts a per-account publisher (e.g. an MCP publisher) can post to.
 func (s *Server) connectorAccounts(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {

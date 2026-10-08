@@ -1,7 +1,7 @@
 // Package media stores images CueFlow holds itself (reviewer uploads and AI-generated images) and
 // generates images through image connectors. Posts reference stored images as "/media/{id}";
 // the dispatch worker turns that into an absolute URL (CUEFLOW_MEDIA_BASE_URL) and also hands
-// publishers the bytes, for services that cannot reach CueFlow (e.g. CueSocial on Cloud Run).
+// publishers the bytes, for services that cannot reach CueFlow (e.g. an MCP publisher on Cloud Run).
 package media
 
 import (

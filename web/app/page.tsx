@@ -132,7 +132,7 @@ export default function ReviewPage() {
     });
   const chosen = pending.filter((p) => selected.has(p.id));
 
-  // needsAccounts: per-account publishers (CueSocial) can't publish a post with no accounts.
+  // needsAccounts: per-account publishers (MCP publisher) can't publish a post with no accounts.
   const needsAccounts = (p: Post) =>
     accountMode(effectivePublisher(p, publishers.data ?? []), meta?.connector_types ?? []) === "required" &&
     (p.accounts ?? []).length === 0;

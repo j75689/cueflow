@@ -127,7 +127,7 @@ against an in-process MCP server.
 Images a reviewer uploads or an image connector generates are stored by CueFlow (table `media`) and
 referenced from posts as `/media/{id}`. Publishers receive `PublishRequest.MediaURLs` as absolute URLs
 (`CUEFLOW_MEDIA_BASE_URL` + path) and `PublishRequest.Media`, where stored images carry a `Load` func
-for their bytes. Use the bytes when your service cannot reach CueFlow (CueSocial uploads them as base64);
+for their bytes. Use the bytes when your service cannot reach CueFlow (the MCP publisher uploads them as base64);
 use the URL when it can (Postiz fetches it).
 
 An image connector returns raw bytes; CueFlow checks the type (PNG, JPEG, WebP or GIF, at most 10 MB)
@@ -141,13 +141,14 @@ A publisher that posts to individual accounts (several Threads or Instagram acco
 stores the reviewer's choice on the post; `Publish` receives it as `PublishRequest.Accounts`.
 
 Set `Spec.AccountsRequired` too when a post cannot go out without accounts: the editor then blocks approval
-until some are picked. Otherwise an empty `Accounts` means "use your defaults". The CueSocial connector
-([`internal/connectors/cuesocial`](../internal/connectors/cuesocial/cuesocial.go)) requires accounts; the
-Postiz connector treats picked channels as optional and falls back to its channel mapping.
+until some are picked. Otherwise an empty `Accounts` means "use your defaults". The MCP publisher
+([`internal/connectors/mcppublisher`](../internal/connectors/mcppublisher/mcppublisher.go); its tool contract is in
+[publisher-mcp.md](publisher-mcp.md)) requires accounts; the Postiz connector treats picked channels as optional
+and falls back to its channel mapping.
 
 When a publish fails after something was created remotely, return a `*connector.PartialError` with the
 external IDs that exist. The dispatch worker keeps them on the failed post and passes them back as
-`PublishRequest.Previous` on retry, so the connector can finish that attempt (CueSocial calls
+`PublishRequest.Previous` on retry, so the connector can finish that attempt (the MCP publisher calls
 `publish_post`, which only retries the accounts that failed) instead of publishing a second copy.
 
 If a call gets no reply, the outcome is unknown. Report a plain error that says so; don't guess. The

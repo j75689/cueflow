@@ -9,7 +9,7 @@ import { Select } from "./select";
 
 /**
  * Where drafts made for a task (or a schedule's tasks) are published: a publisher and, for
- * per-account publishers such as CueSocial, the accounts. Drafts start with these; the reviewer
+ * per-account publishers such as the MCP publisher, the accounts. Drafts start with these; the reviewer
  * can still change them.
  */
 export function PublishTarget({

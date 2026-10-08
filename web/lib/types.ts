@@ -40,10 +40,12 @@ export interface ConnectorSpec {
   name: string;
   description: string;
   fields: FieldSpec[];
-  /** Publisher that can post to individual accounts chosen per post (CueSocial, Postiz). */
+  /** Publisher that can post to individual accounts chosen per post (MCP publisher, Postiz). */
   accounts?: boolean;
-  /** Posts through this publisher must name their accounts (CueSocial). */
+  /** Posts through this publisher must name their accounts (MCP publisher). */
   accounts_required?: boolean;
+  /** Kept only so connectors that already exist under this type load and can be edited; not offered for new ones. */
+  hidden?: boolean;
 }
 
 /** An image CueFlow stores (uploaded or generated); `url` is "/media/{id}". */

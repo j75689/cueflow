@@ -1,23 +1,29 @@
-// Package cuesocial is the publisher connector for CueSocial, a self-hosted scheduler that posts
-// to several Threads and Instagram accounts, including threads and multi-image posts. CueFlow calls
-// CueSocial's MCP server; the reviewer picks the accounts for each post (PublishRequest.Accounts).
+// Package mcppublisher is a publisher connector for any MCP server that follows the publisher
+// contract below: a scheduler that posts to several Threads and Instagram accounts, including
+// threads and multi-image posts. CueFlow calls the server's MCP tools; the reviewer picks the
+// accounts for each post (PublishRequest.Accounts). docs/publisher-mcp.md describes the contract.
 //
-// CueSocial MCP (Streamable HTTP, stateless) sits behind Cloudflare Access, so requests carry a
-// service token in CF-Access-Client-Id / CF-Access-Client-Secret. Tools used:
-//   - list_accounts {}                                  -> {accounts:[{id, platform, username}], platforms}
-//   - create_upload {content_type, size}                -> {upload_url, method, headers, key} (signed, 15 min)
+// The server speaks MCP over Streamable HTTP (stateless is fine). Requests carry whatever the
+// connector is given: a bearer token, extra headers, and secret headers (a Cloudflare Access service
+// token, say). Tools used (their names can be changed in the settings):
+//   - list_accounts {}                                  -> {accounts:[{id, platform, username, tag?}], platforms}
+//   - create_upload {content_type, size}                -> {upload_url, method, headers, key} (signed, 15 min; optional)
 //   - create_post {parts:[{text, image_urls?, images_base64?, video_urls?, video_keys?}], accounts[], scheduled_at?, topic?, link?}
 //     (several parts make a Threads reply chain; on Instagram they become one caption and carousel)
 //     -> {id, status: scheduled|published|partial|failed, results:[{account, label, published, permalink, error}]}
 //   - publish_post {id}                                 -> same shape; retries the accounts not yet reached
 //
-// CueSocial has no idempotency key, so a create_post that gets no reply is reported as failed
-// with a warning to check CueSocial before retrying: it may already have gone out. A post that
+// The contract has no idempotency key, so a create_post that gets no reply is reported as failed
+// with a warning to check the publisher before retrying: it may already have gone out. A post that
 // was created but did not reach every account is retried with publish_post, which only republishes
 // the accounts that failed.
-package cuesocial
+//
+// The connector was first written for CueSocial and is still registered under that type, hidden,
+// so installs that have one keep working.
+package mcppublisher
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -39,47 +45,119 @@ import (
 	"github.com/j75689/cueflow/internal/mcpx"
 )
 
-// PostIDKey is the ExternalIDs key holding the CueSocial post id.
-const PostIDKey = "cuesocial"
+// PostIDKey is the ExternalIDs key holding the publisher's post id. Posts made while this was
+// still the CueSocial connector keep their id under legacyPostIDKey, which a retry still finds.
+const (
+	PostIDKey       = "post_id"
+	legacyPostIDKey = "cuesocial"
+)
+
+// Default tool names; each can be changed in the connector's settings.
+const (
+	defaultListTool    = "list_accounts"
+	defaultCreateTool  = "create_post"
+	defaultPublishTool = "publish_post"
+	defaultUploadTool  = "create_upload"
+)
 
 func init() {
-	connector.Register(connector.Spec{
-		Type:             "cuesocial",
+	connector.Register(spec(), New)
+	// The type this connector was first registered under, for installs that already have one. Its
+	// settings are the same, so a stored connector of this type works unchanged.
+	legacy := spec()
+	legacy.Type, legacy.Name, legacy.Hidden = "cuesocial", "CueSocial", true
+	connector.Register(legacy, New)
+}
+
+func spec() connector.Spec {
+	return connector.Spec{
+		Type:             "mcp_publisher",
 		Kind:             connector.KindPublisher,
-		Name:             "CueSocial",
-		Description:      "Publishes approved posts to your Threads and Instagram accounts through a CueSocial server. Choose the accounts for each post when you review it.",
+		Name:             "MCP publisher",
+		Description:      "Publishes approved posts to your Threads and Instagram accounts through an MCP server that follows the publisher contract (docs/publisher-mcp.md). Choose the accounts for each post when you review it.",
 		Accounts:         true,
 		AccountsRequired: true,
 		Fields: []connector.Field{
 			{Key: "endpoint_url", Label: "MCP endpoint", Type: connector.FieldString, Required: true,
-				Placeholder: "https://social.example.com/mcp", Help: "Your CueSocial URL + /mcp"},
-			{Key: "cf_client_id", Label: "Cloudflare Access client ID", Type: connector.FieldString,
-				Help: "Service token allowed by the CueSocial Access application (CF-Access-Client-Id)"},
-			{Key: "cf_client_secret", Label: "Cloudflare Access client secret", Type: connector.FieldPassword, Secret: true,
-				Help: "CF-Access-Client-Secret of the same service token"},
+				Placeholder: "https://social.example.com/mcp", Help: "The publisher's URL + /mcp"},
+			{Key: "auth_token", Label: "Bearer token", Type: connector.FieldPassword, Secret: true,
+				Help: "Sent as Authorization: Bearer <token>"},
+			{Key: "headers", Label: "Extra headers", Type: connector.FieldKV},
+			{Key: "secret_headers", Label: "Secret headers", Type: connector.FieldText, Secret: true,
+				Help: "Header-Name: value, one per line. For a Cloudflare Access service token: CF-Access-Client-Id and CF-Access-Client-Secret"},
+			{Key: "list_tool", Label: "List-accounts tool", Type: connector.FieldString, Default: defaultListTool},
+			{Key: "create_tool", Label: "Create-post tool", Type: connector.FieldString, Default: defaultCreateTool},
+			{Key: "publish_tool", Label: "Publish-post tool", Type: connector.FieldString, Default: defaultPublishTool,
+				Help: "Retries the accounts a post has not reached yet"},
+			{Key: "upload_tool", Label: "Upload tool", Type: connector.FieldString, Default: defaultUploadTool,
+				Help: "Takes video uploads; if the server has none, videos need the public media URL below"},
 			{Key: "public_media_base_url", Label: "Public media URL", Type: connector.FieldString, Placeholder: "https://media.example.com",
-				Help: "Optional. Videos are uploaded straight to CueSocial; this public https address (e.g. a Cloudflare Tunnel exposing only /media/) is only used when CueSocial can't take uploads"},
+				Help: "Optional. Videos are uploaded straight to the publisher; this public https address (e.g. a Cloudflare Tunnel exposing only /media/) is only used when it can't take uploads"},
+			{Key: "cf_client_id", Label: "Cloudflare Access client ID (older setting)", Type: connector.FieldString,
+				Help: "Kept for connectors made before secret headers existed; use Secret headers for new ones"},
+			{Key: "cf_client_secret", Label: "Cloudflare Access client secret (older setting)", Type: connector.FieldPassword, Secret: true},
 		},
 		DefaultName: func(cfg connector.Config) string {
 			if u, err := url.Parse(cfg.String("endpoint_url")); err == nil && u.Host != "" {
-				return connector.WithDetail("CueSocial", u.Host)
+				return connector.WithDetail("MCP publisher", u.Host)
 			}
 			return ""
 		},
-	}, New)
+	}
 }
 
 type Publisher struct {
 	opts        mcpx.Options
 	now         func() time.Time
-	publicMedia string       // base URL CueSocial can fetch stored videos from (fallback)
-	upload      *http.Client // sends videos to CueSocial's signed upload URLs
+	publicMedia string       // base URL the publisher can fetch stored videos from (fallback)
+	upload      *http.Client // sends videos to the publisher's signed upload URLs
+	tools       tools
+}
+
+type tools struct{ list, create, publish, upload string }
+
+// previousID is the publisher's post id from an earlier, partly successful attempt, whether it was
+// recorded under the current key or the one the CueSocial connector used.
+func previousID(previous map[string]string) string {
+	if id := previous[PostIDKey]; id != "" {
+		return id
+	}
+	return previous[legacyPostIDKey]
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
-	opts := mcpx.Options{Transport: mcpx.TransportStreamable, Endpoint: cfg.String("endpoint_url"), HTTPClient: env.HTTPClient}
+	opts := mcpx.Options{Transport: mcpx.TransportStreamable, Endpoint: cfg.String("endpoint_url"), HTTPClient: env.HTTPClient,
+		Headers: map[string]string{}}
+	if opts.Endpoint == "" {
+		return nil, errors.New("mcp publisher: an MCP endpoint is required")
+	}
 	if id := cfg.String("cf_client_id"); id != "" {
-		opts.Headers = map[string]string{"CF-Access-Client-Id": id, "CF-Access-Client-Secret": cfg.String("cf_client_secret")}
+		opts.Headers["CF-Access-Client-Id"] = id
+		opts.Headers["CF-Access-Client-Secret"] = cfg.String("cf_client_secret")
+	}
+	for k, v := range cfg.KV("headers") {
+		opts.Headers[k] = v
+	}
+	sc := bufio.NewScanner(strings.NewReader(cfg.String("secret_headers")))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("mcp publisher: secret header line %q is not Header-Name: value", line)
+		}
+		opts.Headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	if t := cfg.String("auth_token"); t != "" {
+		opts.Headers["Authorization"] = "Bearer " + t
+	}
+	name := func(key, def string) string {
+		if n := strings.TrimSpace(cfg.String(key)); n != "" {
+			return n
+		}
+		return def
 	}
 	upload := &http.Client{}
 	if env.HTTPClient != nil {
@@ -87,7 +165,9 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	}
 	upload.Timeout = 15 * time.Minute // a Reel is tens of MB
 	return &Publisher{opts: opts, now: time.Now, upload: upload,
-		publicMedia: strings.TrimRight(strings.TrimSpace(cfg.String("public_media_base_url")), "/")}, nil
+		publicMedia: strings.TrimRight(strings.TrimSpace(cfg.String("public_media_base_url")), "/"),
+		tools: tools{list: name("list_tool", defaultListTool), create: name("create_tool", defaultCreateTool),
+			publish: name("publish_tool", defaultPublishTool), upload: name("upload_tool", defaultUploadTool)}}, nil
 }
 
 type account struct {
@@ -122,13 +202,13 @@ type postView struct {
 }
 
 func (p *Publisher) accounts(ctx context.Context, cs *mcp.ClientSession) (*accountsOutput, error) {
-	raw, err := mcpx.CallJSON(ctx, cs, "list_accounts", map[string]any{})
+	raw, err := mcpx.CallJSON(ctx, cs, p.tools.list, map[string]any{})
 	if err != nil {
 		return nil, err
 	}
 	var out accountsOutput
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("cuesocial: list_accounts: %w", err)
+		return nil, fmt.Errorf("mcp publisher: list accounts: %w", err)
 	}
 	return &out, nil
 }
@@ -148,13 +228,13 @@ func (p *Publisher) Test(ctx context.Context) (*connector.TestResult, error) {
 		labels = append(labels, a.label())
 	}
 	if len(labels) == 0 {
-		return &connector.TestResult{OK: false, Message: "connected, but no accounts are connected in CueSocial yet"}, nil
+		return &connector.TestResult{OK: false, Message: "connected, but the publisher has no accounts connected yet"}, nil
 	}
 	return &connector.TestResult{OK: true, Message: fmt.Sprintf("connected: %d accounts (%s)", len(labels), strings.Join(labels, ", ")),
 		Details: map[string]any{"accounts": labels}}, nil
 }
 
-// ListAccounts offers CueSocial's connected accounts to the review UI.
+// ListAccounts offers the publisher's connected accounts to the review UI.
 func (p *Publisher) ListAccounts(ctx context.Context) ([]connector.Account, error) {
 	cs, err := mcpx.Connect(ctx, p.opts)
 	if err != nil {
@@ -179,11 +259,11 @@ func (p *Publisher) Publish(ctx context.Context, req connector.PublishRequest) (
 	}
 	defer cs.Close()
 
-	if id := req.Previous[PostIDKey]; id != "" {
+	if id := previousID(req.Previous); id != "" {
 		// An earlier attempt created the post but did not reach every account: finish it.
-		raw, err := mcpx.CallJSON(ctx, cs, "publish_post", map[string]any{"id": id})
+		raw, err := mcpx.CallJSON(ctx, cs, p.tools.publish, map[string]any{"id": id})
 		if err != nil {
-			return nil, sentErr("publish_post", err, map[string]string{PostIDKey: id})
+			return nil, sentErr(p.tools.publish, err, map[string]string{PostIDKey: id})
 		}
 		return finish(raw, req.Previous)
 	}
@@ -192,9 +272,9 @@ func (p *Publisher) Publish(ctx context.Context, req connector.PublishRequest) (
 	if err != nil {
 		return nil, err
 	}
-	raw, err := mcpx.CallJSON(ctx, cs, "create_post", args)
+	raw, err := mcpx.CallJSON(ctx, cs, p.tools.create, args)
 	if err != nil {
-		return nil, sentErr("create_post", err, nil)
+		return nil, sentErr(p.tools.create, err, nil)
 	}
 	return finish(raw, nil)
 }
@@ -202,7 +282,7 @@ func (p *Publisher) Publish(ctx context.Context, req connector.PublishRequest) (
 // createArgs checks the post against the chosen accounts and builds create_post's arguments.
 func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req connector.PublishRequest) (map[string]any, error) {
 	if len(req.Accounts) == 0 {
-		return nil, errors.New("no CueSocial accounts chosen for this post: pick them in the review editor, then retry")
+		return nil, errors.New("no accounts chosen for this post: pick them in the review editor, then retry")
 	}
 	out, err := p.accounts(ctx, cs)
 	if err != nil {
@@ -217,7 +297,7 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 	for _, id := range req.Accounts {
 		a, ok := byID[id]
 		if !ok {
-			return nil, fmt.Errorf("CueSocial account %s is no longer connected: pick the accounts again", id)
+			return nil, fmt.Errorf("account %s is no longer connected: pick the accounts again", id)
 		}
 		if !slices.Contains(req.Platforms, a.Platform) {
 			return nil, fmt.Errorf("account %s is on %s, which is not one of this post's platforms", a.label(), a.Platform)
@@ -226,7 +306,7 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 		tags[a.Tag == "test"] = true
 	}
 	if tags[true] && tags[false] {
-		return nil, errors.New("CueSocial never mixes test accounts with real ones in one post: pick only test accounts or only real ones")
+		return nil, errors.New("test accounts (tagged \"test\") are never mixed with real ones in one post: pick only test accounts or only real ones")
 	}
 
 	parts, err := partsFor(ctx, req, platforms, p.publicMedia, func(ctx context.Context, data []byte, mime string) (string, error) {
@@ -252,7 +332,7 @@ func (p *Publisher) createArgs(ctx context.Context, cs *mcp.ClientSession, req c
 	return args, nil
 }
 
-// CueSocial's limits (see its MCP instructions).
+// Limits of the publisher contract (docs/publisher-mcp.md).
 const (
 	maxParts            = 10
 	threadsMaxMedia     = 20
@@ -265,7 +345,7 @@ const (
 // partsFor builds create_post's parts: CueFlow's thread parts in order, hashtags after the last
 // part, and every image and video on the first part (an album on Threads; a carousel on Instagram,
 // or a reel when it is a single video). Images CueFlow stores go as base64 and its videos are
-// uploaded to CueSocial's storage (create_upload); linked images and videos are fetched by CueSocial.
+// uploaded to the publisher's storage (the upload tool); linked images and videos are fetched by the publisher.
 func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[string]bool, publicMedia string,
 	upload func(ctx context.Context, data []byte, mime string) (string, error)) ([]map[string]any, error) {
 	texts := append([]string{}, req.Parts...)
@@ -273,7 +353,7 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 		texts = []string{""}
 	}
 	if len(texts) > maxParts {
-		return nil, fmt.Errorf("CueSocial threads have at most %d parts; this post has %d", maxParts, len(texts))
+		return nil, fmt.Errorf("threads have at most %d parts; this post has %d", maxParts, len(texts))
 	}
 	if tags := domain.FormatHashtags(req.Hashtags); tags != "" {
 		texts[len(texts)-1] = strings.TrimSpace(texts[len(texts)-1] + "\n\n" + tags)
@@ -308,9 +388,9 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 			}
 			var te *mcpx.ToolError
 			if !errors.As(err, &te) || publicMedia == "" {
-				return nil, fmt.Errorf("upload video %d to CueSocial: %w", i+1, err)
+				return nil, fmt.Errorf("upload video %d to the publisher: %w", i+1, err)
 			}
-			// This CueSocial can't take uploads: let it fetch the video from the public media URL.
+			// This publisher can't take uploads: let it fetch the video from the public media URL.
 			pu, perr := url.Parse(u)
 			if perr != nil {
 				return nil, fmt.Errorf("media %d: %w", i+1, perr)
@@ -318,7 +398,7 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 			videos = append(videos, publicMedia+pu.Path)
 		case isVideoURL(u):
 			if !strings.HasPrefix(u, "https://") {
-				return nil, fmt.Errorf("CueSocial fetches videos itself and needs a public https URL, got %q", u)
+				return nil, fmt.Errorf("the publisher fetches videos itself and needs a public https URL, got %q", u)
 			}
 			videos = append(videos, u)
 		case stored:
@@ -327,15 +407,15 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 				return nil, fmt.Errorf("load image %d: %w", i+1, err)
 			}
 			if mt != "image/jpeg" && mt != "image/png" {
-				return nil, fmt.Errorf("image %d is %s; CueSocial accepts JPEG or PNG", i+1, mt)
+				return nil, fmt.Errorf("image %d is %s; the publisher accepts JPEG or PNG", i+1, mt)
 			}
 			if len(data) > maxImageBytes {
-				return nil, fmt.Errorf("image %d is larger than CueSocial's 8 MB limit", i+1)
+				return nil, fmt.Errorf("image %d is larger than the 8 MB limit", i+1)
 			}
 			b64 = append(b64, base64.StdEncoding.EncodeToString(data))
 		default:
 			if !strings.HasPrefix(u, "https://") {
-				return nil, fmt.Errorf("CueSocial fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
+				return nil, fmt.Errorf("the publisher fetches linked images itself and needs a public https URL, got %q (upload the image to CueFlow instead)", u)
 			}
 			urls = append(urls, u)
 		}
@@ -355,7 +435,7 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 	for i, t := range texts {
 		parts[i] = map[string]any{"text": t}
 	}
-	// Within a part CueSocial orders linked images, uploaded images, then videos.
+	// Within a part the publisher orders linked images, uploaded images, then videos.
 	if len(urls) > 0 {
 		parts[0]["image_urls"] = urls
 	}
@@ -371,9 +451,9 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 	return parts, nil
 }
 
-// uploadVideo sends a video to a signed URL from CueSocial's create_upload and returns its key.
+// uploadVideo sends a video to a signed URL from the upload tool and returns its key.
 func (p *Publisher) uploadVideo(ctx context.Context, cs *mcp.ClientSession, data []byte, mime string) (string, error) {
-	raw, err := mcpx.CallJSON(ctx, cs, "create_upload", map[string]any{"content_type": mime, "size": len(data)})
+	raw, err := mcpx.CallJSON(ctx, cs, p.tools.upload, map[string]any{"content_type": mime, "size": len(data)})
 	if err != nil {
 		return "", err
 	}
@@ -422,7 +502,7 @@ func isVideoURL(u string) bool {
 
 const threadsMaxTopic = 50
 
-// extras checks the Threads topic tag and link card. CueSocial puts the topic on the first part and
+// extras checks the Threads topic tag and link card. The publisher puts the topic on the first part and
 // the link card on the last part without images; Instagram ignores both.
 func extras(req connector.PublishRequest, parts []map[string]any, platforms map[string]bool) (string, string, error) {
 	if !platforms["threads"] {
@@ -456,7 +536,7 @@ func extras(req connector.PublishRequest, parts []map[string]any, platforms map[
 	return topic, link, nil
 }
 
-// sentErr classifies a failed call. A tool error means CueSocial rejected the request, so nothing
+// sentErr classifies a failed call. A tool error means the publisher rejected the request, so nothing
 // went out. Any other failure (timeout, dropped connection) leaves the outcome unknown.
 func sentErr(tool string, err error, known map[string]string) error {
 	var te *mcpx.ToolError
@@ -466,7 +546,7 @@ func sentErr(tool string, err error, known map[string]string) error {
 		}
 		return err
 	}
-	err = fmt.Errorf("no reply from CueSocial to %s (%v): the post may have been published; check CueSocial before retrying", tool, err)
+	err = fmt.Errorf("no reply from the publisher to %s (%v): the post may have been published; check the publisher before retrying", tool, err)
 	if known != nil {
 		// publish_post only retries the accounts not yet reached, so retrying it stays safe.
 		return &connector.PartialError{ExternalIDs: known, Err: err}
@@ -474,12 +554,12 @@ func sentErr(tool string, err error, known map[string]string) error {
 	return err
 }
 
-// finish turns CueSocial's post view into a result, or a PartialError that keeps the post id
+// finish turns the publisher's post view into a result, or a PartialError that keeps the post id
 // (and what did go out) for publish_post on retry.
 func finish(raw json.RawMessage, previous map[string]string) (*connector.PublishResult, error) {
 	var v postView
 	if err := json.Unmarshal(raw, &v); err != nil || v.ID == "" {
-		return nil, fmt.Errorf("cuesocial: unexpected reply %s", truncate(string(raw), 300))
+		return nil, fmt.Errorf("mcp publisher: unexpected reply %s", truncate(string(raw), 300))
 	}
 	ids := map[string]string{}
 	for k, val := range previous {
@@ -500,9 +580,9 @@ func finish(raw json.RawMessage, previous map[string]string) (*connector.Publish
 	}
 	switch v.Status {
 	case "published", "scheduled", "publishing":
-		return &connector.PublishResult{ExternalIDs: ids, Details: map[string]any{"cuesocial_status": v.Status}}, nil
+		return &connector.PublishResult{ExternalIDs: ids, Details: map[string]any{"status": v.Status}}, nil
 	}
-	msg := fmt.Sprintf("CueSocial post %s is %s", v.ID, v.Status)
+	msg := fmt.Sprintf("post %s is %s", v.ID, v.Status)
 	if len(failed) > 0 {
 		msg += ": " + strings.Join(failed, "; ")
 	}

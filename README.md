@@ -89,7 +89,7 @@ sends them to Postiz.
 
 | Kind | Types |
 |---|---|
-| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio), channels optionally picked per post · `cuesocial` - CueSocial over MCP, posting to the Threads/Instagram accounts picked per post (threads, carousels, videos and reels; videos are uploaded straight to CueSocial) |
+| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio), channels optionally picked per post · `mcp_publisher` - any MCP server that follows the [publisher contract](docs/publisher-mcp.md), posting to the Threads/Instagram accounts picked per post (threads, carousels, videos and reels; videos are uploaded straight to the server) |
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
@@ -129,8 +129,9 @@ Then:
    *Settings → Developers*.
 2. **CueFlow → Connectors**:
    - *Postiz (MCP)* - endpoint `http://postiz:5000/api/mcp`, paste the API key, press **Test**.
-     Or *CueSocial* - endpoint `https://<your CueSocial>/mcp` plus a Cloudflare Access service token; you then
-     pick the Threads/Instagram accounts for each post in the review editor.
+     Or *MCP publisher* - the endpoint of a server that follows the [publisher contract](docs/publisher-mcp.md), with a
+     bearer token or secret headers (such as a Cloudflare Access service token); you then pick the Threads/Instagram
+     accounts for each post in the review editor.
    - an LLM - e.g. *Anthropic Claude* (model `claude-opus-5-5`) or *OpenAI-compatible* pointing at Ollama.
    - one or more sources - e.g. an RSS feed.
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
@@ -329,7 +330,7 @@ cmd/cueflow            the binary (serve | migrate | genkey | healthcheck | rota
 cmd/mock-postiz-mcp    Postiz MCP stand-in for development
 internal/domain        post state machine, platform rules
 internal/connector     plugin registry, interfaces, config specs
-internal/connectors/*  built-in plugins (postiz, cuesocial, rss, imap, searxng, tavily, openai, anthropic, smtp)
+internal/connectors/*  built-in plugins (postiz, mcppublisher, rss, imap, searxng, tavily, openai, anthropic, smtp)
 internal/agent         pipeline draft generator (LLM tool loop)
 internal/crew          agent team runner: task claiming, tools, delegation, default roles
 internal/acpdrive      drives external agents over ACP (used by the server and by runners)

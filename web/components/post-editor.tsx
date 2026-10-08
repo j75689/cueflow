@@ -63,7 +63,7 @@ export function effectivePublisher(
 }
 
 /**
- * How a publisher takes accounts: "required" (CueSocial: every post names its accounts),
+ * How a publisher takes accounts: "required" (MCP publisher: every post names its accounts),
  * "optional" (Postiz: unpicked platforms use its channel mapping), or null.
  */
 export function accountMode(c: Connector | undefined, types: ConnectorSpec[]): "required" | "optional" | null {
@@ -323,7 +323,7 @@ export function PostEditor({
           </Field>
           <Field
             label="Link card"
-            help="Shown as a link preview on Threads, on the last part without images (CueSocial)."
+            help="Shown as a link preview on Threads, on the last part without images (MCP publisher)."
           >
             <Input
               value={draft.link_url}

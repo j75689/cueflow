@@ -1,4 +1,4 @@
-package cuesocial
+package mcppublisher
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,20 +20,29 @@ import (
 	"github.com/j75689/cueflow/internal/connector"
 )
 
-// fakeCueSocial mimics CueSocial's MCP tools. createStatus decides how create_post ends.
-type fakeCueSocial struct {
+// fakePublisher mimics a publisher MCP server. createStatus decides how create_post ends; rename gives
+// a tool another name (the connector's tool settings).
+type fakePublisher struct {
 	mu           sync.Mutex
+	rename       map[string]string // default tool name -> name this server uses
 	createStatus string
 	block        chan struct{}
 	calls        []string
 	lastCreate   map[string]any
 	headers      http.Header
-	localMedia   bool   // create_upload refuses, like a CueSocial that keeps media locally
+	localMedia   bool   // create_upload refuses, like a publisher that keeps media locally
 	uploaded     []byte // body received at the signed upload URL
 	uploadHeader http.Header
 }
 
-func (f *fakeCueSocial) record(name string) {
+func (f *fakePublisher) name(def string) string {
+	if n := f.rename[def]; n != "" {
+		return n
+	}
+	return def
+}
+
+func (f *fakePublisher) record(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, name)
@@ -43,9 +53,9 @@ func jsonResult(v any) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}
 }
 
-func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cuesocial", Version: "test"}, nil)
-	srv.AddTool(&mcp.Tool{Name: "list_accounts", InputSchema: map[string]any{"type": "object"}},
+func (f *fakePublisher) server(t *testing.T) *httptest.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "publisher", Version: "test"}, nil)
+	srv.AddTool(&mcp.Tool{Name: f.name("list_accounts"), InputSchema: map[string]any{"type": "object"}},
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("list_accounts")
 			return jsonResult(map[string]any{"accounts": []map[string]any{
@@ -55,7 +65,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 				{"id": "th9", "platform": "threads", "username": "sandbox", "tag": "test"},
 			}}), nil
 		})
-	srv.AddTool(&mcp.Tool{Name: "create_post", InputSchema: map[string]any{"type": "object"}},
+	srv.AddTool(&mcp.Tool{Name: f.name("create_post"), InputSchema: map[string]any{"type": "object"}},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("create_post")
 			var in map[string]any
@@ -83,7 +93,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 			return jsonResult(map[string]any{"id": "post-1", "status": status, "results": results}), nil
 		})
 	var base string
-	srv.AddTool(&mcp.Tool{Name: "create_upload", InputSchema: map[string]any{"type": "object"}},
+	srv.AddTool(&mcp.Tool{Name: f.name("create_upload"), InputSchema: map[string]any{"type": "object"}},
 		func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("create_upload")
 			if f.localMedia {
@@ -97,7 +107,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 			return jsonResult(map[string]any{"upload_url": base + "/upload/vid-1", "method": "PUT", "key": "uploads/vid-1.mp4",
 				"headers": map[string]string{"Content-Type": in.ContentType, "X-Goog-Content-Length-Range": fmt.Sprintf("0,%d", in.Size)}}), nil
 		})
-	srv.AddTool(&mcp.Tool{Name: "publish_post", InputSchema: map[string]any{"type": "object"}},
+	srv.AddTool(&mcp.Tool{Name: f.name("publish_post"), InputSchema: map[string]any{"type": "object"}},
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("publish_post")
 			return jsonResult(map[string]any{"id": "post-1", "status": "published", "results": []map[string]any{
@@ -126,7 +136,7 @@ func (f *fakeCueSocial) server(t *testing.T) *httptest.Server {
 	return ts
 }
 
-func newPublisher(t *testing.T, f *fakeCueSocial) *Publisher {
+func newPublisher(t *testing.T, f *fakePublisher) *Publisher {
 	ts := f.server(t)
 	inst, err := New(connector.Config{"endpoint_url": ts.URL, "cf_client_id": "cid", "cf_client_secret": "csecret"},
 		connector.Env{HTTPClient: ts.Client()})
@@ -142,7 +152,7 @@ func req(accounts ...string) connector.PublishRequest {
 }
 
 func TestTestAndAccounts(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	res, _ := p.Test(context.Background())
 	if !res.OK || !strings.Contains(res.Message, "4 accounts") || !strings.Contains(res.Message, "threads @brand") {
@@ -158,7 +168,7 @@ func TestTestAndAccounts(t *testing.T) {
 }
 
 func TestPublish(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	res, err := p.Publish(context.Background(), req("th1"))
 	if err != nil {
@@ -174,12 +184,12 @@ func TestPublish(t *testing.T) {
 }
 
 func TestPublishValidation(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	cases := map[string]connector.PublishRequest{
-		"no CueSocial accounts chosen": req(),
-		"no longer connected":          req("gone"),
-		"not one of this post's":       req("ig1"),
+		"no accounts chosen":     req(),
+		"no longer connected":    req("gone"),
+		"not one of this post's": req("ig1"),
 	}
 	long := req("th1")
 	long.Parts = []string{"ok", strings.Repeat("字", 501)}
@@ -217,14 +227,14 @@ func TestPublishValidation(t *testing.T) {
 }
 
 func TestScheduled(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "scheduled"}
+	f := &fakePublisher{createStatus: "scheduled"}
 	p := newPublisher(t, f)
 	r := req("th1", "th2")
 	at := time.Now().Add(time.Hour)
 	r.ScheduledAt = &at
 	r.MediaURLs = []string{"https://cdn.example.com/a.png"}
 	res, err := p.Publish(context.Background(), r)
-	if err != nil || res.Details["cuesocial_status"] != "scheduled" {
+	if err != nil || res.Details["status"] != "scheduled" {
 		t.Fatalf("scheduled: %+v %v", res, err)
 	}
 	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
@@ -234,7 +244,7 @@ func TestScheduled(t *testing.T) {
 }
 
 func TestPartialThenRetryUsesPublishPost(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "partial"}
+	f := &fakePublisher{createStatus: "partial"}
 	p := newPublisher(t, f)
 	_, err := p.Publish(context.Background(), req("th1", "th2"))
 	var partial *connector.PartialError
@@ -259,7 +269,7 @@ func TestPartialThenRetryUsesPublishPost(t *testing.T) {
 }
 
 func TestRejectedIsPlainError(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "rejected"}
+	f := &fakePublisher{createStatus: "rejected"}
 	p := newPublisher(t, f)
 	_, err := p.Publish(context.Background(), req("th1"))
 	var partial *connector.PartialError
@@ -269,7 +279,7 @@ func TestRejectedIsPlainError(t *testing.T) {
 }
 
 func TestTimeoutWarnsItMayHaveGoneOut(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published", block: make(chan struct{})}
+	f := &fakePublisher{createStatus: "published", block: make(chan struct{})}
 	defer close(f.block)
 	p := newPublisher(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -282,7 +292,7 @@ func TestTimeoutWarnsItMayHaveGoneOut(t *testing.T) {
 }
 
 func TestStoredImageIsUploaded(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	r := req("th1")
 	r.MediaURLs = []string{"http://cueflow:3000/media/abc"}
@@ -298,7 +308,7 @@ func TestStoredImageIsUploaded(t *testing.T) {
 }
 
 func TestThreadWithImages(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	r := req("th1", "ig1")
 	r.Platforms = []string{"threads", "instagram"}
@@ -323,7 +333,7 @@ func TestThreadWithImages(t *testing.T) {
 }
 
 func TestTopicAndLink(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	r := req("th1")
 	r.Topic, r.Link = "#日文學習", "https://futureindex.ai/blog/1"
@@ -369,7 +379,7 @@ func TestTopicAndLink(t *testing.T) {
 
 func TestStoredVideoUpload(t *testing.T) {
 	video := []byte("\x00\x00\x00\x18ftypmp42-fake-video")
-	mk := func(f *fakeCueSocial, public string) *Publisher {
+	mk := func(f *fakePublisher, public string) *Publisher {
 		ts := f.server(t)
 		inst, _ := New(connector.Config{"endpoint_url": ts.URL, "public_media_base_url": public}, connector.Env{HTTPClient: ts.Client()})
 		return inst.(*Publisher)
@@ -380,8 +390,8 @@ func TestStoredVideoUpload(t *testing.T) {
 	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0], Stored: true,
 		Load: func(context.Context) ([]byte, string, error) { return video, "video/mp4", nil }}}
 
-	// Default: uploaded to CueSocial's signed URL, then referenced by key.
-	f := &fakeCueSocial{createStatus: "published"}
+	// Default: uploaded to the publisher's signed URL, then referenced by key.
+	f := &fakePublisher{createStatus: "published"}
 	if _, err := mk(f, "").Publish(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
@@ -394,8 +404,8 @@ func TestStoredVideoUpload(t *testing.T) {
 		t.Fatalf("upload: %q %v", f.uploaded, f.uploadHeader)
 	}
 
-	// A CueSocial without direct uploads fetches from the public media URL instead.
-	f = &fakeCueSocial{createStatus: "published", localMedia: true}
+	// A publisher without direct uploads fetches from the public media URL instead.
+	f = &fakePublisher{createStatus: "published", localMedia: true}
 	if _, err := mk(f, "https://media.example.com/").Publish(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
@@ -405,16 +415,16 @@ func TestStoredVideoUpload(t *testing.T) {
 	}
 
 	// Neither works: a clear error, nothing created.
-	f = &fakeCueSocial{createStatus: "published", localMedia: true}
+	f = &fakePublisher{createStatus: "published", localMedia: true}
 	if _, err := mk(f, "").Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), "upload video 1") {
 		t.Fatalf("no upload, no public URL: %v", err)
 	}
 }
 
 func TestTestAndRealAccountsDontMix(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
-	if _, err := p.Publish(context.Background(), req("th1", "th9")); err == nil || !strings.Contains(err.Error(), "never mixes test accounts") {
+	if _, err := p.Publish(context.Background(), req("th1", "th9")); err == nil || !strings.Contains(err.Error(), "are never mixed with real ones") {
 		t.Fatalf("mixed accounts: %v", err)
 	}
 	if _, err := p.Publish(context.Background(), req("th9")); err != nil {
@@ -423,7 +433,7 @@ func TestTestAndRealAccountsDontMix(t *testing.T) {
 }
 
 func TestInstagramIgnoresTopicAndLink(t *testing.T) {
-	f := &fakeCueSocial{createStatus: "published"}
+	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	r := req("ig1")
 	r.Platforms = []string{"instagram"}
@@ -434,5 +444,144 @@ func TestInstagramIgnoresTopicAndLink(t *testing.T) {
 	}
 	if f.lastCreate["link"] != nil || f.lastCreate["topic"] != nil {
 		t.Fatalf("topic/link must not be sent for Instagram-only posts: %v", f.lastCreate)
+	}
+}
+
+// headersOf connects the publisher built from cfg to a fake server and returns what that server saw.
+func headersOf(t *testing.T, cfg connector.Config) http.Header {
+	t.Helper()
+	f := &fakePublisher{createStatus: "published"}
+	ts := f.server(t)
+	cfg["endpoint_url"] = ts.URL
+	inst, err := New(cfg, connector.Env{HTTPClient: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := inst.(*Publisher).Test(context.Background()); !res.OK {
+		t.Fatalf("test: %+v", res)
+	}
+	return f.headers
+}
+
+func TestAuthSettingsBecomeHeaders(t *testing.T) {
+	h := headersOf(t, connector.Config{
+		"auth_token":     "tok",
+		"headers":        map[string]any{"X-Team": "ops"},
+		"secret_headers": "CF-Access-Client-Id: id-1\n# a comment\n\nCF-Access-Client-Secret: s3cret: with colon\n",
+	})
+	for k, want := range map[string]string{"Authorization": "Bearer tok", "X-Team": "ops", "Cf-Access-Client-Id": "id-1",
+		"Cf-Access-Client-Secret": "s3cret: with colon"} {
+		if got := h.Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+	// What an install made while this was the CueSocial connector has stored.
+	h = headersOf(t, connector.Config{"cf_client_id": "old-id", "cf_client_secret": "old-secret"})
+	if h.Get("Cf-Access-Client-Id") != "old-id" || h.Get("Cf-Access-Client-Secret") != "old-secret" {
+		t.Errorf("older Cloudflare settings are not sent: %v", h)
+	}
+	if h = headersOf(t, connector.Config{}); h.Get("Authorization") != "" {
+		t.Errorf("no settings, no credentials: %v", h)
+	}
+}
+
+func TestBadSettingsAreRefused(t *testing.T) {
+	if _, err := New(connector.Config{}, connector.Env{}); err == nil || !strings.Contains(err.Error(), "endpoint") {
+		t.Errorf("no endpoint: %v", err)
+	}
+	if _, err := New(connector.Config{"endpoint_url": "https://x/mcp", "secret_headers": "no colon here"}, connector.Env{}); err == nil ||
+		!strings.Contains(err.Error(), "Header-Name: value") {
+		t.Errorf("a secret header line without a colon: %v", err)
+	}
+}
+
+// The tool names are settings: a server that calls them something else works, and the defaults are
+// not used.
+func TestToolNamesAreSettings(t *testing.T) {
+	f := &fakePublisher{createStatus: "partial", rename: map[string]string{
+		"list_accounts": "accounts_list", "create_post": "post_create", "publish_post": "post_publish", "create_upload": "upload_create"}}
+	ts := f.server(t)
+	inst, err := New(connector.Config{"endpoint_url": ts.URL, "list_tool": "accounts_list", "create_tool": "post_create",
+		"publish_tool": "post_publish", "upload_tool": "upload_create"}, connector.Env{HTTPClient: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := inst.(*Publisher)
+	if res, _ := p.Test(context.Background()); !res.OK {
+		t.Fatalf("test: %+v", res)
+	}
+	r := req("th1", "th2")
+	r.Platforms = []string{"threads"}
+	r.MediaURLs = []string{"http://cueflow:3000/media/abc.mp4"}
+	r.Media = []connector.MediaFile{{URL: r.MediaURLs[0], Stored: true,
+		Load: func(context.Context) ([]byte, string, error) { return []byte("VIDEO"), "video/mp4", nil }}}
+	_, err = p.Publish(context.Background(), r)
+	var partial *connector.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("partial: %v", err)
+	}
+	r.Previous = partial.ExternalIDs
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	// The fake records the default names, whichever name the call came in under.
+	for _, want := range []string{"list_accounts", "create_upload", "create_post", "publish_post"} {
+		if !slices.Contains(f.calls, want) {
+			t.Errorf("%s never called under its configured name: %v", want, f.calls)
+		}
+	}
+	// A server that still uses the defaults, asked by the wrong names, finds nothing.
+	g := &fakePublisher{createStatus: "published"}
+	gs := g.server(t)
+	bad, _ := New(connector.Config{"endpoint_url": gs.URL, "list_tool": "accounts_list"}, connector.Env{HTTPClient: gs.Client()})
+	if res, _ := bad.(*Publisher).Test(context.Background()); res.OK {
+		t.Errorf("a tool that does not exist must fail the test: %+v", res)
+	}
+}
+
+// A post whose first attempt was made by the CueSocial connector recorded its id under the old key;
+// retrying it still finishes that post instead of creating a second one.
+func TestRetryFindsAnIdRecordedUnderTheOldKey(t *testing.T) {
+	f := &fakePublisher{createStatus: "published"}
+	p := newPublisher(t, f)
+	r := req("th1", "th2")
+	r.Previous = map[string]string{"cuesocial": "post-1"}
+	if _, err := p.Publish(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) == 0 || f.calls[len(f.calls)-1] != "publish_post" || slices.Contains(f.calls, "create_post") {
+		t.Fatalf("the retry must use publish_post and not create again: %v", f.calls)
+	}
+}
+
+// Installs that have a connector of the old type keep working, and nobody is offered it for a new one.
+func TestOldTypeStillLoadsButIsNotOffered(t *testing.T) {
+	var current, old *connector.Spec
+	for _, s := range connector.Specs() {
+		switch s.Type {
+		case "mcp_publisher":
+			current = &s
+		case "cuesocial":
+			old = &s
+		}
+	}
+	if current == nil || old == nil {
+		t.Fatalf("both types must be registered: %v %v", current, old)
+	}
+	if current.Hidden || !old.Hidden {
+		t.Errorf("only the old type is hidden: current=%v old=%v", current.Hidden, old.Hidden)
+	}
+	if len(old.Fields) != len(current.Fields) || !old.Accounts || !old.AccountsRequired {
+		t.Errorf("the old type must take the same settings: %d vs %d fields", len(old.Fields), len(current.Fields))
+	}
+	f := &fakePublisher{createStatus: "published"}
+	ts := f.server(t)
+	inst, err := connector.Build("cuesocial", connector.Config{"endpoint_url": ts.URL, "cf_client_id": "cid", "cf_client_secret": "cs"},
+		connector.Env{HTTPClient: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := inst.Test(context.Background()); !res.OK {
+		t.Fatalf("a connector of the old type: %+v", res)
 	}
 }

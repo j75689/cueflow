@@ -118,7 +118,7 @@ machines (runners, MCP clients, social platforms) ─► the run.app URL directl
 ```
 
 1. **A hostname** on a Cloudflare zone, served by a small Worker that forwards to the service
-   (`cueflow/edge/` in the IaC-deployments repo, the same shape as CueSocial's).
+   (`cueflow/edge/` in the IaC-deployments repo, the same shape as a publisher's).
 2. **An Access application** for that hostname in Zero Trust → Access → Applications, with an Allow
    policy for the people who may sign in. Note its **Application Audience (AUD) tag** and your team
    domain (`<team>.cloudflareaccess.com`).

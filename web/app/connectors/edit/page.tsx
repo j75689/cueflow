@@ -612,7 +612,9 @@ function ConnectorEdit() {
         }
       />
 
-      {!spec && isNew && <TypePicker specs={specs} onPick={pick} />}
+      {!spec && isNew && (
+        <TypePicker specs={specs.filter((s) => !s.hidden)} onPick={pick} />
+      )}
       {!spec && !isNew && c && (
         <ErrorBox>
           Unknown connector type <code>{c.type}</code> — the server no longer

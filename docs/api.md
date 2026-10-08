@@ -106,9 +106,9 @@ Posts and pipelines of the org; connectors are global.
   "image_prompt":"string",
   "platforms":["threads"],
   "media_urls":["https://..."],
-  "accounts":["acc-id"],                  // per-account publishers (CueSocial): accounts to post to
-  "topic":"string",                       // Threads topic tag (CueSocial); others ignore it
-  "link_url":"https://...",               // link preview card (CueSocial, Threads)
+  "accounts":["acc-id"],                  // per-account publishers (MCP publisher): accounts to post to
+  "topic":"string",                       // Threads topic tag (MCP publisher); others ignore it
+  "link_url":"https://...",               // link preview card (MCP publisher, Threads)
   "status":"PENDING_REVIEW",
   "review_note":"string",                 // reject reason
   "source_context":{"topic":"...","items":[{"title":"...","url":"...","source":"Hacker News"}],"search":[{"title":"...","url":"..."}]},
