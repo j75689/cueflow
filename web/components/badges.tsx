@@ -42,6 +42,7 @@ export function StatusBadge({ status, className }: { status: PostStatus; classNa
 const PLATFORM_STYLE: Record<string, string> = {
   threads: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
   instagram: "bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-300",
+  youtube: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   x: "bg-zinc-200 text-zinc-900 dark:bg-zinc-700 dark:text-zinc-100",
   linkedin: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
 };

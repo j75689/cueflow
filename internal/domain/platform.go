@@ -19,6 +19,9 @@ type Platform struct {
 	Style string `json:"-"`
 }
 
+// YouTubeTitleMax is how much of a YouTube post's first line is kept as the title.
+const YouTubeTitleMax = 100
+
 var platforms = []Platform{
 	{
 		ID: "threads", Name: "Threads", MaxChars: 500, SupportsThread: true, MaxHashtags: 1,
@@ -31,6 +34,14 @@ var platforms = []Platform{
 		Style: "A hook line, then tidy short paragraphs and a bulleted summary of the key points. " +
 			"End with 5-15 relevant popular hashtags (returned separately, not in the body). " +
 			"Also provide an image_prompt describing a single eye-catching visual for the post. No markdown.",
+	},
+	{
+		// A Short: one vertical or square video of up to 3 minutes. The first line of the text is the
+		// title (YouTube cuts it at 100 characters) and the rest is the description.
+		ID: "youtube", Name: "YouTube", MaxChars: 5000, MaxHashtags: 15, RequiresMedia: true,
+		Style: "A YouTube Short. The first line is the video title (at most 100 characters, no < or >), " +
+			"then a short description with the key points. A few relevant hashtags (returned separately). " +
+			"It needs one vertical video of up to 3 minutes. No markdown.",
 	},
 	{
 		ID: "x", Name: "X", MaxChars: 280, SupportsThread: true, MaxHashtags: 3,
@@ -100,6 +111,15 @@ func (p *Post) ComputeWarnings() []string {
 		}
 		if pl.MaxHashtags > 0 && len(p.Hashtags) > pl.MaxHashtags {
 			w = append(w, fmt.Sprintf("%s: %d hashtags, limit is %d", id, len(p.Hashtags), pl.MaxHashtags))
+		}
+		if id == "youtube" {
+			title, _, _ := strings.Cut(strings.TrimSpace(strings.Join(parts, "\n\n")), "\n")
+			if n := utf8.RuneCountInString(strings.TrimSpace(title)); n > YouTubeTitleMax {
+				w = append(w, fmt.Sprintf("youtube: the first line becomes the title and is cut at %d characters (it has %d)", YouTubeTitleMax, n))
+			}
+			if strings.ContainsAny(strings.Join(parts, "\n"), "<>") {
+				w = append(w, "youtube: the title and description can't contain < or >")
+			}
 		}
 		if pl.RequiresMedia && len(p.MediaURLs) == 0 {
 			w = append(w, fmt.Sprintf("%s: requires at least one image or video", id))

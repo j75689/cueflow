@@ -63,6 +63,7 @@ func (f *fakePublisher) server(t *testing.T) *httptest.Server {
 				{"id": "th2", "platform": "threads", "username": "me"},
 				{"id": "ig1", "platform": "instagram", "username": "brand.ig"},
 				{"id": "th9", "platform": "threads", "username": "sandbox", "tag": "test"},
+				{"id": "yt1", "platform": "youtube", "username": "brand-channel"},
 			}}), nil
 		})
 	srv.AddTool(&mcp.Tool{Name: f.name("create_post"), InputSchema: map[string]any{"type": "object"}},
@@ -155,14 +156,14 @@ func TestTestAndAccounts(t *testing.T) {
 	f := &fakePublisher{createStatus: "published"}
 	p := newPublisher(t, f)
 	res, _ := p.Test(context.Background())
-	if !res.OK || !strings.Contains(res.Message, "4 accounts") || !strings.Contains(res.Message, "threads @brand") {
+	if !res.OK || !strings.Contains(res.Message, "5 accounts") || !strings.Contains(res.Message, "threads @brand") {
 		t.Fatalf("test: %+v", res)
 	}
 	if f.headers.Get("CF-Access-Client-Id") != "cid" || f.headers.Get("CF-Access-Client-Secret") != "csecret" {
 		t.Fatalf("access headers not sent: %v", f.headers)
 	}
 	accts, err := p.ListAccounts(context.Background())
-	if err != nil || len(accts) != 4 || accts[2] != (connector.Account{ID: "ig1", Platform: "instagram", Name: "@brand.ig"}) {
+	if err != nil || len(accts) != 5 || accts[2] != (connector.Account{ID: "ig1", Platform: "instagram", Name: "@brand.ig"}) {
 		t.Fatalf("accounts: %+v %v", accts, err)
 	}
 }
@@ -583,5 +584,45 @@ func TestOldTypeStillLoadsButIsNotOffered(t *testing.T) {
 	}
 	if res, _ := inst.Test(context.Background()); !res.OK {
 		t.Fatalf("a connector of the old type: %+v", res)
+	}
+}
+
+func TestYouTubeNeedsExactlyOneVideo(t *testing.T) {
+	f := &fakePublisher{createStatus: "published"}
+	p := newPublisher(t, f)
+	yt := func(urls ...string) connector.PublishRequest {
+		r := req("yt1")
+		r.Platforms = []string{"youtube"}
+		r.Parts = []string{"Weekly AI recap\nfive things that mattered"}
+		r.MediaURLs = urls
+		return r
+	}
+	video := "https://cdn.example.com/reel.mp4"
+	for want, r := range map[string]connector.PublishRequest{
+		"exactly one video":     yt(),
+		"0 videos and 0 images": yt(),
+		"2 videos":              yt(video, "https://cdn.example.com/b.mp4"),
+		"1 videos and 1 images": yt(video, "https://cdn.example.com/a.png"),
+		"can't contain < or >":  func() connector.PublishRequest { r := yt(video); r.Parts = []string{"a <b> title"}; return r }(),
+	} {
+		if _, err := p.Publish(context.Background(), r); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v", want, err)
+		}
+	}
+	for _, c := range f.calls {
+		if c == "create_post" {
+			t.Fatal("an invalid YouTube post must not reach create_post")
+		}
+	}
+
+	if _, err := p.Publish(context.Background(), yt(video)); err != nil {
+		t.Fatalf("one video: %v", err)
+	}
+	part := f.lastCreate["parts"].([]any)[0].(map[string]any)
+	if v := part["video_urls"].([]any); len(v) != 1 || v[0] != video || part["image_urls"] != nil {
+		t.Fatalf("create args: %v", part)
+	}
+	if f.lastCreate["topic"] != nil || f.lastCreate["link"] != nil {
+		t.Fatalf("topic and link are Threads-only: %v", f.lastCreate)
 	}
 }

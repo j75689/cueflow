@@ -1,6 +1,6 @@
 // Package mcppublisher is a publisher connector for any MCP server that follows the publisher
-// contract below: a scheduler that posts to several Threads and Instagram accounts, including
-// threads and multi-image posts. CueFlow calls the server's MCP tools; the reviewer picks the
+// contract below: a scheduler that posts to several Threads, Instagram and YouTube accounts,
+// including threads, multi-image posts and Shorts. CueFlow calls the server's MCP tools; the reviewer picks the
 // accounts for each post (PublishRequest.Accounts). docs/publisher-mcp.md describes the contract.
 //
 // The server speaks MCP over Streamable HTTP (stateless is fine). Requests carry whatever the
@@ -74,7 +74,7 @@ func spec() connector.Spec {
 		Type:             "mcp_publisher",
 		Kind:             connector.KindPublisher,
 		Name:             "MCP publisher",
-		Description:      "Publishes approved posts to your Threads and Instagram accounts through an MCP server that follows the publisher contract (docs/publisher-mcp.md). Choose the accounts for each post when you review it.",
+		Description:      "Publishes approved posts to your Threads, Instagram and YouTube accounts through an MCP server that follows the publisher contract (docs/publisher-mcp.md). Choose the accounts for each post when you review it.",
 		Accounts:         true,
 		AccountsRequired: true,
 		Fields: []connector.Field{
@@ -426,6 +426,15 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 	}
 	if platforms["instagram"] && media > instagramMaxMedia {
 		return nil, fmt.Errorf("Instagram posts take at most %d images and videos; this post has %d", instagramMaxMedia, media)
+	}
+	if platforms["youtube"] {
+		// A Short is exactly one video: no images, no albums.
+		if v := len(videos) + len(videoKeys); v != 1 || media != 1 {
+			return nil, fmt.Errorf("YouTube takes exactly one video and no images; this post has %d videos and %d images: fix the media, or untick the YouTube account", v, media-v)
+		}
+		if strings.ContainsAny(strings.Join(texts, "\n"), "<>") {
+			return nil, errors.New("a YouTube title and description can't contain < or >: edit the text, or untick the YouTube account")
+		}
 	}
 	if platforms["threads"] && media > threadsMaxMedia {
 		return nil, fmt.Errorf("Threads posts take at most %d images and videos; this post has %d", threadsMaxMedia, media)

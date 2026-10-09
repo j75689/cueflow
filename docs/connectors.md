@@ -136,7 +136,7 @@ nearest size. Built-in: `openai_image`, `gemini_image` (AI Studio), `vertex_imag
 
 ## Per-account publishers
 
-A publisher that posts to individual accounts (several Threads or Instagram accounts, for example) sets
+A publisher that posts to individual accounts (several Threads, Instagram or YouTube accounts, for example) sets
 `Spec.Accounts` and implements `connector.AccountLister`. The review editor then lists the accounts and
 stores the reviewer's choice on the post; `Publish` receives it as `PublishRequest.Accounts`.
 

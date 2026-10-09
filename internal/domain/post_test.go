@@ -93,3 +93,24 @@ func TestValidatePlatforms(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestYouTubeWarnings(t *testing.T) {
+	p := &Post{
+		Platforms: []string{"youtube"},
+		Content:   strings.Repeat("標", 101) + "\n說明 <script>",
+	}
+	w := strings.Join(p.ComputeWarnings(), "\n")
+	for _, want := range []string{
+		"youtube: the first line becomes the title and is cut at 100 characters (it has 101)",
+		"youtube: the title and description can't contain < or >",
+		"youtube: requires at least one image or video",
+	} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warnings missing %q:\n%s", want, w)
+		}
+	}
+	ok := &Post{Platforms: []string{"youtube"}, Content: "短標題\n說明", MediaURLs: []string{"/media/x.mp4"}}
+	if got := ok.ComputeWarnings(); len(got) != 0 {
+		t.Errorf("unexpected warnings: %v", got)
+	}
+}
