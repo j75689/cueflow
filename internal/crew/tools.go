@@ -136,6 +136,7 @@ func init() {
 				"thread_parts": strList("New thread parts"), "hashtags": strList("New hashtags"),
 				"image_prompt": str("New image prompt"), "topic": str("New Threads topic tag (empty removes it)"),
 				"link": str("New link card URL (empty removes it)"), "note": str("Why you changed it"),
+				"media_urls": strList("Replace the attached images or videos (CueFlow media URLs like /media/... returned by tools, or public https URLs); an empty list removes them"),
 			}, "post_id"), run: toolReviseDraft},
 
 		// --- imaging ---
@@ -414,16 +415,9 @@ func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		// No link card given: show the main source, so readers can always open it (Threads only).
 		a.Link = strings.TrimSpace(a.SourceURLs[0])
 	}
-	var mediaURLs []string
-	for _, u := range a.MediaURLs {
-		u = strings.TrimSpace(u)
-		if u == "" {
-			continue
-		}
-		if _, stored := media.IDFromURL(u); !(stored && strings.HasPrefix(u, media.PathPrefix)) && !strings.HasPrefix(u, "https://") {
-			return "", fmt.Errorf("media_urls must be CueFlow media URLs (/media/...) or https URLs, got %q", u)
-		}
-		mediaURLs = append(mediaURLs, u)
+	mediaURLs, err := cleanMediaURLs(a.MediaURLs)
+	if err != nil {
+		return "", err
 	}
 	var publishAt *time.Time
 	if s := strings.TrimSpace(a.PublishAt); s != "" {
@@ -597,6 +591,22 @@ func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 	return jsonResult(out)
 }
 
+// cleanMediaURLs trims the list and accepts only CueFlow media URLs (/media/...) and public https URLs.
+func cleanMediaURLs(in []string) ([]string, error) {
+	var out []string
+	for _, u := range in {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if _, stored := media.IDFromURL(u); !(stored && strings.HasPrefix(u, media.PathPrefix)) && !strings.HasPrefix(u, "https://") {
+			return nil, fmt.Errorf("media_urls must be CueFlow media URLs (/media/...) or https URLs, got %q", u)
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
 func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct {
 		PostID      string    `json:"post_id"`
@@ -607,6 +617,7 @@ func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 		ImagePrompt *string   `json:"image_prompt"`
 		Topic       *string   `json:"topic"`
 		Link        *string   `json:"link"`
+		MediaURLs   *[]string `json:"media_urls"`
 		Note        string    `json:"note"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
@@ -623,13 +634,21 @@ func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (strin
 	if !cur.Status.Editable() {
 		return "", fmt.Errorf("post is %s and can no longer be edited", cur.Status)
 	}
+	var mediaPatch *[]string
+	if a.MediaURLs != nil {
+		urls, err := cleanMediaURLs(*a.MediaURLs)
+		if err != nil {
+			return "", err
+		}
+		mediaPatch = &urls
+	}
 	note := fmt.Sprintf("revised by @%s", e.agent.Slug)
 	if a.Note != "" {
 		note += ": " + a.Note
 	}
 	p, err := e.c.store.UpdatePostAs(ctx, id, cur.Version, store.PostPatch{Title: a.Title, Content: a.Content,
-		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt, Topic: a.Topic, LinkURL: a.Link},
-		domain.ActorAgent, note)
+		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt, Topic: a.Topic, LinkURL: a.Link,
+		MediaURLs: mediaPatch}, domain.ActorAgent, note)
 	if err != nil {
 		return "", err
 	}
