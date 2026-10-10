@@ -8,8 +8,8 @@
 # Creates: the APIs, the service account the service runs as, the media bucket, the Cloud Tasks
 # queue, the permissions between them, the Artifact Registry remote repository "ghcr" if
 # it is missing (Cloud Run pulls ghcr.io images through it), the private repository "apps" for
-# images that must not be public, and the account of the reels renderer (it may only create files
-# under uploads/ in the media bucket, which a lifecycle rule empties after a day).
+# images that must not be public, and the accounts of the reels renderer and of the lessons runner (each may only
+# create files under uploads/ in the media bucket, which a lifecycle rule empties after a day).
 # Does NOT create: the database (Supabase, see deploy/cloudrun/README.md), the service itself, the
 # secrets, or the Scheduler job (all in IaC-deployments/cueflow/anyship.yaml).
 #
@@ -27,6 +27,8 @@ SA_NAME=${SA_NAME:-cueflow-run}
 SA="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 RENDER_SA_NAME=${RENDER_SA_NAME:-cueflow-render}
 RENDER_SA="${RENDER_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
+LESSONS_SA_NAME=${LESSONS_SA_NAME:-cueflow-lessons}
+LESSONS_SA="${LESSONS_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 g() { gcloud --project "$PROJECT" --quiet "$@"; }
 
@@ -75,6 +77,17 @@ for role in roles/aiplatform.user roles/serviceusage.serviceUsageConsumer; do
   g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:${RENDER_SA}" \
     --role "$role" --condition=None >/dev/null
 done
+# The lessons runner (your-lessons-runner) makes videos on a machine of its own and hands them over the same way, with
+# a key kept on that machine. It gets only what the key needs: create files under uploads/. It is not on the Vertex
+# roles above, and CueFlow must list it in CUEFLOW_MEDIA_REGISTER_ACCOUNTS (IaC-deployments/cueflow/anyship.yaml).
+# The key itself is made by the person who owns that machine:
+#   gcloud iam service-accounts keys create secrets/lessons-sa.json --iam-account "$LESSONS_SA"
+echo "== lessons runner account $LESSONS_SA"
+g iam service-accounts describe "$LESSONS_SA" >/dev/null 2>&1 \
+  || g iam service-accounts create "$LESSONS_SA_NAME" --display-name "CueFlow lessons runner"
+g storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member "serviceAccount:${LESSONS_SA}" --role roles/storage.objectCreator \
+  --condition="title=uploads-only,expression=resource.name.startsWith(\"projects/_/buckets/${BUCKET}/objects/uploads/\")" >/dev/null
 # Files nobody registered (refused, or the call failed) go away after a day; any other rule stays.
 echo "== lifecycle: uploads/ expires after 1 day"
 LC=$(mktemp)
