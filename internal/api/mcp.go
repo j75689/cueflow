@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -38,6 +39,7 @@ func (s *Server) mcpHandler() http.Handler {
 		}
 		return operator
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	serve := mcpx.NoStandaloneStream(h) // no GET stream held open (Cloud Run bills an open request)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		// An agent token acts as that agent: it sees and works only that agent's tasks.
@@ -47,7 +49,7 @@ func (s *Server) mcpHandler() http.Handler {
 				writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or revoked agent token")
 				return
 			}
-			h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentKey{}, a)))
+			serve.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentKey{}, a)))
 			return
 		}
 		if s.MCPToken == "" {
@@ -58,7 +60,7 @@ func (s *Server) mcpHandler() http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid MCP token")
 			return
 		}
-		h.ServeHTTP(w, r)
+		serve.ServeHTTP(w, r)
 	})
 }
 

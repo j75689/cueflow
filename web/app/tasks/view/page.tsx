@@ -73,12 +73,13 @@ function TaskView() {
   useOrgFollow(task.data?.org_id);
 
   useServerEvent("task.message", (d) => {
-    if (d.task_id === id) void messages.reload();
+    if (d.resync || d.task_id === id) void messages.reload();
   });
   useServerEvent(["task.updated", "task.deleted"], (d) => {
     const t = task.data;
     if (!t) return;
     const related =
+      d.resync ||
       d.id === id ||
       d.id === t.parent_id ||
       (t.subtasks ?? []).some((s) => s.id === d.id);

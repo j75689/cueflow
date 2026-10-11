@@ -99,7 +99,7 @@ function PostView() {
   const dirty = Object.keys(changes).length > 0;
 
   useServerEvent("post.updated", (d) => {
-    if (d.id !== id) return;
+    if (!d.resync && d.id !== id) return;
     void audit.reload();
     if (dirty) setStale(true);
     else void post.reload();

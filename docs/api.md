@@ -324,7 +324,7 @@ A schedule creates a new task for an agent on a cron expression (agents with `pl
 
 ## Runners
 
-A Runner is a machine you own that works agents' tasks: `cueflow runner run` long-polls CueFlow for jobs
+A Runner is a machine you own that works agents' tasks: `cueflow runner run` polls CueFlow for jobs (every 20 s by default, each claim answered at once; `poll_interval: 0` in `runner.json` or `CUEFLOW_RUNNER_POLL_INTERVAL=0` long-polls instead)
 (outbound HTTP only), launches the agent CLI locally (Claude Code, Codex, ...) with that machine's own
 credentials, and reports back. Point an agent at runners with a `runner_pool` runtime connector
 (`labels`, `preset`, `model`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`). `model` (also a field of
@@ -359,7 +359,7 @@ reverse proxy that guards the admin API must let this path through. A runner spe
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/register` | `{token, name, version, platform, labels, concurrency, protocol}` trades a registration token for a runner token (`401` if used/expired). Labels set at registration win; the runner's own are used only when the registration has none |
-| POST | `/jobs/claim` | `{protocol}`; long-polls up to 25 s → `200 {id, task_id, title, preset, prompt, mcp_path, timeout_seconds, allow_web}` or `204`. `401` once the runner is revoked or disabled. The runner reaches the tool server at its registered URL + `mcp_path` |
+| POST | `/jobs/claim` | `{protocol, wait?}`; holds the request up to `wait` seconds (0–25) for work to arrive, 25 when `wait` is absent (the long poll of older runners) → `200 {id, task_id, title, preset, prompt, mcp_path, timeout_seconds, allow_web}` or `204`. `401` once the runner is revoked or disabled. The runner reaches the tool server at its registered URL + `mcp_path` |
 | POST | `/jobs/{id}/events` | `{events:[{kind: message\|tool_call\|tool_result\|system, content, data}]}` → thread messages; also extends the lease. → `{"cancel":bool}` |
 | POST | `/jobs/{id}/heartbeat` | Extends the 2-minute lease (send every 30 s) → `{"cancel":bool}`; `cancel` means stop the agent |
 | POST | `/jobs/{id}/complete` | `{stop_reason, final_text, agent_name, tool_calls, input_tokens, output_tokens, error, timed_out, canceled}` → `{"accepted":bool}` |

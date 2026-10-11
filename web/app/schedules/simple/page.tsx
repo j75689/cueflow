@@ -131,7 +131,7 @@ function PipelineEdit() {
   );
   const refreshRuns = useDebouncedCallback(() => void runs.reload(), 300);
   useServerEvent("run.updated", (d) => {
-    if (d.pipeline_id === id) refreshRuns();
+    if (d.resync || d.pipeline_id === id) refreshRuns();
   });
 
   const [form, setForm] = useState<PipelineInput | null>(

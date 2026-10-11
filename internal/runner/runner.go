@@ -58,6 +58,19 @@ type Config struct {
 	// CUEFLOW_RUNNER_ALLOW_SHELL can turn it on: the server cannot ask for it. Give it a runner of its
 	// own, in a container, with credentials limited to what the agent needs.
 	AllowShell bool `json:"allow_shell,omitempty"`
+	// PollInterval is how many seconds to wait between claims that found no work (default
+	// runnerapi.DefaultPollInterval). Each claim is answered at once, so nothing is held open on the server
+	// in between. 0 long-polls instead: work is picked up the moment it appears, but the server is kept
+	// busy (and, on Cloud Run, billed) the whole time. CUEFLOW_RUNNER_POLL_INTERVAL overrides it.
+	PollInterval *int `json:"poll_interval,omitempty"`
+}
+
+// pollEvery is the wait between empty claims; 0 means long polling.
+func (c *Config) pollEvery() time.Duration {
+	if c.PollInterval == nil {
+		return runnerapi.DefaultPollInterval * time.Second
+	}
+	return time.Duration(max(0, *c.PollInterval)) * time.Second
 }
 
 // DefaultConfigPath is cueflow/runner.json under the OS user config dir (macOS: ~/Library/Application
@@ -99,6 +112,13 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, fmt.Errorf("CUEFLOW_RUNNER_ALLOW_SHELL=%q: want true or false", v)
 		}
 		c.AllowShell = allow
+	}
+	if v := os.Getenv("CUEFLOW_RUNNER_POLL_INTERVAL"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("CUEFLOW_RUNNER_POLL_INTERVAL=%q: want a number of seconds (0 long-polls)", v)
+		}
+		c.PollInterval = &n
 	}
 	return &c, nil
 }
@@ -180,6 +200,11 @@ func status(args []string) error {
 	}
 	if c.AllowShell {
 		fmt.Println("shell: allowed (agents may run commands and edit files here)")
+	}
+	if every := c.pollEvery(); every > 0 {
+		fmt.Printf("polling every %s\n", every)
+	} else {
+		fmt.Println("long polling (the server is kept busy while it waits)")
 	}
 	hc := &http.Client{Timeout: 5 * time.Second}
 	resp, err := hc.Get(c.URL + "/api/v1/health")
@@ -295,6 +320,12 @@ func (r *Runner) Loop(ctx context.Context) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	backoff := time.Second
+	every := r.cfg.pollEvery()
+	claim := runnerapi.ClaimRequest{Protocol: runnerapi.ProtocolVersion}
+	if every > 0 {
+		now := 0 // answer at once; this runner asks again after `every`
+		claim.Wait = &now
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -302,11 +333,18 @@ func (r *Runner) Loop(ctx context.Context) error {
 		case slots <- struct{}{}:
 		}
 		var job runnerapi.Job
-		err := r.cfg.post(ctx, "/jobs/claim", runnerapi.ClaimRequest{Protocol: runnerapi.ProtocolVersion}, &job, true)
+		err := r.cfg.post(ctx, "/jobs/claim", claim, &job, true)
 		if err != nil {
 			<-slots
 			if errors.Is(err, errNoContent) {
 				backoff = time.Second
+				if every > 0 {
+					select {
+					case <-ctx.Done():
+						return nil
+					case <-time.After(every):
+					}
+				}
 				continue
 			}
 			var fatal *fatalError

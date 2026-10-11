@@ -98,6 +98,9 @@ export function useServerEvent(events: string | string[], fn: Listener) {
   }, [key, subscribe]);
 }
 
+/** How long a tab may be out of sight before its live updates are closed (see the SSE bus below). */
+const HIDDEN_GRACE_MS = 60_000;
+
 const SSE_EVENTS = [
   "post.updated",
   "post.deleted",
@@ -154,7 +157,7 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
   useEffect(loadMeta, [loadMeta, authEpoch]);
 
-  // SSE bus: one shared EventSource with exponential backoff reconnects.
+  // SSE bus: one shared EventSource with exponential backoff reconnects, closed while the tab is hidden.
   const listeners = useRef(new Map<string, Set<Listener>>());
   const [connected, setConnected] = useState(false);
   const subscribe = useCallback((event: string, fn: Listener) => {
@@ -173,26 +176,44 @@ export function Providers({ children }: { children: ReactNode }) {
     if (typeof EventSource === "undefined") return;
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    let sleep: ReturnType<typeof setTimeout> | null = null;
     let backoff = 1000;
     let closed = false;
+    // The stream was closed while the tab was in the background, so updates may have been missed: when it opens
+    // again, every listener is told to catch up ({ resync: true }).
+    let missed = false;
 
     const connect = () => {
-      if (closed) return;
-      es = new EventSource(eventsURL());
-      es.onopen = () => {
+      if (closed || es) return;
+      const stream = new EventSource(eventsURL());
+      es = stream;
+      stream.onopen = () => {
         backoff = 1000;
         setConnected(true);
+        if (missed) {
+          missed = false;
+          const told = new Set<Listener>();
+          for (const name of SSE_EVENTS) {
+            listeners.current.get(name)?.forEach((fn) => {
+              if (!told.has(fn)) {
+                told.add(fn);
+                fn({ resync: true });
+              }
+            });
+          }
+        }
       };
-      es.onerror = () => {
+      stream.onerror = () => {
         setConnected(false);
-        es?.close();
-        if (!closed) {
+        stream.close();
+        if (es === stream) es = null;
+        if (!closed && !document.hidden) {
           retry = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 30000);
         }
       };
       for (const name of SSE_EVENTS) {
-        es.addEventListener(name, (ev) => {
+        stream.addEventListener(name, (ev) => {
           let data: Record<string, unknown> = {};
           try {
             data = JSON.parse((ev as MessageEvent).data);
@@ -203,10 +224,39 @@ export function Providers({ children }: { children: ReactNode }) {
         });
       }
     };
+
+    // An open stream is a request the server is busy with, and Cloud Run bills the whole time one is open. A tab
+    // left in the background would keep it busy all day, so the stream closes after a minute out of sight and
+    // reopens (and catches up) when the tab is looked at again.
+    const disconnect = () => {
+      if (retry) clearTimeout(retry);
+      retry = null;
+      if (es) {
+        es.close();
+        es = null;
+        missed = true;
+        setConnected(false);
+      }
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (!sleep) sleep = setTimeout(disconnect, HIDDEN_GRACE_MS);
+        return;
+      }
+      if (sleep) clearTimeout(sleep);
+      sleep = null;
+      backoff = 1000;
+      connect();
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    if (document.hidden) onVisibility();
     connect();
     return () => {
       closed = true;
+      document.removeEventListener("visibilitychange", onVisibility);
       if (retry) clearTimeout(retry);
+      if (sleep) clearTimeout(sleep);
       es?.close();
     };
   }, [authEpoch]);

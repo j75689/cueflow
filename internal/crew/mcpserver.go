@@ -15,6 +15,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
+	"github.com/j75689/cueflow/internal/mcpx"
 )
 
 // MCPPathPrefix is where per-run tool servers are mounted on CueFlow's HTTP server.
@@ -204,12 +205,13 @@ func (c *Crew) MCPHandler() http.Handler {
 		}
 		return nil
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	serve := mcpx.NoStandaloneStream(h) // no GET stream held open (Cloud Run bills an open request)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)) == nil {
 			http.Error(w, "unknown or finished run", http.StatusNotFound)
 			return
 		}
-		h.ServeHTTP(w, r)
+		serve.ServeHTTP(w, r)
 	})
 }
 

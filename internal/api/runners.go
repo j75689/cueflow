@@ -181,7 +181,8 @@ func (s *Server) runnerRegister(w http.ResponseWriter, r *http.Request) {
 		Name: runner.Name, Labels: runner.Labels})
 }
 
-// runnerClaim long-polls for a job: it answers as soon as one is available or 204 after ClaimWait.
+// runnerClaim answers with a job as soon as one is available, or 204: at once when the runner asks with
+// wait 0 (it polls), after up to ClaimWait otherwise (a long poll).
 func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 	var req runnerapi.ClaimRequest
 	if err := decode(r, &req); err != nil {
@@ -192,7 +193,11 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runner := runnerFrom(r)
-	deadline := time.NewTimer(runnerapi.ClaimWait * time.Second)
+	wait := runnerapi.ClaimWait
+	if req.Wait != nil {
+		wait = max(0, min(*req.Wait, runnerapi.ClaimWait))
+	}
+	deadline := time.NewTimer(time.Duration(wait) * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
@@ -213,6 +218,10 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 			s.Crew.RunnerPickedUp(r.Context(), job.TaskID, runner.Name)
 			s.Broker.Publish("task.updated", map[string]any{"id": job.TaskID})
 			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		if wait == 0 {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		select {

@@ -9,8 +9,13 @@ const ProtocolVersion = 1
 // BasePath is where the runner API is mounted.
 const BasePath = "/api/runner/v1"
 
-// ClaimWait is how long a claim request waits for work before answering 204.
+// ClaimWait is the longest a claim request waits for work before answering 204.
 const ClaimWait = 25 // seconds
+
+// DefaultPollInterval is how long a runner waits between claims that found no work. It asks with Wait 0, so
+// the server answers at once: a request held open is what Cloud Run bills, and a runner that long-polled kept
+// the service billed around the clock. A job is picked up at most this much later.
+const DefaultPollInterval = 20 // seconds
 
 type RegisterRequest struct {
 	Token       string   `json:"token"`
@@ -31,6 +36,9 @@ type RegisterResponse struct {
 
 type ClaimRequest struct {
 	Protocol int `json:"protocol"`
+	// Wait is how many seconds the server may hold the request for work to arrive, up to ClaimWait; 0 answers
+	// at once. Absent means ClaimWait: the long poll of runners from before this field.
+	Wait *int `json:"wait,omitempty"`
 }
 
 // Job is one unit of work for a runner.

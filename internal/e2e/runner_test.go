@@ -55,6 +55,8 @@ func TestRunnerExecutesTask(t *testing.T) {
 	}
 	cfg.Commands = map[string]string{"custom": os.Args[0]}
 	cfg.Env = map[string]string{"CUEFLOW_FAKE_ACP": "1"}
+	every := 1 // poll every second (the default 20 s would only make this test slow): the short-poll path
+	cfg.PollInterval = &every
 
 	var runners []store.Runner
 	e.do("GET", "/runners", nil, &runners)
