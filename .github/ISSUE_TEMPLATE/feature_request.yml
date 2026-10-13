@@ -1,0 +1,25 @@
+name: Feature request
+description: A connector, a tool, a change in how agents or the board work
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task or workflow, not the solution. Who does it, how often.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like CueFlow to do
+      description: If it is a connector, name the service and whether it is a publisher, source, search engine, LLM or notifier.
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Ground rules
+      options:
+        - label: This does not let an agent publish without a human approval
+          required: true
