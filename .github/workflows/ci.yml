@@ -67,6 +67,9 @@ jobs:
   # needs GITLEAKS_LICENSE.)
   secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # on a pull request the action lists its commits through the API
     steps:
       - uses: actions/checkout@v5
         with:
