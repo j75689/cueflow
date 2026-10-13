@@ -260,11 +260,16 @@ func normalizeDrafts(drafts []Draft, platforms []string) []Draft {
 		}
 		pl, _ := domain.PlatformByID(d.Platform)
 		d.Content = cleanText(d.Content)
-		parts := make([]string, 0, len(d.ThreadParts))
+		parts := make([]string, 0, len(d.ThreadParts)+1)
 		for _, p := range d.ThreadParts {
 			if p = cleanText(p); p != "" {
 				parts = append(parts, p)
 			}
+		}
+		// Some models put the first part in content and only the replies in thread_parts. Keep it as the
+		// first part instead of dropping it, unless content is just the thread again.
+		if all := strings.Join(parts, "\n\n"); len(parts) > 0 && d.Content != "" && !strings.Contains(all, d.Content) {
+			parts = append([]string{d.Content}, parts...)
 		}
 		if pl.SupportsThread {
 			if len(parts) == 0 && runeLen(d.Content) > pl.MaxChars {

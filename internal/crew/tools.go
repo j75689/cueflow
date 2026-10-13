@@ -119,7 +119,7 @@ func init() {
 				"platform":     map[string]any{"type": "string", "enum": platformIDs()},
 				"title":        str("Short internal title for the reviewer"),
 				"content":      str("Post body, plain text, no hashtags"),
-				"thread_parts": strList("Ordered thread parts for thread-capable platforms (optional)"),
+				"thread_parts": strList("The whole thread in order, first part included, for thread-capable platforms (optional; content is then the first part)"),
 				"hashtags":     strList("Hashtags without '#'"),
 				"image_prompt": str("Prompt for an accompanying image (Instagram)"),
 				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
