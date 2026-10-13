@@ -50,3 +50,27 @@ jobs:
       - uses: actions/checkout@v5
       - run: docker build -t cueflow:slim .
       - run: docker build --target agents -t cueflow:agents .
+
+  # Nothing that belongs to the maintainer's own deployment (project ids, private repositories,
+  # in-house services) may be named in the public tree. Generic words live in the script; the
+  # PRIVATE_REF_WORDS repository variable adds the ones that must not appear in the tree themselves.
+  private-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/check-no-private-refs.sh
+        env:
+          PRIVATE_REF_WORDS: ${{ vars.PRIVATE_REF_WORDS }}
+
+  # Secret scan over the whole history, not just the diff: a key removed in a later commit is still
+  # in the clone. (gitleaks-action is free for repositories owned by a user account; an organization
+  # needs GITLEAKS_LICENSE.)
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
