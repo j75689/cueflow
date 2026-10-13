@@ -72,7 +72,8 @@ flowchart TB
 
 | 套件 | 職責 |
 |---|---|
-| `cmd/cueflow` | 進入點：載入設定、連線 DB、跑 migration、組裝所有元件、優雅關機；子命令 `migrate` / `genkey` / `healthcheck` |
+| `cmd/cueflow` | 進入點：載入設定、連線 DB、跑 migration、組裝所有元件、優雅關機；子命令 `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
+| `cmd/mock-postiz-mcp` | 開發用的 Postiz MCP 替身（`internal/postizmock`） |
 | `internal/config` | 從環境變數載入設定（`CUEFLOW_*`、`DATABASE_URL`） |
 | `internal/db` | 連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate） |
 | `internal/domain` | 貼文狀態機、平台規則（字數、hashtag、是否支援串文、是否需要圖片） |
@@ -83,15 +84,21 @@ flowchart TB
 | `internal/hub` | 從 DB 讀出 connector、解密、呼叫工廠建立實例 |
 | `internal/mcpx` | MCP client 封裝（Streamable HTTP / SSE / stdio）、工具分類 |
 | `internal/guard` | 發布授權（context 上的 grant 與 agent 標記） |
+| `internal/llm` | 工具迴圈共用、與供應商無關的對話型別；LLM connector 負責轉成各自的格式 |
 | `internal/agent` | Pipeline 用的草稿產生器（固定兩個工具的 LLM 迴圈） |
 | `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶 |
 | `internal/pipeline` | 排程內容管線：收集 → 產生 → 存成待審 → 通知 |
 | `internal/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
 | `internal/scheduler` | cron：觸發 pipeline、產生定時任務、寄送待審摘要 |
 | `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |
-| `internal/acpdrive` | 在 CueFlow 的沙箱政策下，讓 ACP agent 執行一次 prompt；伺服器與 Runner 共用 |
+| `internal/jobs` | 背景工作請求（「跑這個任務」、「發這篇貼文」）：本機在程序內處理，雲端模式交給 Cloud Tasks（`internal/jobs/cloudtasks`） |
+| `internal/acpx` / `internal/acpdrive` | 以 stdio 啟動 ACP agent；在 CueFlow 的沙箱政策下讓它執行一次 prompt；伺服器與 Runner 共用 |
 | `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status`（Runner 的機器端）與通訊協定 |
-| `internal/blob` | 把媒體位元組存到資料庫之外（`file://`）；每一列記錄存放在哪個後端 |
+| `internal/blob` | 把媒體位元組存到資料庫之外（`file://`、`gcs://` 加簽名網址）；每一列記錄存放在哪個後端 |
+| `internal/media` | 類型與大小檢查、上傳、圖片生成、交給發布器的 `/media/{id}` 引用 |
+| `internal/internalauth` / `internal/googleid` | 驗證 `/internal/*` 上 Google 簽發的 token；替 CueFlow 自己呼叫私有 Cloud Run 服務簽章 |
+| `internal/cfaccess` | 辨識通過 Cloudflare Access 的請求（雲端的儀表板登入） |
+| `internal/textutil` | 給發布器用的串文切分與 HTML 轉換 |
 | `internal/api` | REST + SSE、管理 token 驗證、提供內嵌前端 |
 | `internal/webui` | 內嵌 Next.js 靜態輸出（`web/out` → `internal/webui/dist`） |
 | `web/` | Next.js + Tailwind 前端（static export） |

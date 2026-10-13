@@ -26,7 +26,7 @@ g() { gcloud --project "$PROJECT" --quiet "$@"; }
 ## 1. Publish the image
 
 Push to `main`; `image.yml` builds the **slim** image (no agent CLIs: the cloud runs agents on
-[Runners](../../README.md#run-agents-on-your-own-machine-runners) or as self-driven agents) and
+[Runners](../../docs/external-agents.md#run-agents-on-your-own-machine-runners) or as self-driven agents) and
 pushes `ghcr.io/<owner>/cueflow:main`.
 
 Cloud Run cannot pull from ghcr.io directly. Either mirror the image into Artifact Registry yourself, or

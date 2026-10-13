@@ -3,11 +3,11 @@
 **Open-source, self-hosted Agent Ops Console.** Give a team of AI agents tasks on a kanban board. They work
 the tasks with their own tools, ask you when they need a decision, and anything risky waits for your approval.
 An agent can run on a built-in LLM loop or hand the work to an external agent (Claude Code, Codex, Gemini CLI...)
-on a machine you own (a *runner*); any [MCP](https://modelcontextprotocol.io) server can be its tools, each tool set
-to allow, ask or deny; tasks can recur on a schedule. Run it at home (a NAS, a home lab or a laptop with Docker, no
-public IP, domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
+on a machine you own; any [MCP](https://modelcontextprotocol.io) server can be its tools, each tool set to allow,
+ask or deny; tasks can recur on a schedule. Run it at home (a NAS, a home lab or a laptop with Docker, no public
+IP, domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
 
-Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md) · Cloud deployment: [deploy/cloudrun](deploy/cloudrun/README.md)
+Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](docs/)
 
 > **Status: pre-1.0, maintained by one person.** It runs the author's own content workflow every day, but the
 > REST API, the MCP tools and the database schema may still change between minor versions (migrations are
@@ -22,99 +22,39 @@ Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md) · Cloud deploym
 
 It ships with a **content workflow** as its built-in example: agents collect material (RSS, mailboxes, web
 search), write platform-specific drafts, a human reviews every draft, and only then it is published through
-[Postiz](https://github.com/gitroomhq/postiz-app) over MCP. Agents without the `drafting` capability never see any of it.
+[Postiz](https://github.com/gitroomhq/postiz-app) over MCP. Agents never publish: no agent tool can, and
+publishers refuse unless the dispatch worker attached a grant for that exact, human-approved post.
 
-```
- Cron ─▶ Ingest (RSS · IMAP · Search) ─▶ Agent (LLM tool loop) ─▶ PENDING_REVIEW
-                                                                     │  human approves
-                                                                     ▼
-                         Postiz ◀── MCP ── Dispatch worker ◀── APPROVED → QUEUED ─▶ PUBLISHED / FAILED
-```
-
-## Agent team (Command · Board · Agents)
-
-CueFlow ships with a small team of agents you can talk to in plain language - like a chat bot that
-actually does the work, but on a board you can watch:
+## How it works
 
 - **Command**: tell the team what you want, e.g. "Every morning at 8, summarize AI news and draft a
-  Threads post". The manager agent (🧭 Chief) works out the plan, delegates subtasks to teammates, sets up recurring
-  schedules, and reports back.
-- **Board**: every request is a task card - Backlog → To do → In progress → Waiting → Review → Done.
-  Drag a card to *To do* with an agent assigned and it starts working. Each task has a thread: the
-  agent's progress, tool calls, questions and result. Reply to continue, or start with `@writer` to hand
-  it to another agent.
-- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. A new install has one:
-  🧭 Chief, who plans, delegates to the agents you add, and does the work itself when nobody fits. Add your
-  own (a writer, a researcher, an editor...) and edit any of them. Agents write in their configured language
-  (default English).
-- **Schedules**: recurring tasks for an agent (agents can create them too, at most every 5 minutes).
-- **External agents (ACP)**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or Goose
-  instead of the built-in LLM loop, over the [Agent Client Protocol](https://agentclientprotocol.com). Add an
-  *External agent (ACP)* runtime connector and pick it as the agent's *Runtime*. It gets CueFlow's tools through a
-  per-run MCP server; shell and file access are refused unless the owner of the runner allows them (for a coding agent,
-see [deploy/runner](deploy/runner/README.md)), and its drafts still go to Review. With Claude Code you
-  can use a Claude subscription (`claude setup-token`, paste the token into the connector).
+  Threads post". The manager agent (🧭 Chief) plans, delegates subtasks, sets up schedules and reports back.
+- **Board**: every request is a task card, Backlog → To do → In progress → Waiting → Review → Done. Each task
+  has a thread with the agent's progress, tool calls, questions and result; reply to continue, or `@writer` to
+  hand it to another agent.
+- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. A new install has only the
+  Chief; add a writer, a researcher, an editor... and edit any of them.
+- **Schedules**: recurring tasks for an agent (agents can create them too).
+- **External agents and runners**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or
+  Goose over ACP, on the server or on a machine you own, and other agents can drive the board through
+  CueFlow's own MCP endpoint. See [docs/external-agents.md](docs/external-agents.md).
 
-| Capability | Tools |
-|---|---|
-| research | `web_search`, `read_url` (public addresses only), `search_materials`, `fetch_sources` |
-| drafting | `create_post_draft`, `list_posts`, `revise_draft` |
-| delegation | `create_subtask`, `list_agents`, `wait_for_subtasks` |
-| planning | `list_tasks`, `get_task`, `create_task`, `schedule_task`, `list_schedules`, `pause_schedule` |
-| memory | `remember`, `search_memory` |
-| (always) | `add_comment`, `ask_human`, `complete_task` |
-
-Agents never publish. Drafts they write land in **Review** like any other post, and only a human approval
-sends them to Postiz.
+Capabilities and tools, the task state machine, delegation and guardrails: [docs/agentic-flow.md](docs/agentic-flow.md).
 
 ## Highlights
 
 - **Human-in-the-loop by construction.** Posts follow a strict state machine
-  `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED` (plus `FAILED → QUEUED` for manual retry).
-  Every change is recorded in an audit log, including before/after diffs of reviewer edits.
-- **Agents cannot publish.** No agent tool can publish, and publishers are wrapped so `Publish` fails
-  unless the dispatch worker attached a grant for that exact, human-approved post.
-- **Everything is a connector plugin.** Publishers, sources, search engines, LLMs and notifiers implement
-  small Go interfaces and self-register with a config schema; the UI renders their forms automatically.
-  See [docs/connectors.md](docs/connectors.md).
-- **Private by default.** At home it only makes outbound connections and binds to `127.0.0.1:3000`. In the
-  cloud the dashboard sits behind a login (Cloudflare Access) and every machine-to-machine call carries a
-  Google-signed identity.
-- **Runs anywhere.** Docker Compose on your own hardware, or Cloud Run with Cloud Tasks and Cloud Scheduler
-  doing the work and the clock, so nothing runs between jobs. Agents can also run on your own machines
-  ([Runners](#run-agents-on-your-own-machine-runners)).
-- **Media stays out of the way.** Images and videos live in the database, on disk or in Google Cloud Storage,
-  are served with signed URLs, and old unused ones can be deleted automatically.
-- **Secrets encrypted at rest** with AES-256-GCM (bound to the connector row).
+  (`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED`) and every change is in an
+  audit log, including diffs of reviewer edits.
+- **Everything is a connector plugin.** Publishers, sources, search engines, LLMs, notifiers and image
+  generators implement small Go interfaces and self-register with a config schema; the UI renders their forms.
+- **Private by default.** At home it only makes outbound connections and binds to `127.0.0.1:3000`; in the
+  cloud the dashboard sits behind Cloudflare Access and machine-to-machine calls carry Google-signed identities.
+  Connector secrets are encrypted at rest (AES-256-GCM).
 - **Crash-safe publishing.** Dispatch uses leases; a worker that dies mid-publish leaves the post `FAILED`
   with a "check before retrying" note instead of silently double-posting.
-- **Single binary.** Go API + scheduler + worker, with the Next.js dashboard embedded.
-
-## Built-in connectors
-
-| Kind | Types |
-|---|---|
-| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio), channels optionally picked per post · `mcp_publisher` - any MCP server that follows the [publisher contract](docs/publisher-mcp.md), posting to the Threads/Instagram accounts picked per post (threads, carousels, videos and reels; videos are uploaded straight to the server) |
-| Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
-| Search | `searxng` (self-hosted) · `tavily` |
-| LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
-| Notifier | `smtp` (review reminders and digests) |
-| Agent tools | `mcp_server` - any MCP server (HTTP or stdio); each tool set to allow, ask (you approve each call) or deny |
-| Image generation | `openai_image` (OpenAI / Azure / compatible) · `gemini_image` (AI Studio key) · `vertex_image` (Vertex AI, ADC) · `comfyui` (self-hosted) |
-
-### LLM authentication
-
-| Connector | Ways to authenticate |
-|---|---|
-| Anthropic Claude | API key · OAuth access token (adds the required OAuth beta header) · Bearer token for gateways · named `ant auth login` profile · or blank to use the server environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, the default profile) |
-| Claude on Amazon Bedrock | Bedrock API key · AWS access key + secret (+ session token) · AWS profile · or blank to use the default AWS credential chain (env vars, `~/.aws`, IAM role) |
-| Claude on Google Vertex AI | Service account key JSON · or blank to use Application Default Credentials |
-| Gemini on Google Vertex AI | Same as above (for example `gcloud auth application-default login`). Needs a GCP project with billing enabled; billed by GCP, not by Google AI subscriptions |
-| OpenAI-compatible | API key (Bearer; `api-key` header for Azure) · extra headers for gateways · none for local servers. Presets: OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI |
-
-Credentials entered in the UI are encrypted per connector and win over server environment variables. For
-environment variables or credential files in Docker, see `deploy/.env.example` and the commented `volumes:` example
-in `deploy/docker-compose.yml`.
+- **Single binary, runs anywhere.** Go API + scheduler + worker with the Next.js dashboard embedded. Docker
+  Compose on your own hardware, or Cloud Run with Cloud Tasks and Cloud Scheduler, so nothing runs between jobs.
 
 ## Quick start (Docker)
 
@@ -125,250 +65,53 @@ cp .env.example .env
 docker compose up -d
 ```
 
-- CueFlow: <http://localhost:3000>
-- Postiz: <http://localhost:4007>
+CueFlow is at <http://localhost:3000>, Postiz at <http://localhost:4007>. Then:
 
-Then:
+1. **Postiz**: create an account, connect your channels, copy the API key from *Settings → Developers*.
+2. **CueFlow → Connectors**: *Postiz (MCP)* with endpoint `http://postiz:5000/api/mcp` and that key; an LLM
+   (e.g. *Anthropic Claude*, or *OpenAI-compatible* pointing at Ollama); a source such as an RSS feed.
+3. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
+4. **Review**: edit, approve or reject. Approved posts reach Postiz within seconds.
 
-1. **Postiz**: create an account, connect your Threads / Instagram / X channels, and copy the API key from
-   *Settings → Developers*.
-2. **CueFlow → Connectors**:
-   - *Postiz (MCP)* - endpoint `http://postiz:5000/api/mcp`, paste the API key, press **Test**.
-     Or *MCP publisher* - the endpoint of a server that follows the [publisher contract](docs/publisher-mcp.md), with a
-     bearer token or secret headers (such as a Cloudflare Access service token); you then pick the Threads/Instagram
-     accounts for each post in the review editor.
-   - an LLM - e.g. *Anthropic Claude* (model `claude-opus-5-5`) or *OpenAI-compatible* pointing at Ollama.
-   - one or more sources - e.g. an RSS feed.
-   - optional: SearXNG/Tavily for web search, SMTP for review reminders.
-3. Either:
-   - **Command**: tell the agent team what you want, or
-   - **Schedules**: run work on a timer. An *agent task* schedule opens a task for an agent each time
-     (it researches, reads originals and decides); a *simple schedule* is a fixed collect → one LLM call →
-     drafts flow (cron such as `0 8 * * *`, topic, platforms, instructions - see
-     [docs/prompt-templates.md](docs/prompt-templates.md)). Press **Run now** to try one.
-4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
-   show the reason and a **Retry** button.
+Image variants, web search, trying it without Postiz, remote access: [docs/docker.md](docs/docker.md).
 
-### Docker image variants
+## Connectors
 
-| `CUEFLOW_IMAGE_TARGET` | Contents |
-|---|---|
-| `slim` (default) | CueFlow only (distroless). Built-in agents and LLM connectors |
-| `agents` | + Node.js and the ACP adapters for Claude Code and Codex, for external agents |
+Publishers (Postiz, or any MCP server that follows the [publisher contract](docs/publisher-mcp.md)), sources
+(RSS, IMAP), search (SearXNG, Tavily), LLMs (OpenAI-compatible, Claude on the API, Bedrock or Vertex AI, Gemini
+on Vertex AI), SMTP notifications, image generation (OpenAI, Gemini, Vertex, ComfyUI) and any MCP server as
+agent tools. Full list and authentication options: [docs/builtin-connectors.md](docs/builtin-connectors.md).
+Writing one: [docs/connectors.md](docs/connectors.md).
 
-Set it in `deploy/.env`, then `docker compose up -d --build`.
+## Going further
 
-### Web search
-
-The compose file includes SearXNG (set `SEARXNG_SECRET` in `deploy/.env`). Add a *SearXNG* connector with URL
-`http://searxng:8080`; agents without a search connector of their own use the first active one.
-
-### Try it without Postiz
-
-```bash
-cd deploy
-docker compose --profile mock up -d cueflow cueflow-db mock-postiz
-```
-
-Create a *Postiz (MCP)* connector with endpoint `http://mock-postiz:4007/api/mcp` and API key `dev-key`.
-Received posts are listed at <http://localhost:4008/posts>.
-
-### Images and videos
-
-Posts reference media as `/media/{id}` (images up to 10 MB; MP4 up to 100 MB). Upload from the editor, generate
-with an image connector, or have an agent attach what a tool produced (for example a rendered Reel).
-
-- **Where bytes live**: `CUEFLOW_MEDIA_STORAGE` is empty (the database), `file:///data/media` or `gcs://bucket/prefix`.
-  `cueflow media migrate --to <target>` moves existing media; URLs do not change.
-- **Deleting**: `DELETE /api/v1/media/{id}` removes the item and its file, and answers `409` while a post that is
-  not yet published or rejected still uses it. `cueflow media prune --older-than 90d [--dry-run]` does the same
-  for everything old and unused; `CUEFLOW_MEDIA_RETENTION_DAYS` runs it on a schedule in cloud mode.
-- **Big files from a trusted renderer**: a service with its own Google identity can write a video straight into
-  the bucket's `uploads/` area and have CueFlow adopt it with `POST /internal/media/register`, so the bytes never
-  pass through CueFlow ([docs/api.md](docs/api.md#media)).
-
-### Control CueFlow from other agents (MCP)
-
-CueFlow serves an MCP endpoint at `/mcp` so an external agent (Claude Code, Codex, Cursor...) can run
-the board for you: list agents and tasks, create and assign tasks, comment (answering an agent that is
-waiting on you), move, start or stop tasks, and read the review queue. It cannot approve or publish posts;
-that stays in the dashboard.
-
-Set `CUEFLOW_MCP_TOKEN` in `deploy/.env` (`openssl rand -hex 32`), restart, then for example:
-
-```bash
-claude mcp add --transport http cueflow http://localhost:3000/mcp \
-  --header "Authorization: Bearer $CUEFLOW_MCP_TOKEN"
-```
-
-### Run agents on your own machine (Runners)
-
-A **Runner** is a machine you own that works agents' tasks, like a CI self-hosted runner. It only makes
-outbound connections, runs the agent CLI (Claude Code, Codex...) locally with *its own* credentials, and the
-agent still uses CueFlow's tools, so drafts go to review and nothing is published. It works against a local
-CueFlow or one running elsewhere.
-
-1. Dashboard → **Runners → Add runner**; copy the command it shows.
-2. On the machine (it needs the `cueflow` binary and the agent CLI):
-   ```bash
-   cueflow runner register --url http://localhost:3000 --token cfreg_... --name mbp
-   cueflow runner run
-   ```
-3. Under **Connectors**, add a **Runner pool** (label `claude-code`) and select it as an agent's *Runtime*.
-
-Local policy wins: the runner's own `runner.json` can only narrow what the server asks for (allowed presets, no web,
-which command to run, which ACP login to use), and `cueflow runner status` checks the connection. Revoking a runner in
-the dashboard stops it at once. Details and an example: [docs/api.md](docs/api.md#runners).
-
-To keep the agent away from your own logins, run the runner in a container with its own Claude token, a GitHub token
-of its own and a clean work directory: [deploy/runner](deploy/runner/README.md).
-
-An agent can also drive itself: give it the **External (self-driven)** runtime, create an agent token on its
-edit page, and connect any MCP client to `/mcp` with it. The agent claims its own tasks (`claim_task`) and
-works them with the same tools. See [`docs/api.md`](docs/api.md#runners).
-
-### Run it on Google Cloud
-
-The same binary runs on Cloud Run with Supabase (PostgreSQL), Cloud Storage for media, Cloud Tasks for background
-work and Cloud Scheduler for the clock (`CUEFLOW_QUEUE=cloudtasks`, `CUEFLOW_TICK=external`). The service scales to
-zero between jobs. Dashboard login is Cloudflare Access (the service verifies the Access token itself);
-runners, MCP clients and other machines use their own tokens on the service URL. Helper services such as SearXNG,
-an MCP server or a video renderer can run as private Cloud Run services and are called with CueFlow's
-Google identity (a connector option). Step by step: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
-
-### Remote access (Docker)
-
-Ports are bound to localhost on purpose. To review from your phone, use an SSH tunnel
-(`ssh -L 3000:localhost:3000 nas`) or a VPN such as Tailscale, and set `CUEFLOW_ADMIN_TOKEN`.
-
-## Configuration
-
-Environment variables; the Docker defaults are in `deploy/.env.example`.
-
-### Core
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
-| `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
-| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
-| `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
-| `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
-| `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
-| `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
-| `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
-| `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
-
-### Publishing and scheduling
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |
-| `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
-
-### Agents
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
-| `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
-
-### Media
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
-| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
-| `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished post uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
-| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
-
-### Cloud mode
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](deploy/cloudrun/README.md)) |
-| `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
-| `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
-| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
-| `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | Cloudflare Access (Zero Trust) login for the dashboard: your team domain and the application's AUD tag. Both or neither. Requests with a valid Access JWT are accepted like the admin token; see [`deploy/cloudrun`](deploy/cloudrun/README.md) |
-
-### Rotating the secret key
-
-Connector credentials are encrypted with `CUEFLOW_SECRET_KEY`; losing that key means re-entering every
-credential, so keep a copy in a password manager. To change it without downtime or re-entering anything:
-
-1. Generate a new key (`cueflow genkey`). Set it as `CUEFLOW_SECRET_KEY`, move the old one to
-   `CUEFLOW_SECRET_KEY_PREVIOUS`, and restart. New data uses the new key; old data stays readable.
-2. Re-encrypt everything: `docker compose exec cueflow cueflow rotate-key` (try `--dry-run` first). It changes
-   nothing if any connector can't be decrypted.
-3. Remove `CUEFLOW_SECRET_KEY_PREVIOUS` and restart.
-
-Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow and Postiz databases.
-
-## Development
-
-Requirements: Go 1.27+, Node 22+, Docker (for PostgreSQL).
-
-```bash
-make test-db                      # disposable PostgreSQL on :55432
-export DATABASE_URL="postgres://cueflow:cueflow@localhost:55432/cueflow?sslmode=disable"
-export CUEFLOW_SECRET_KEY=$(go run ./cmd/cueflow genkey)
-
-go run ./cmd/cueflow              # API on :3000
-go run ./cmd/mock-postiz-mcp      # mock Postiz on :4007 (key dev-key)
-cd web && npm install && npm run dev   # dashboard on :3001, proxies /api to :3000
-
-make test                         # unit tests
-make test-e2e                     # full chain against PostgreSQL
-make build                        # bin/cueflow with the dashboard embedded
-```
-
-### Layout
-
-```
-cmd/cueflow            the binary (serve | migrate | genkey | healthcheck | rotate-key | runner | media | mcp-bridge)
-cmd/mock-postiz-mcp    Postiz MCP stand-in for development
-internal/domain        post state machine, platform rules
-internal/connector     plugin registry, interfaces, config specs
-internal/connectors/*  built-in plugins (postiz, mcppublisher, rss, imap, searxng, tavily, openai, anthropic, smtp)
-internal/agent         pipeline draft generator (LLM tool loop)
-internal/crew          agent team runner: task claiming, tools, delegation, default roles
-internal/acpdrive      drives external agents over ACP (used by the server and by runners)
-internal/runner*       Runners: registration, job queue and the runner-side client
-internal/jobs          background work (in-process, or Cloud Tasks in cloud mode)
-internal/events        in-process and cross-instance event broker (PostgreSQL LISTEN/NOTIFY)
-internal/blob          media bytes: database, disk or Google Cloud Storage (signed URLs)
-internal/media         type and size checks, upload and generation
-internal/internalauth  Google ID-token checks for /internal/* and the media register call
-internal/cfaccess      Cloudflare Access login verification
-internal/pipeline      ingest -> generate -> store -> notify
-internal/dispatch      publish worker (the only caller of publishers)
-internal/scheduler     cron heartbeat
-internal/store         PostgreSQL repositories; migrations in internal/db/migrations
-internal/api           REST + SSE (docs/api.md), serves the embedded UI
-web/                   Next.js + Tailwind dashboard (static export)
-deploy/                docker-compose.yml, .env.example, and the Cloud Run guide (deploy/cloudrun)
-scripts/               check-no-private-refs.sh: CI guard, keeps internal names and ids out of the tree
-```
+- **Configuration**: every environment variable, and how to rotate the secret key:
+  [docs/configuration.md](docs/configuration.md). Back up `CUEFLOW_SECRET_KEY`; without it stored credentials
+  are unreadable.
+- **Runners, external agents, MCP**: [docs/external-agents.md](docs/external-agents.md).
+- **Images and videos**: storage backends, deletion, big files from a renderer: [docs/media.md](docs/media.md).
+- **Google Cloud Run**: Supabase, Cloud Storage, Cloud Tasks and Cloud Scheduler, scaling to zero:
+  [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
+- [Architecture](docs/architecture.md), with the package layout in §2.1
 - [Agentic flow](docs/agentic-flow.md)
 - [REST API](docs/api.md)
-- [Writing a connector plugin](docs/connectors.md)
+- [Configuration](docs/configuration.md)
+- [Running with Docker Compose](docs/docker.md)
+- [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) · [Publisher MCP contract](docs/publisher-mcp.md)
+- [External agents, runners and MCP](docs/external-agents.md)
+- [Images and videos](docs/media.md)
 - [Prompt templates](docs/prompt-templates.md)
-- [Deploying on Google Cloud Run](deploy/cloudrun/README.md)
-- Traditional Chinese docs: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
+- [Deploying on Google Cloud Run](deploy/cloudrun/README.md) · [A runner in a container](deploy/runner/README.md)
+- Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
-## Contributing
+## Development and contributing
 
-Issues and pull requests are welcome; new connectors most of all. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-first. Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+Go 1.27+, Node 22+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
+The full setup, the rules that are not negotiable and the commit convention are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
 
 ## License
 
