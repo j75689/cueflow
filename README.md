@@ -352,7 +352,7 @@ internal/store         PostgreSQL repositories; migrations in internal/db/migrat
 internal/api           REST + SSE (docs/api.md), serves the embedded UI
 web/                   Next.js + Tailwind dashboard (static export)
 deploy/                docker-compose.yml, .env.example, and the Cloud Run guide (deploy/cloudrun)
-scripts/               setup-gcp.sh: prepares a Google Cloud project
+scripts/               check-no-private-refs.sh: CI guard, keeps internal names and ids out of the tree
 ```
 
 ## Documentation
