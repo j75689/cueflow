@@ -138,17 +138,20 @@ func TestMCPToolPermissionsAndApproval(t *testing.T) {
 	if code := e.do("POST", path, map[string]any{"decision": "approve"}, &decided); code != 200 || decided.Status != "approved" {
 		t.Fatalf("approve: %d %+v", code, decided)
 	}
-	// The call runs out of band: the answer does not wait for it.
-	for i := 0; i < 100 && created.Load() == 0; i++ {
-		time.Sleep(50 * time.Millisecond)
-	}
+	// The call runs out of band: the answer does not wait for it. RunApproval records the result
+	// first and only then moves the task WAITING_HUMAN → TODO, so wait for the resume (which implies
+	// the result), not for the result: RunPending below claims nothing but TODO tasks.
 	for i := 0; i < 100; i++ {
-		e.do("GET", "/tasks/"+task.ID.String()+"/approvals", nil, &approvals)
-		if approvals[0].Result != "" {
+		got, _ = e.store.GetTask(ctx, task.ID)
+		if got.Status == store.TaskTodo {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if got.Status != store.TaskTodo {
+		t.Fatalf("task not resumed after approval: %s (created=%d)", got.Status, created.Load())
+	}
+	e.do("GET", "/tasks/"+task.ID.String()+"/approvals", nil, &approvals)
 	if !strings.Contains(approvals[0].Result, "page created") {
 		t.Fatalf("result after approval: %+v", approvals[0])
 	}
