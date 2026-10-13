@@ -59,6 +59,7 @@ func (s *Source) Fetch(ctx context.Context, opts connector.FetchOptions) ([]conn
 		return nil, fmt.Errorf("rss: %w", err)
 	}
 	items := make([]connector.Item, 0, len(feed.Items))
+	shared := sharedLinks(feed.Items)
 	for _, e := range feed.Items {
 		pub := e.PublishedParsed
 		if pub == nil {
@@ -76,7 +77,7 @@ func (s *Source) Fetch(ctx context.Context, opts connector.FetchOptions) ([]conn
 			author = e.Author.Name
 		}
 		items = append(items, connector.Item{
-			ExternalID:  ExternalID(e),
+			ExternalID:  externalID(e, shared[e.Link]),
 			Title:       strings.TrimSpace(e.Title),
 			URL:         e.Link,
 			Author:      author,
@@ -92,14 +93,38 @@ func (s *Source) Fetch(ctx context.Context, opts connector.FetchOptions) ([]conn
 
 // ExternalID is the entry's GUID, falling back to its link, then a content hash.
 func ExternalID(e *gofeed.Item) string {
+	return externalID(e, false)
+}
+
+// externalID is ExternalID, except that a link several entries share (Google Trends gives every
+// entry the feed's own URL and no GUID) cannot tell them apart, so the link is hashed with the
+// entry's title and description instead.
+func externalID(e *gofeed.Item, linkShared bool) string {
 	if e.GUID != "" {
 		return e.GUID
 	}
-	if e.Link != "" {
+	if e.Link != "" && !linkShared {
 		return e.Link
 	}
-	sum := sha256.Sum256([]byte(e.Title + "\x00" + e.Description))
+	sum := sha256.Sum256([]byte(e.Link + "\x00" + e.Title + "\x00" + e.Description))
 	return "sha256:" + hex.EncodeToString(sum[:16])
+}
+
+// sharedLinks reports the links that more than one GUID-less entry of the feed uses.
+func sharedLinks(items []*gofeed.Item) map[string]bool {
+	seen := map[string]int{}
+	for _, e := range items {
+		if e.GUID == "" && e.Link != "" {
+			seen[e.Link]++
+		}
+	}
+	shared := map[string]bool{}
+	for link, n := range seen {
+		if n > 1 {
+			shared[link] = true
+		}
+	}
+	return shared
 }
 
 var (
