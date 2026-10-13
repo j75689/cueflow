@@ -2,6 +2,8 @@
 
 > English: [README.md](README.md) · 雲端部署：[deploy/cloudrun](deploy/cloudrun/README.md)
 
+> **狀態：pre-1.0，單人維護。** 作者每天用它跑自己的內容流程，但 REST API、MCP 工具和資料庫 schema 在次版本之間仍可能變動（會附 migration）。Issue 通常一週內回覆，沒有 SLA。見 [CONTRIBUTING.md](CONTRIBUTING.md) 與 [SECURITY.md](SECURITY.md)（英文）。
+
 **開源、可自託管的 Agent 運營控制台。** 把任務交給看板上的一組 AI agent：它們用各自的工具完成任務，需要你決定時會來問，有風險的動作會等你核准。Agent 可以用內建的 LLM 迴圈，或把工作交給你自己機器上（*Runner*）的外部 agent（Claude Code、Codex、Gemini CLI⋯）；任何 [MCP](https://modelcontextprotocol.io) 伺服器都能當它的工具，每個工具可設為允許、需核准或禁止；任務可以定時重複。可以在自己的機器上跑（家裡的 NAS、Home Lab 或筆電上的 Docker，不需要 Public IP、網域或 Webhook），也能部署到 Google Cloud Run，沒工作時縮到零。
 
 ```
@@ -266,6 +268,11 @@ make build                        # 產生內嵌控制台的 bin/cueflow
 - [Prompt 範本](docs/zh-TW/prompt-templates.md)
 - [部署到 Google Cloud Run](deploy/cloudrun/README.md)（英文）
 - 英文文件：[REST API](docs/api.md) · [Connector 插件開發](docs/connectors.md)
+
+## 參與貢獻
+
+歡迎開 issue 和 pull request，尤其是新的 connector。請先讀 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
+安全性問題請走 [SECURITY.md](SECURITY.md) 的私下通報，不要開公開 issue。
 
 ## 授權
 

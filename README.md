@@ -9,6 +9,11 @@ public IP, domain or webhook needed) or on Google Cloud Run, where it scales to 
 
 Traditional Chinese version: [README.zh-TW.md](README.zh-TW.md) · Cloud deployment: [deploy/cloudrun](deploy/cloudrun/README.md)
 
+> **Status: pre-1.0, maintained by one person.** It runs the author's own content workflow every day, but the
+> REST API, the MCP tools and the database schema may still change between minor versions (migrations are
+> provided). Expect a reply to issues within a week, not an SLA. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+> [SECURITY.md](SECURITY.md).
+
 ```
  You · Schedule · MCP client ─▶ Task ─▶ Agent ─▶ tools (built-in · MCP servers · its own CLI on a runner)
                                          │
@@ -359,6 +364,11 @@ scripts/               setup-gcp.sh: prepares a Google Cloud project
 - [Prompt templates](docs/prompt-templates.md)
 - [Deploying on Google Cloud Run](deploy/cloudrun/README.md)
 - Traditional Chinese docs: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
+
+## Contributing
+
+Issues and pull requests are welcome; new connectors most of all. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+first. Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
 
 ## License
 

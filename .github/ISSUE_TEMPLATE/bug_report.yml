@@ -1,0 +1,36 @@
+name: Bug report
+description: Something does not work the way the docs say
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, image tag or commit (`cueflow --version`, or the `image` label of the container)
+      placeholder: v0.2.1
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How CueFlow runs
+      options:
+        - Docker Compose (deploy/docker-compose.yml)
+        - Google Cloud Run
+        - go run / own build
+        - Other (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead. Which agent, connector or page.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server logs around the time of the problem. Remove tokens, keys and anything personal first.
+      render: text
