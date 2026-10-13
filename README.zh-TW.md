@@ -4,8 +4,6 @@
 
 > English: [README.md](README.md) · 全部文件：[docs/zh-TW/](docs/zh-TW/)、[docs/](docs/)（英文）
 
-> **狀態：pre-1.0，單人維護。** 作者每天用它跑自己的內容流程，但 REST API、MCP 工具和資料庫 schema 在次版本之間仍可能變動（會附 migration）。Issue 通常一週內回覆，沒有 SLA。見 [CONTRIBUTING.md](CONTRIBUTING.md) 與 [SECURITY.md](SECURITY.md)（英文）。
-
 ```
  你 · 排程 · MCP client ─▶ 任務 ─▶ Agent ─▶ 工具（內建 · MCP 伺服器 · Runner 上自己的 CLI）
                                      │

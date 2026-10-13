@@ -9,11 +9,6 @@ IP, domain or webhook needed) or on Google Cloud Run, where it scales to zero be
 
 Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](docs/)
 
-> **Status: pre-1.0, maintained by one person.** It runs the author's own content workflow every day, but the
-> REST API, the MCP tools and the database schema may still change between minor versions (migrations are
-> provided). Expect a reply to issues within a week, not an SLA. See [CONTRIBUTING.md](CONTRIBUTING.md) and
-> [SECURITY.md](SECURITY.md).
-
 ```
  You · Schedule · MCP client ─▶ Task ─▶ Agent ─▶ tools (built-in · MCP servers · its own CLI on a runner)
                                          │
