@@ -1,6 +1,6 @@
 # Runner in a container
 
-A [runner](../../README.md#run-agents-on-your-own-machine-runners) that works agents' tasks with Claude Code, inside a
+A [runner](../../docs/external-agents.md#run-agents-on-your-own-machine-runners) that works agents' tasks with Claude Code, inside a
 container. The agent sees only what you hand it here: a Claude login, one GitHub token and an empty work directory.
 Your own `gh` / Claude / SSH logins on the host stay out of reach.
 

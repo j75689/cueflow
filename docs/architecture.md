@@ -73,7 +73,8 @@ flowchart TB
 
 | Package | Responsibility |
 |---|---|
-| `cmd/cueflow` | Entry point: load config, connect to the DB, run migrations, wire all components, graceful shutdown; subcommands `migrate` / `genkey` / `healthcheck` |
+| `cmd/cueflow` | Entry point: load config, connect to the DB, run migrations, wire all components, graceful shutdown; subcommands `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
+| `cmd/mock-postiz-mcp` | Postiz MCP stand-in for development (`internal/postizmock`) |
 | `internal/config` | Load settings from environment variables (`CUEFLOW_*`, `DATABASE_URL`) |
 | `internal/db` | Connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) |
 | `internal/domain` | Post state machine, platform rules (character limits, hashtags, thread support, media requirement) |
@@ -84,15 +85,21 @@ flowchart TB
 | `internal/hub` | Loads a connector from the DB, decrypts it and calls its factory to build an instance |
 | `internal/mcpx` | MCP client wrapper (Streamable HTTP / SSE / stdio), tool classification |
 | `internal/guard` | Publish authorization (a grant and an agent marker carried on the context) |
+| `internal/llm` | Provider-neutral chat types used by the tool loops; LLM connectors translate to their wire formats |
 | `internal/agent` | Draft generator used by pipelines (an LLM loop with two fixed tools) |
 | `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory |
 | `internal/pipeline` | Scheduled content pipeline: collect → generate → store for review → notify |
 | `internal/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
 | `internal/scheduler` | cron: triggers pipelines, spawns scheduled tasks, sends the review digest |
 | `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
-| `internal/acpdrive` | Drives one prompt through an ACP agent under CueFlow's sandbox policy; shared by the server and runners |
+| `internal/jobs` | Background work requests ("run this task", "publish this post"): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |
+| `internal/acpx` / `internal/acpdrive` | Launches ACP agents over stdio; drives one prompt through one under CueFlow's sandbox policy; shared by the server and runners |
 | `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status` (the machine side of Runners) and the wire protocol |
-| `internal/blob` | Byte storage for media outside the database (`file://`); rows record which backend holds them |
+| `internal/blob` | Byte storage for media outside the database (`file://`, `gcs://` with signed URLs); rows record which backend holds them |
+| `internal/media` | Type and size checks, uploads, image generation, the `/media/{id}` references publishers receive |
+| `internal/internalauth` / `internal/googleid` | Verifies the Google-signed tokens on `/internal/*`; signs CueFlow's own calls to private Cloud Run services |
+| `internal/cfaccess` | Recognizes requests that passed Cloudflare Access (the dashboard login in the cloud) |
+| `internal/textutil` | Thread splitting and HTML rendering for publishers |
 | `internal/api` | REST + SSE, admin token check, serves the embedded frontend |
 | `internal/webui` | Embedded Next.js static export (`web/out` → `internal/webui/dist`) |
 | `web/` | Next.js + Tailwind frontend (static export) |
