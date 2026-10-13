@@ -71,7 +71,8 @@ type Config struct {
 	// MediaRetentionDays, when positive, deletes media older than that many days which no unfinished
 	// post uses (checked by the external clock; locally use `cueflow media prune`).
 	MediaRetentionDays int
-	// MediaRegisterAccounts may call /internal/media/register (the Reels renderer's service account).
+	// MediaRegisterAccounts may call /internal/media/register (the service accounts of media producers
+	// such as a video renderer that writes to the bucket itself).
 	MediaRegisterAccounts []string
 	// DBMaxConns caps this process's connection pool (0 = driver default). Set it low (e.g. 5) in
 	// the cloud so several instances stay under a small database's connection limit.

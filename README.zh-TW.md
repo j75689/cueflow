@@ -168,7 +168,7 @@ MCP client 帶著 token 連 `/mcp`。Agent 用 `claim_task` 領自己的任務�
 
 ### 部署到 Google Cloud
 
-同一個 binary 可以跑在 Cloud Run：Supabase（PostgreSQL）、Cloud Storage 放媒體、Cloud Tasks 派送背景工作、Cloud Scheduler 當時鐘（`CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external`），沒工作時縮到零。儀表板用 Cloudflare Access 登入（服務自己驗證 Access token）；Runner、MCP client 等機器用服務網址和各自的 token。SearXNG、news-trends MCP、Reels 渲染器這類輔助服務跑成私有的 Cloud Run 服務，用 CueFlow 的 Google 身分呼叫（connector 的一個選項）。`scripts/setup-gcp.sh` 會準備專案；基礎設施的 manifest 放在你自己的部署 repo。步驟見 [deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
+同一個 binary 可以跑在 Cloud Run：Supabase（PostgreSQL）、Cloud Storage 放媒體、Cloud Tasks 派送背景工作、Cloud Scheduler 當時鐘（`CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external`），沒工作時縮到零。儀表板用 Cloudflare Access 登入（服務自己驗證 Access token）；Runner、MCP client 等機器用服務網址和各自的 token。SearXNG、MCP 伺服器、影片渲染器這類輔助服務可以跑成私有的 Cloud Run 服務，用 CueFlow 的 Google 身分呼叫（connector 的一個選項）。步驟見 [deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
 
 ### 遠端存取（Docker）
 

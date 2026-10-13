@@ -24,7 +24,7 @@ import (
 // PathPrefix is where stored images are served.
 const PathPrefix = "/media/"
 
-// Size limits: images (uploaded or generated) and videos (e.g. rendered Reels).
+// Size limits: images (uploaded or generated) and videos (e.g. rendered short-form clips).
 const (
 	MaxImageBytes = 10 << 20
 	MaxVideoBytes = 100 << 20

@@ -228,9 +228,8 @@ The same binary runs on Cloud Run with Supabase (PostgreSQL), Cloud Storage for 
 work and Cloud Scheduler for the clock (`CUEFLOW_QUEUE=cloudtasks`, `CUEFLOW_TICK=external`). The service scales to
 zero between jobs. Dashboard login is Cloudflare Access (the service verifies the Access token itself);
 runners, MCP clients and other machines use their own tokens on the service URL. Helper services such as SearXNG,
-a news-trends MCP server or the Reels renderer run as private Cloud Run services and are called with CueFlow's
-Google identity (a connector option). `scripts/setup-gcp.sh` prepares the project; infrastructure manifests live in
-your own deployment repository. Step by step: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+an MCP server or a video renderer can run as private Cloud Run services and are called with CueFlow's
+Google identity (a connector option). Step by step: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
 ### Remote access (Docker)
 

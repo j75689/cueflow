@@ -106,7 +106,7 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", time.Time{}, rc)
 }
 
-// registerMedia adopts a file the Reels renderer left in the bucket's staging area (see
+// registerMedia adopts a file a media producer (e.g. a video renderer) left in the bucket's staging area (see
 // blob.StagingPrefix): POST /internal/media/register {"object":"uploads/<file>"}. The caller proves
 // who it is with a Google ID token (MediaRegisterAuth); the video itself never passes through here.
 func (s *Server) registerMedia(w http.ResponseWriter, r *http.Request) {
