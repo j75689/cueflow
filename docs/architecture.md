@@ -331,7 +331,7 @@ flowchart LR
 
 ### 8.1 Cloud deployment (Cloud Run + Cloud Tasks + Cloud Scheduler)
 
-The same binary and image run in the cloud with `CUEFLOW_QUEUE=cloudtasks` and `CUEFLOW_TICK=external` (guide: `deploy/cloudrun/`, one-time setup: `scripts/setup-gcp.sh`, deployment with anyship). Nothing polls and nothing is scheduled in the process, so it scales to zero between requests and runs on several instances:
+The same binary and image run in the cloud with `CUEFLOW_QUEUE=cloudtasks` and `CUEFLOW_TICK=external` (guide: `deploy/cloudrun/`). Nothing polls and nothing is scheduled in the process, so it scales to zero between requests and runs on several instances:
 
 ```
  Cloud Scheduler ── every minute ──► POST /internal/tick

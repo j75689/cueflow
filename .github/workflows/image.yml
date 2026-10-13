@@ -1,6 +1,6 @@
 # Builds the slim container image on GitHub's runners and pushes it to GitHub Packages
-# (ghcr.io/j75689/cueflow). Cloud Run pulls it through an Artifact Registry remote repository
-# (see scripts/setup-gcp.sh), which can only read PUBLIC packages: after the first push, set the
+# (ghcr.io/<owner>/cueflow). Cloud Run pulls it through an Artifact Registry remote repository
+# (see deploy/cloudrun/README.md), which can only read PUBLIC packages: after the first push, set the
 # package to public in GitHub (Packages -> cueflow -> Package settings -> Change visibility).
 # The image holds the compiled server and dashboard, no secrets.
 name: image

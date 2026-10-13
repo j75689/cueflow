@@ -24,6 +24,3 @@ coverage.out
 .idea/
 .vscode/
 *.swp
-
-# Local feed list for the news-trends MCP server
-deploy/news-feeds.json

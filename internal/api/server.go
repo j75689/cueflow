@@ -60,8 +60,8 @@ type Server struct {
 	// Cloud deployment: when InternalAuth is set, /internal/tick and /internal/work/{kind}/{id}
 	// are served behind it (Cloud Scheduler and Cloud Tasks call them with Google ID tokens).
 	InternalAuth func(http.Handler) http.Handler
-	// MediaRegisterAuth guards POST /internal/media/register, which only the Reels renderer's account
-	// may call (not the Cloud Tasks / Scheduler accounts InternalAuth lets in).
+	// MediaRegisterAuth guards POST /internal/media/register, which only the accounts of media
+	// producers (e.g. a video renderer) may call (not the Cloud Tasks / Scheduler accounts InternalAuth lets in).
 	MediaRegisterAuth func(http.Handler) http.Handler
 	Handlers          jobs.Handlers
 	Tick              func(context.Context) error
