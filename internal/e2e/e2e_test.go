@@ -124,7 +124,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(mockSrv.Close)
 
 	server := &api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
-		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken}
+		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken, Modules: []api.Module{api.Content{}}}
 	apiSrv := httptest.NewServer(server.Handler())
 	t.Cleanup(apiSrv.Close)
 

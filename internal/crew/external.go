@@ -31,7 +31,7 @@ var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 func (c *Crew) agentTools(ctx context.Context, a *store.Agent) []tool {
 	out := toolsFor(a)
 	used := map[string]bool{}
-	for _, t := range tools {
+	for _, t := range toolCatalog() {
 		used[t.name] = true
 	}
 	for _, id := range a.ToolConnectorIDs {

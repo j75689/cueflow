@@ -5,28 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/j75689/cueflow/internal/agent"
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/domain"
-	"github.com/j75689/cueflow/internal/hub"
-	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 )
-
-// Capability groups tools an agent may use. No capability can publish: drafts always go to the
-// human review queue, and publishers are only reachable from the dispatch worker.
-type Capability struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Tools       []string `json:"tools"`
-}
 
 type tool struct {
 	name        string
@@ -48,8 +33,7 @@ type runEnv struct {
 	agent    *store.Agent
 	outcome  *outcome
 	subtasks int
-	drafts   int
-	images   int
+	counts   map[string]int // per-run counters of module tools (see Run.Inc)
 
 	searcher    connector.Searcher
 	searcherErr error
@@ -58,163 +42,110 @@ type runEnv struct {
 
 const (
 	maxSubtasksPerRun = 8
-	maxDraftsPerRun   = 10
-	maxImagesPerRun   = 2
 	maxDelegateDepth  = 3
 	maxToolResult     = 12000
 )
 
-func obj(props map[string]any, required ...string) map[string]any {
+// run is the module-facing view of this run.
+func (e *runEnv) run() *Run {
+	return &Run{Deps: Deps{Store: e.c.store, Hub: e.c.hub, Broker: e.c.broker, Logger: e.c.logger}, Task: e.task, Agent: e.agent, env: e}
+}
+
+// Obj, Str, StrList and Integer build JSON schemas for tool arguments.
+func Obj(props map[string]any, required ...string) map[string]any {
 	if required == nil {
 		required = []string{}
 	}
 	return map[string]any{"type": "object", "properties": props, "required": required}
 }
 
-func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
-func strList(desc string) map[string]any {
+func Str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+func StrList(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }
-func integer(desc string) map[string]any {
+func Integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
 
 var priorityEnum = map[string]any{"type": "string", "enum": []string{"low", "normal", "high", "urgent"}}
 
-var capabilities = []Capability{
+// coreCapabilities are the ones every install has; modules add theirs with RegisterCapability.
+var coreCapabilities = []Capability{
 	{ID: "research", Name: "Research", Description: "Search the web and read pages."},
-	{ID: "sources", Name: "Sources", Description: "Fetch and search material collected by source connectors (RSS feeds, mailboxes)."},
-	{ID: "drafting", Name: "Drafting", Description: "Write social post drafts into the human review queue and revise drafts that are still pending."},
-	{ID: "imaging", Name: "Images", Description: "Generate images for drafts with the image connector (each image costs money; at most a few per run)."},
 	{ID: "delegation", Name: "Delegation", Description: "Split work into subtasks for teammates and wait for their results."},
 	{ID: "planning", Name: "Planning", Description: "Look at and create tasks on the board, and set up recurring schedules."},
 	{ID: "memory", Name: "Memory", Description: "Remember facts and preferences across tasks."},
 }
 
-var tools []tool
+var coreTools []tool
 
 func init() {
-	tools = []tool{
+	coreTools = []tool{
 		// --- always available ---
 		{name: "add_comment", description: "Post a short progress update to the task thread (visible to the human).",
-			schema: obj(map[string]any{"content": str("Update text")}, "content"), run: toolAddComment},
+			schema: Obj(map[string]any{"content": Str("Update text")}, "content"), run: toolAddComment},
 		{name: "ask_human", description: "Ask the human a question and pause until they reply. Use only when you genuinely need their decision or missing information.",
-			schema: obj(map[string]any{"question": str("The question, with options if helpful")}, "question"), run: toolAskHuman},
+			schema: Obj(map[string]any{"question": Str("The question, with options if helpful")}, "question"), run: toolAskHuman},
 		{name: "complete_task", description: "Finish the task with a concise summary of what you did and the outputs (draft IDs, subtask numbers, links).",
-			schema: obj(map[string]any{"summary": str("Result summary for the human")}, "summary"), run: toolComplete},
+			schema: Obj(map[string]any{"summary": Str("Result summary for the human")}, "summary"), run: toolComplete},
 
 		// --- research ---
 		{name: "web_search", capability: "research", description: "Search the web for recent information.",
-			schema: obj(map[string]any{"query": str("Search query"), "limit": integer("Max results (default 5)")}, "query"), run: toolWebSearch},
+			schema: Obj(map[string]any{"query": Str("Search query"), "limit": Integer("Max results (default 5)")}, "query"), run: toolWebSearch},
 		{name: "read_url", capability: "research", description: "Read the text of a public web page.",
-			schema: obj(map[string]any{"url": str("Absolute http(s) URL")}, "url"), run: toolReadURL},
-		{name: "search_materials", capability: "sources", description: "Search items already collected from RSS feeds and mailboxes.",
-			schema: obj(map[string]any{"query": str("Keyword (blank = latest)"), "days": integer("Look back this many days (default 7)"), "limit": integer("Max items (default 10)")}), run: toolSearchMaterials},
-		{name: "fetch_sources", capability: "sources", description: "Pull the latest items from your source connectors (RSS, IMAP) right now.",
-			schema: obj(map[string]any{}), run: toolFetchSources},
-
-		// --- drafting ---
-		{name: "create_post_draft", capability: "drafting", description: "Create one social post draft for one platform. It goes to the human review queue; it is NOT published.",
-			schema: obj(map[string]any{
-				"platform":     map[string]any{"type": "string", "enum": platformIDs()},
-				"title":        str("Short internal title for the reviewer"),
-				"content":      str("Post body, plain text, no hashtags"),
-				"thread_parts": strList("The whole thread in order, first part included, for thread-capable platforms (optional; content is then the first part)"),
-				"hashtags":     strList("Hashtags without '#'"),
-				"image_prompt": str("Prompt for an accompanying image (Instagram)"),
-				"topic":        str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
-				"link":         str("Optional URL shown as a link preview card (Threads); defaults to the first source_urls entry"),
-				"publish_at":   str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
-				"media_urls":   strList("Optional images or videos to attach: CueFlow media URLs (/media/...) returned by tools, or public https URLs"),
-				"source_urls":  strList("URLs backing the claims in this post"),
-			}, "platform", "content"), run: toolCreateDraft},
-		{name: "list_posts", capability: "drafting", description: "List recent posts and drafts with their review status.",
-			schema: obj(map[string]any{"status": str("Optional status filter, e.g. PENDING_REVIEW"), "limit": integer("Max posts (default 10)")}), run: toolListPosts},
-		{name: "revise_draft", capability: "drafting", description: "Revise a draft that is still DRAFT or PENDING_REVIEW.",
-			schema: obj(map[string]any{
-				"post_id": str("Post ID"), "title": str("New title"), "content": str("New body"),
-				"thread_parts": strList("New thread parts"), "hashtags": strList("New hashtags"),
-				"image_prompt": str("New image prompt"), "topic": str("New Threads topic tag (empty removes it)"),
-				"link": str("New link card URL (empty removes it)"), "note": str("Why you changed it"),
-				"media_urls": strList("Replace the attached images or videos (CueFlow media URLs like /media/... returned by tools, or public https URLs); an empty list removes them"),
-			}, "post_id"), run: toolReviseDraft},
-
-		// --- imaging ---
-		{name: "generate_image", capability: "imaging", description: fmt.Sprintf("Generate an image for a draft that is still DRAFT or PENDING_REVIEW and attach it. Uses the draft's image_prompt unless you give a prompt. Costs money: at most %d per run.", maxImagesPerRun),
-			schema: obj(map[string]any{
-				"post_id": str("Draft (post) ID"),
-				"prompt":  str("Image prompt in English: subject, style, composition, no text in the image (optional; defaults to the draft's image_prompt)"),
-				"aspect":  map[string]any{"type": "string", "enum": connector.Aspects, "description": "Aspect ratio (default 4:5 for Instagram, else 1:1)"},
-			}, "post_id"), run: toolGenerateImage},
-
+			schema: Obj(map[string]any{"url": Str("Absolute http(s) URL")}, "url"), run: toolReadURL},
 		// --- delegation ---
 		{name: "list_agents", capability: "delegation", description: "List teammates you can delegate to.",
-			schema: obj(map[string]any{}), run: toolListAgents},
+			schema: Obj(map[string]any{}), run: toolListAgents},
 		{name: "create_subtask", capability: "delegation", description: "Delegate part of this task to a teammate. They start immediately.",
-			schema: obj(map[string]any{
-				"title": str("Clear, specific title"), "description": str("Everything they need: goal, context, expected output"),
-				"assignee": str("Teammate slug, e.g. writer"), "priority": priorityEnum,
+			schema: Obj(map[string]any{
+				"title": Str("Clear, specific title"), "description": Str("Everything they need: goal, context, expected output"),
+				"assignee": Str("Teammate slug, e.g. writer"), "priority": priorityEnum,
 			}, "title", "description", "assignee"), run: toolCreateSubtask},
 		{name: "wait_for_subtasks", capability: "delegation", description: "Pause until all your subtasks finish; you will be resumed with their results.",
-			schema: obj(map[string]any{}), run: toolWaitSubtasks},
+			schema: Obj(map[string]any{}), run: toolWaitSubtasks},
 
 		// --- planning ---
 		{name: "list_tasks", capability: "planning", description: "List tasks on the board.",
-			schema: obj(map[string]any{"status": str("Optional status filter"), "assignee": str("Optional agent slug"), "limit": integer("Max tasks (default 20)")}), run: toolListTasks},
+			schema: Obj(map[string]any{"status": Str("Optional status filter"), "assignee": Str("Optional agent slug"), "limit": Integer("Max tasks (default 20)")}), run: toolListTasks},
 		{name: "get_task", capability: "planning", description: "Read a task by number, including its result and subtasks.",
-			schema: obj(map[string]any{"number": integer("Task number")}, "number"), run: toolGetTask},
+			schema: Obj(map[string]any{"number": Integer("Task number")}, "number"), run: toolGetTask},
 		{name: "create_task", capability: "planning", description: "Create a separate task on the board (not a subtask). Assign it to start it.",
-			schema: obj(map[string]any{
-				"title": str("Title"), "description": str("Details"), "assignee": str("Optional agent slug"),
+			schema: Obj(map[string]any{
+				"title": Str("Title"), "description": Str("Details"), "assignee": Str("Optional agent slug"),
 				"priority": priorityEnum,
 			}, "title"), run: toolCreateTask},
 		{name: "schedule_task", capability: "planning", description: "Create a recurring schedule that opens a task for an agent on a cron expression (minute hour day month weekday), at most every 5 minutes.",
-			schema: obj(map[string]any{
-				"name": str("Schedule name"), "cron": str("Cron, e.g. '0 8 * * *' for 08:00 daily"),
-				"timezone": str("IANA timezone, e.g. Asia/Taipei"), "title": str("Title of each task"),
-				"description": str("Instructions for each run"), "assignee": str("Agent slug (default: yourself)"),
+			schema: Obj(map[string]any{
+				"name": Str("Schedule name"), "cron": Str("Cron, e.g. '0 8 * * *' for 08:00 daily"),
+				"timezone": Str("IANA timezone, e.g. Asia/Taipei"), "title": Str("Title of each task"),
+				"description": Str("Instructions for each run"), "assignee": Str("Agent slug (default: yourself)"),
 				"priority": priorityEnum,
 			}, "cron", "title", "description"), run: toolScheduleTask},
 		{name: "list_schedules", capability: "planning", description: "List recurring schedules.",
-			schema: obj(map[string]any{}), run: toolListSchedules},
+			schema: Obj(map[string]any{}), run: toolListSchedules},
 		{name: "pause_schedule", capability: "planning", description: "Pause a recurring schedule by ID.",
-			schema: obj(map[string]any{"id": str("Schedule ID")}, "id"), run: toolPauseSchedule},
+			schema: Obj(map[string]any{"id": Str("Schedule ID")}, "id"), run: toolPauseSchedule},
 
 		// --- memory ---
 		{name: "remember", capability: "memory", description: "Save a durable note (a preference, fact, or decision) for future tasks.",
-			schema: obj(map[string]any{"content": str("The note")}, "content"), run: toolRemember},
+			schema: Obj(map[string]any{"content": Str("The note")}, "content"), run: toolRemember},
 		{name: "search_memory", capability: "memory", description: "Search your saved notes.",
-			schema: obj(map[string]any{"query": str("Keyword")}, "query"), run: toolSearchMemory},
+			schema: Obj(map[string]any{"query": Str("Keyword")}, "query"), run: toolSearchMemory},
 	}
-	byCap := map[string][]string{}
-	for _, t := range tools {
-		if t.capability != "" {
-			byCap[t.capability] = append(byCap[t.capability], t.name)
-		}
-	}
-	for i := range capabilities {
-		capabilities[i].Tools = byCap[capabilities[i].ID]
-	}
-	store.ValidCapability = func(c string) bool {
-		_, ok := byCap[c]
-		return ok
-	}
+	store.ValidCapability = validCapability
 }
 
-// Capabilities returns the capability catalog for the UI.
-func Capabilities() []Capability { return capabilities }
-
-func platformIDs() []string {
-	var ids []string
-	for _, p := range domain.Platforms() {
-		ids = append(ids, p.ID)
-	}
-	return ids
+// toolCatalog is every built-in tool: the core's and the modules'.
+func toolCatalog() []tool {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return allTools()
 }
 
 func toolsFor(a *store.Agent) []tool {
 	var out []tool
-	for _, t := range tools {
+	for _, t := range toolCatalog() {
 		if t.capability == "" || a.Has(t.capability) {
 			out = append(out, t)
 		}
@@ -222,7 +153,8 @@ func toolsFor(a *store.Agent) []tool {
 	return out
 }
 
-func decodeArgs(raw json.RawMessage, v any) error {
+// DecodeArgs parses a tool call's arguments; a missing body is an empty object.
+func DecodeArgs(raw json.RawMessage, v any) error {
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
@@ -232,7 +164,8 @@ func decodeArgs(raw json.RawMessage, v any) error {
 	return nil
 }
 
-func jsonResult(v any) (string, error) {
+// JSONResult renders a tool result as JSON.
+func JSONResult(v any) (string, error) {
 	b, err := json.Marshal(v)
 	return string(b), err
 }
@@ -241,7 +174,7 @@ func jsonResult(v any) (string, error) {
 
 func toolAddComment(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Content string }
-	if err := decodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Content) == "" {
+	if err := DecodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Content) == "" {
 		return "", errors.New("content is required")
 	}
 	e.c.say(ctx, e.task.ID, e.agent, "message", a.Content, nil)
@@ -250,7 +183,7 @@ func toolAddComment(ctx context.Context, e *runEnv, raw json.RawMessage) (string
 
 func toolAskHuman(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Question string }
-	if err := decodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Question) == "" {
+	if err := DecodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Question) == "" {
 		return "", errors.New("question is required")
 	}
 	e.outcome = &outcome{kind: "ask", text: a.Question}
@@ -259,7 +192,7 @@ func toolAskHuman(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 
 func toolComplete(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Summary string }
-	if err := decodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Summary) == "" {
+	if err := DecodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Summary) == "" {
 		return "", errors.New("summary is required")
 	}
 	e.outcome = &outcome{kind: "complete", text: a.Summary}
@@ -291,7 +224,7 @@ func toolWebSearch(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 		Query string
 		Limit int
 	}
-	if err := decodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Query) == "" {
+	if err := DecodeArgs(raw, &a); err != nil || strings.TrimSpace(a.Query) == "" {
 		return "", errors.New("query is required")
 	}
 	if a.Limit <= 0 || a.Limit > 10 {
@@ -305,411 +238,19 @@ func toolWebSearch(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
-	return jsonResult(res)
+	return JSONResult(res)
 }
 
 func toolReadURL(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ URL string }
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	page, err := e.c.fetcher.Fetch(ctx, a.URL)
 	if err != nil {
 		return "", err
 	}
-	return jsonResult(page)
-}
-
-func toolSearchMaterials(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
-	var a struct {
-		Query string
-		Days  int
-		Limit int
-	}
-	if err := decodeArgs(raw, &a); err != nil {
-		return "", err
-	}
-	if a.Days <= 0 || a.Days > 90 {
-		a.Days = 7
-	}
-	items, err := e.c.store.SearchItems(ctx, e.agent.SourceConnectorIDs, a.Query, time.Now().AddDate(0, 0, -a.Days), a.Limit)
-	if err != nil {
-		return "", err
-	}
-	type row struct {
-		Title     string `json:"title"`
-		URL       string `json:"url"`
-		Author    string `json:"author,omitempty"`
-		Published string `json:"published,omitempty"`
-		Excerpt   string `json:"excerpt"`
-	}
-	out := []row{}
-	for _, it := range items {
-		r := row{Title: it.Title, URL: it.URL, Author: it.Author, Excerpt: clip(it.Content, 600)}
-		if it.PublishedAt != nil {
-			r.Published = it.PublishedAt.Format("2006-01-02")
-		}
-		out = append(out, r)
-	}
-	if len(out) == 0 {
-		return "No matching material. Try fetch_sources first, or web_search.", nil
-	}
-	return jsonResult(out)
-}
-
-func toolFetchSources(ctx context.Context, e *runEnv, _ json.RawMessage) (string, error) {
-	ids := e.agent.SourceConnectorIDs
-	if len(ids) == 0 {
-		cs, err := e.c.store.ListConnectors(ctx, string(connector.KindSource))
-		if err != nil {
-			return "", err
-		}
-		for _, c := range cs {
-			if c.IsActive {
-				ids = append(ids, c.ID)
-			}
-		}
-	}
-	if len(ids) == 0 {
-		return "", errors.New("no source connectors configured")
-	}
-	var lines []string
-	for _, id := range ids {
-		n, err := e.c.hub.FetchSource(ctx, id, time.Now().AddDate(0, 0, -7), 0)
-		name := id.String()
-		if c, cerr := e.c.store.GetConnector(ctx, id); cerr == nil {
-			name = c.Name
-		}
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("%s: error: %v", name, err))
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%s: %d new items", name, n))
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-// --- drafting ---
-
-func toolCreateDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
-	var a struct {
-		Platform    string   `json:"platform"`
-		Title       string   `json:"title"`
-		Content     string   `json:"content"`
-		ThreadParts []string `json:"thread_parts"`
-		Hashtags    []string `json:"hashtags"`
-		ImagePrompt string   `json:"image_prompt"`
-		Topic       string   `json:"topic"`
-		Link        string   `json:"link"`
-		PublishAt   string   `json:"publish_at"`
-		MediaURLs   []string `json:"media_urls"`
-		SourceURLs  []string `json:"source_urls"`
-	}
-	if err := decodeArgs(raw, &a); err != nil {
-		return "", err
-	}
-	if e.drafts >= maxDraftsPerRun {
-		return "", fmt.Errorf("draft limit reached (%d per run)", maxDraftsPerRun)
-	}
-	if a.Platform == "threads" && strings.TrimSpace(a.Link) == "" && len(a.SourceURLs) > 0 {
-		// No link card given: show the main source, so readers can always open it (Threads only).
-		a.Link = strings.TrimSpace(a.SourceURLs[0])
-	}
-	mediaURLs, err := cleanMediaURLs(a.MediaURLs)
-	if err != nil {
-		return "", err
-	}
-	var publishAt *time.Time
-	if s := strings.TrimSpace(a.PublishAt); s != "" {
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			return "", fmt.Errorf("publish_at must be RFC 3339, e.g. 2026-10-07T12:00:00+08:00: %v", err)
-		}
-		if !t.After(time.Now()) {
-			return "", errors.New("publish_at must be in the future")
-		}
-		publishAt = &t
-	}
-	if _, ok := domain.PlatformByID(a.Platform); !ok {
-		return "", fmt.Errorf("unknown platform %q (use one of %s)", a.Platform, strings.Join(platformIDs(), ", "))
-	}
-	drafts := agent.Normalize([]agent.Draft{{Platform: a.Platform, Title: a.Title, Content: a.Content,
-		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt}}, []string{a.Platform})
-	if len(drafts) == 0 {
-		return "", errors.New("content is empty")
-	}
-	d := drafts[0]
-	taskID := e.task.ID
-	var publisher *uuid.UUID
-	var accounts []string
-	if pt := e.c.publishTarget(ctx, e.task); pt != nil {
-		if pls, ok := pt.platforms(); ok && !slices.Contains(pls, d.Platform) {
-			return "", fmt.Errorf("this task publishes only to %s (the accounts chosen for it); do not write a %s draft",
-				strings.Join(pls, ", "), d.Platform)
-		}
-		publisher, accounts = &pt.connectorID, pt.accountsOn(d.Platform)
-	}
-	post, err := e.c.store.CreatePost(ctx, store.NewPost{
-		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
-		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
-		PublisherConnectorID: publisher, Accounts: accounts, ScheduledAt: publishAt, MediaURLs: mediaURLs,
-		SourceContext: map[string]any{"task": e.task.Number, "agent": e.agent.Name, "urls": a.SourceURLs},
-	}, domain.ActorAgent, true)
-	if err != nil {
-		return "", err
-	}
-	e.drafts++
-	e.c.broker.Publish("post.updated", map[string]any{"id": post.ID, "status": post.Status})
-	msg := fmt.Sprintf("Draft %s created for %s and queued for human review (not published).", post.ID, d.Platform)
-	if len(post.Warnings) > 0 {
-		msg += " Warnings: " + strings.Join(post.Warnings, "; ")
-	}
-	return msg, nil
-}
-
-// publishTarget is where a task's drafts go: its publisher and the accounts picked for it.
-type publishTarget struct {
-	connectorID uuid.UUID
-	name        string
-	picked      []string                     // account IDs as set on the task
-	known       map[string]connector.Account // picked accounts the publisher still lists; nil if unknown
-}
-
-// publishTarget resolves the task's publishing defaults, or nil when it has none. The account list
-// comes from the publisher; if it cannot be read, accounts are taken as given.
-func (c *Crew) publishTarget(ctx context.Context, t *store.Task) *publishTarget {
-	if t.PublisherConnectorID == nil {
-		return nil
-	}
-	pt := &publishTarget{connectorID: *t.PublisherConnectorID, picked: t.PublishAccounts}
-	if conn, err := c.store.GetConnector(ctx, pt.connectorID); err == nil {
-		pt.name = conn.Name
-	}
-	if len(pt.picked) == 0 {
-		return pt
-	}
-	inst, _, err := c.hub.Instance(ctx, pt.connectorID, true)
-	if err != nil {
-		return pt
-	}
-	defer hub.Close(inst)
-	al, ok := inst.(connector.AccountLister)
-	if !ok {
-		return pt
-	}
-	lctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	list, err := al.ListAccounts(lctx)
-	if err != nil {
-		c.logger.Warn("list publisher accounts", "err", err)
-		return pt
-	}
-	pt.known = map[string]connector.Account{}
-	for _, a := range list {
-		if slices.Contains(pt.picked, a.ID) {
-			pt.known[a.ID] = a
-		}
-	}
-	return pt
-}
-
-// platforms lists the platforms the picked accounts are on; ok is false when that is unknown
-// (no accounts picked, or the publisher's list could not be read).
-func (pt *publishTarget) platforms() ([]string, bool) {
-	if pt == nil || len(pt.picked) == 0 || pt.known == nil {
-		return nil, false
-	}
-	var out []string
-	for _, id := range pt.picked {
-		if a, ok := pt.known[id]; ok && !slices.Contains(out, a.Platform) {
-			out = append(out, a.Platform)
-		}
-	}
-	return out, true
-}
-
-// accountsOn returns the picked accounts on platform (all of them if their platforms are unknown).
-func (pt *publishTarget) accountsOn(platform string) []string {
-	if pt == nil {
-		return nil
-	}
-	if pt.known == nil {
-		return pt.picked
-	}
-	var out []string
-	for _, id := range pt.picked {
-		if a, ok := pt.known[id]; ok && a.Platform == platform {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-// postInOrg loads a post of the task's org; other orgs' posts don't exist for the agent.
-func (e *runEnv) postInOrg(ctx context.Context, id uuid.UUID) (*domain.Post, error) {
-	p, err := e.c.store.GetPost(ctx, id)
-	if err == nil && p.OrgID != e.task.OrgID {
-		err = domain.ErrNotFound
-	}
-	return p, err
-}
-
-func toolListPosts(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
-	var a struct {
-		Status string
-		Limit  int
-	}
-	if err := decodeArgs(raw, &a); err != nil {
-		return "", err
-	}
-	f := store.PostFilter{OrgID: &e.task.OrgID, Limit: a.Limit}
-	if f.Limit <= 0 || f.Limit > 30 {
-		f.Limit = 10
-	}
-	if st := domain.Status(strings.ToUpper(strings.TrimSpace(a.Status))); st != "" {
-		if !st.Valid() {
-			return "", fmt.Errorf("unknown status %q", a.Status)
-		}
-		f.Statuses = []domain.Status{st}
-	}
-	posts, _, err := e.c.store.ListPosts(ctx, f)
-	if err != nil {
-		return "", err
-	}
-	type row struct {
-		ID        uuid.UUID     `json:"id"`
-		Status    domain.Status `json:"status"`
-		Platforms []string      `json:"platforms"`
-		Title     string        `json:"title"`
-		Excerpt   string        `json:"excerpt"`
-		Warnings  []string      `json:"warnings,omitempty"`
-	}
-	out := []row{}
-	for _, p := range posts {
-		out = append(out, row{p.ID, p.Status, p.Platforms, p.Title, clip(p.Content, 240), p.Warnings})
-	}
-	return jsonResult(out)
-}
-
-// cleanMediaURLs trims the list and accepts only CueFlow media URLs (/media/...) and public https URLs.
-func cleanMediaURLs(in []string) ([]string, error) {
-	var out []string
-	for _, u := range in {
-		u = strings.TrimSpace(u)
-		if u == "" {
-			continue
-		}
-		if _, stored := media.IDFromURL(u); !(stored && strings.HasPrefix(u, media.PathPrefix)) && !strings.HasPrefix(u, "https://") {
-			return nil, fmt.Errorf("media_urls must be CueFlow media URLs (/media/...) or https URLs, got %q", u)
-		}
-		out = append(out, u)
-	}
-	return out, nil
-}
-
-func toolReviseDraft(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
-	var a struct {
-		PostID      string    `json:"post_id"`
-		Title       *string   `json:"title"`
-		Content     *string   `json:"content"`
-		ThreadParts *[]string `json:"thread_parts"`
-		Hashtags    *[]string `json:"hashtags"`
-		ImagePrompt *string   `json:"image_prompt"`
-		Topic       *string   `json:"topic"`
-		Link        *string   `json:"link"`
-		MediaURLs   *[]string `json:"media_urls"`
-		Note        string    `json:"note"`
-	}
-	if err := decodeArgs(raw, &a); err != nil {
-		return "", err
-	}
-	id, err := uuid.Parse(strings.TrimSpace(a.PostID))
-	if err != nil {
-		return "", errors.New("post_id must be a post UUID")
-	}
-	cur, err := e.postInOrg(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if !cur.Status.Editable() {
-		return "", fmt.Errorf("post is %s and can no longer be edited", cur.Status)
-	}
-	var mediaPatch *[]string
-	if a.MediaURLs != nil {
-		urls, err := cleanMediaURLs(*a.MediaURLs)
-		if err != nil {
-			return "", err
-		}
-		mediaPatch = &urls
-	}
-	note := fmt.Sprintf("revised by @%s", e.agent.Slug)
-	if a.Note != "" {
-		note += ": " + a.Note
-	}
-	p, err := e.c.store.UpdatePostAs(ctx, id, cur.Version, store.PostPatch{Title: a.Title, Content: a.Content,
-		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt, Topic: a.Topic, LinkURL: a.Link,
-		MediaURLs: mediaPatch}, domain.ActorAgent, note)
-	if err != nil {
-		return "", err
-	}
-	e.c.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": p.Status})
-	msg := "Draft revised."
-	if len(p.Warnings) > 0 {
-		msg += " Warnings: " + strings.Join(p.Warnings, "; ")
-	}
-	return msg, nil
-}
-
-// --- imaging ---
-
-func toolGenerateImage(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
-	var a struct {
-		PostID string `json:"post_id"`
-		Prompt string `json:"prompt"`
-		Aspect string `json:"aspect"`
-	}
-	if err := decodeArgs(raw, &a); err != nil {
-		return "", err
-	}
-	if e.images >= maxImagesPerRun {
-		return "", fmt.Errorf("image limit reached (%d per run)", maxImagesPerRun)
-	}
-	id, err := uuid.Parse(strings.TrimSpace(a.PostID))
-	if err != nil {
-		return "", errors.New("post_id must be a post UUID")
-	}
-	post, err := e.postInOrg(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if !post.Status.Editable() {
-		return "", fmt.Errorf("post is %s and can no longer be edited", post.Status)
-	}
-	prompt := strings.TrimSpace(a.Prompt)
-	if prompt == "" {
-		prompt = post.ImagePrompt
-	}
-	aspect := a.Aspect
-	if aspect == "" {
-		aspect = "1:1"
-		if slices.Contains(post.Platforms, "instagram") {
-			aspect = "4:5"
-		}
-	}
-	e.images++ // count attempts too: a failed generation may still be billed
-	m, err := (&media.Service{Store: e.c.store, Hub: e.c.hub}).Generate(ctx, media.GenerateRequest{
-		Prompt: prompt, Aspect: aspect, CreatedBy: e.agent.Slug})
-	if err != nil {
-		return "", err
-	}
-	urls := append(append([]string{}, post.MediaURLs...), media.URL(m.ID))
-	p, err := e.c.store.UpdatePostAs(ctx, id, post.Version, store.PostPatch{MediaURLs: &urls}, domain.ActorAgent,
-		fmt.Sprintf("image generated by @%s", e.agent.Slug))
-	if err != nil {
-		return "", err
-	}
-	e.c.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": p.Status})
-	return fmt.Sprintf("Image %s generated (%s) and attached to draft %s. The reviewer sees it with the draft.", media.URL(m.ID), aspect, p.ID), nil
+	return JSONResult(page)
 }
 
 // --- delegation ---
@@ -733,7 +274,7 @@ func toolListAgents(ctx context.Context, e *runEnv, _ json.RawMessage) (string, 
 			out = append(out, row{a.Slug, a.Name, a.Role, a.Description, a.Capabilities, a.Stats.OpenTasks})
 		}
 	}
-	return jsonResult(out)
+	return JSONResult(out)
 }
 
 func (e *runEnv) resolveAgent(ctx context.Context, slug string) (*store.Agent, error) {
@@ -754,7 +295,7 @@ func toolCreateSubtask(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 	var a struct {
 		Title, Description, Assignee, Priority string
 	}
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if e.subtasks >= maxSubtasksPerRun {
@@ -815,7 +356,7 @@ func toolListTasks(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 		Status, Assignee string
 		Limit            int
 	}
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	f := store.TaskFilter{OrgID: &e.task.OrgID, Limit: a.Limit}
@@ -851,7 +392,7 @@ func toolListTasks(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 
 func toolGetTask(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Number int64 }
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	t, err := e.c.store.GetTaskByNumber(ctx, e.task.OrgID, a.Number)
@@ -881,7 +422,7 @@ func toolCreateTask(ctx context.Context, e *runEnv, raw json.RawMessage) (string
 	var a struct {
 		Title, Description, Assignee, Priority string
 	}
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if e.subtasks >= maxSubtasksPerRun {
@@ -910,7 +451,7 @@ func toolScheduleTask(ctx context.Context, e *runEnv, raw json.RawMessage) (stri
 	var a struct {
 		Name, Cron, Timezone, Title, Description, Assignee, Priority string
 	}
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	assignee, err := e.resolveAgent(ctx, a.Assignee)
@@ -952,7 +493,7 @@ func toolListSchedules(ctx context.Context, e *runEnv, _ json.RawMessage) (strin
 
 func toolPauseSchedule(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ ID string }
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	id, err := uuid.Parse(strings.TrimSpace(a.ID))
@@ -976,7 +517,7 @@ func toolPauseSchedule(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 
 func toolRemember(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Content string }
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if _, err := e.c.store.AddMemory(ctx, e.agent.ID, a.Content); err != nil {
@@ -988,7 +529,7 @@ func toolRemember(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 
 func toolSearchMemory(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct{ Query string }
-	if err := decodeArgs(raw, &a); err != nil {
+	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	ms, err := e.c.store.Memories(ctx, e.agent.ID, a.Query, 20)

@@ -47,10 +47,14 @@ parent's org; assigning an agent from another org (task create/update, schedules
 ## Meta
 
 ### `GET /api/v1/meta`
-Static info the UI uses to render forms and badges.
+Static info the UI uses to render forms and badges. `modules` lists the feature modules mounted on this
+server; the keys below `connector_types` come from the `content` module (posts, pipelines, publishing)
+and are absent when it is not mounted.
 ```json
 {
   "version": "0.1.0",
+  "modules": ["content"],
+  "connector_types": [ConnectorSpec, ...],
   "statuses": ["DRAFT","PENDING_REVIEW","APPROVED","REJECTED","QUEUED","PUBLISHED","FAILED"],
   "transitions": {"DRAFT":["PENDING_REVIEW"],"PENDING_REVIEW":["APPROVED","REJECTED"],"APPROVED":["QUEUED"],
                   "QUEUED":["PUBLISHED","FAILED"],"FAILED":["QUEUED"],"REJECTED":[],"PUBLISHED":[]},
@@ -59,8 +63,7 @@ Static info the UI uses to render forms and badges.
     {"id":"instagram","name":"Instagram","max_chars":2200,"supports_thread":false,"max_hashtags":30,"requires_media":true},
     {"id":"x","name":"X","max_chars":280,"supports_thread":true,"max_hashtags":3,"requires_media":false},
     {"id":"linkedin","name":"LinkedIn","max_chars":3000,"supports_thread":false,"max_hashtags":5,"requires_media":false}
-  ],
-  "connector_types": [ConnectorSpec, ...]
+  ]
 }
 ```
 
@@ -249,7 +252,7 @@ own host), `runner_pool` (a registered [Runner](#runners) launches it) or `exter
 
 `/meta` additionally returns:
 ```json
-"agent_capabilities":[{"id":"research","name":"Research","description":"...","tools":["web_search","read_url","search_materials","fetch_sources"]}, ...],
+"agent_capabilities":[{"id":"research","name":"Research","description":"...","tools":["web_search","read_url"]}, ...],
 "agent_roles":["manager","researcher","writer","editor","custom"],
 "task_statuses":["BACKLOG","TODO","IN_PROGRESS","BLOCKED","WAITING_HUMAN","REVIEW","DONE","CANCELED"],
 "task_priorities":["low","normal","high","urgent"]
@@ -445,7 +448,7 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 | `list_orgs` | Orgs: slug, name, whether it is the default |
 | `list_agents` | The org's crew: slug, name, role, description, active |
 | `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query`, `all`, `limit` |
-| `get_task` | One task (`#12`, `12` or id) with description, subtasks, drafts and the last 30 thread messages |
+| `get_task` | One task (`#12`, `12` or id) with description, subtasks, its posts and the last 30 thread messages |
 | `create_task` | `title`, `description`, `assignee` slug, `status` `TODO` (default) or `BACKLOG`, `priority`, `labels` |
 | `update_task` | Title, description, priority, labels, assignee (`none` unassigns), status `BACKLOG`/`TODO`/`REVIEW`/`DONE`/`CANCELED` |
 | `comment_task` | Operator message in the thread, same rules as `POST /tasks/{id}/messages` (`@slug` hand-off, resumes the agent) |

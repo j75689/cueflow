@@ -159,3 +159,13 @@ func pack(units []unit, limit int) []string {
 	}
 	return out
 }
+
+// Clip trims s and cuts it to n runes, marking the cut with an ellipsis. n <= 0 means no limit.
+func Clip(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if n > 0 && len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
