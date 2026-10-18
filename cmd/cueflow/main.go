@@ -1,4 +1,5 @@
-// Command cueflow runs the CueFlow agent ops console: API + dashboard, scheduler and publish worker.
+// Command cueflow runs the CueFlow agent ops console: API + dashboard, the scheduler, the agent crew
+// and the modules' workers (the content module's publish worker).
 //
 //	cueflow            start the server (default)
 //	cueflow migrate    apply database migrations and exit
@@ -34,16 +35,17 @@ import (
 	"github.com/j75689/cueflow/internal/cfaccess"
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
+	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/content/dispatch"
+	"github.com/j75689/cueflow/internal/content/pipeline"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
-	"github.com/j75689/cueflow/internal/dispatch"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/internalauth"
 	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/jobs/cloudtasks"
 	"github.com/j75689/cueflow/internal/mcpx"
-	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
@@ -159,8 +161,9 @@ func serve() error {
 	st.SetBlobs(blobs)
 	// "Everything running is stale" is only true when this is the one process. In the cloud, other
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
+	cs := content.NewStore(st)
 	if !cfg.Cloud() {
-		if err := st.FailStaleRuns(ctx); err != nil {
+		if err := cs.FailStaleRuns(ctx); err != nil {
 			logger.Warn("clean stale runs", "err", err)
 		}
 	}
@@ -168,10 +171,15 @@ func serve() error {
 	broker.Attach(pool, logger)
 	go broker.Run(ctx)
 	h := hub.New(st, logger)
-	runner := pipeline.NewRunner(ctx, st, h, broker, logger, cfg.PublicURL)
-	worker := dispatch.NewWorker(st, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
+	sched := scheduler.New(st, logger)
+
+	// The content module: simple schedules, the publish worker and everything around posts.
+	runner := pipeline.NewRunner(ctx, cs, h, broker, logger, cfg.PublicURL)
+	worker := dispatch.NewWorker(cs, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
 	worker.MediaBaseURL = cfg.MediaBaseURL
-	sched := scheduler.New(st, runner, h, logger, cfg.DigestCron, cfg.PublicURL)
+	contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner,
+		Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL}
+	contentModule.Attach(cfg.DigestCron)
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
 	team.Concurrency = cfg.AgentConcurrency
@@ -198,9 +206,9 @@ func serve() error {
 		logger.Info("created the default agent team", "agents", n)
 	}
 	apiSrv := &api.Server{
-		Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
+		Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team,
 		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
-		Modules: []api.Module{api.Content{}},
+		Modules: []api.Module{contentModule},
 	}
 	if cfg.CFAccessTeamDomain != "" {
 		apiSrv.Access = cfaccess.New(ctx, cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
@@ -220,11 +228,11 @@ func serve() error {
 		sched.External = true
 		apiSrv.InternalAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.InternalServiceAccounts))
 		apiSrv.Handlers = jobs.Handlers{
-			jobs.KindCrew:     func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
-			jobs.KindDispatch: func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
-			jobs.KindPipeline: sched.HandlePipeline,
-			jobs.KindSchedule: sched.HandleSchedule,
-			jobs.KindApproval: team.RunApproval,
+			jobs.KindCrew:        func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
+			jobs.KindSchedule:    sched.HandleSchedule,
+			jobs.KindApproval:    team.RunApproval,
+			content.KindDispatch: func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
+			content.KindPipeline: func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") },
 		}
 		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
 		if len(cfg.MediaRegisterAccounts) > 0 {

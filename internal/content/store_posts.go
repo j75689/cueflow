@@ -1,25 +1,25 @@
-package store
+package content
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	"github.com/j75689/cueflow/internal/domain"
 )
 
 const postColumns = `id, group_id, pipeline_id, run_id, task_id, publisher_connector_id, title, content, thread_parts,
 	hashtags, image_prompt, platforms, media_urls, accounts, topic, link_url, status, review_note, source_context, error_message,
 	external_post_ids, attempts, version, scheduled_at, published_at, created_at, updated_at, org_id`
 
-func scanPost(row pgx.Row) (*domain.Post, error) {
-	var p domain.Post
+func scanPost(row pgx.Row) (*Post, error) {
+	var p Post
 	var status string
 	var ext []byte
 	if err := row.Scan(&p.ID, &p.GroupID, &p.PipelineID, &p.RunID, &p.TaskID, &p.PublisherConnectorID, &p.Title, &p.Content,
@@ -28,7 +28,7 @@ func scanPost(row pgx.Row) (*domain.Post, error) {
 		&p.CreatedAt, &p.UpdatedAt, &p.OrgID); err != nil {
 		return nil, err
 	}
-	p.Status = domain.Status(status)
+	p.Status = Status(status)
 	p.ExternalPostIDs = map[string]string{}
 	_ = json.Unmarshal(ext, &p.ExternalPostIDs)
 	normalizePost(&p)
@@ -36,7 +36,7 @@ func scanPost(row pgx.Row) (*domain.Post, error) {
 	return &p, nil
 }
 
-func normalizePost(p *domain.Post) {
+func normalizePost(p *Post) {
 	for _, s := range []*[]string{&p.ThreadParts, &p.Hashtags, &p.Platforms, &p.MediaURLs, &p.Accounts} {
 		if *s == nil {
 			*s = []string{}
@@ -52,7 +52,7 @@ func normalizePost(p *domain.Post) {
 
 type PostFilter struct {
 	OrgID      *uuid.UUID
-	Statuses   []domain.Status
+	Statuses   []Status
 	Query      string
 	PipelineID *uuid.UUID
 	RunID      *uuid.UUID
@@ -60,7 +60,7 @@ type PostFilter struct {
 	Offset     int
 }
 
-func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*domain.Post, int, error) {
+func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*Post, int, error) {
 	var where []string
 	var args []any
 	arg := func(v any) string {
@@ -92,7 +92,7 @@ func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*domain.Post, in
 		cond = "WHERE " + strings.Join(where, " AND ")
 	}
 	var total int
-	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM posts "+cond, args...).Scan(&total); err != nil {
+	if err := s.Pool().QueryRow(ctx, "SELECT count(*) FROM posts "+cond, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	limit := f.Limit
@@ -101,12 +101,12 @@ func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*domain.Post, in
 	}
 	q := fmt.Sprintf("SELECT %s FROM posts %s ORDER BY created_at DESC, id LIMIT %s OFFSET %s",
 		postColumns, cond, arg(limit), arg(max(f.Offset, 0)))
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.Pool().Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	posts := []*domain.Post{}
+	posts := []*Post{}
 	for rows.Next() {
 		p, err := scanPost(rows)
 		if err != nil {
@@ -117,14 +117,14 @@ func (s *Store) ListPosts(ctx context.Context, f PostFilter) ([]*domain.Post, in
 	return posts, total, rows.Err()
 }
 
-func (s *Store) GetPost(ctx context.Context, id uuid.UUID) (*domain.Post, error) {
-	p, err := scanPost(s.pool.QueryRow(ctx, "SELECT "+postColumns+" FROM posts WHERE id=$1", id))
-	return p, notFound(err)
+func (s *Store) GetPost(ctx context.Context, id uuid.UUID) (*Post, error) {
+	p, err := scanPost(s.Pool().QueryRow(ctx, "SELECT "+postColumns+" FROM posts WHERE id=$1", id))
+	return p, store.NotFound(err)
 }
 
-func getPostForUpdate(ctx context.Context, q querier, id uuid.UUID) (*domain.Post, error) {
+func getPostForUpdate(ctx context.Context, q querier, id uuid.UUID) (*Post, error) {
 	p, err := scanPost(q.QueryRow(ctx, "SELECT "+postColumns+" FROM posts WHERE id=$1 FOR UPDATE", id))
-	return p, notFound(err)
+	return p, store.NotFound(err)
 }
 
 // NewPost is the input for CreatePost.
@@ -152,22 +152,22 @@ type NewPost struct {
 
 // CreatePost inserts a DRAFT (audited as GENERATED for the agent, CREATED for humans) and, when
 // submit is set, moves it on to PENDING_REVIEW in the same transaction.
-func (s *Store) CreatePost(ctx context.Context, in NewPost, actor domain.Actor, submit bool) (*domain.Post, error) {
+func (s *Store) CreatePost(ctx context.Context, in NewPost, actor Actor, submit bool) (*Post, error) {
 	if strings.TrimSpace(in.Content) == "" && len(in.ThreadParts) == 0 {
-		return nil, invalid("content is required")
+		return nil, store.Invalid("content is required")
 	}
 	if strings.TrimSpace(in.Content) == "" {
 		in.Content = strings.Join(in.ThreadParts, "\n\n")
 	}
-	if err := domain.ValidatePlatforms(in.Platforms); err != nil {
-		return nil, invalid(err.Error())
+	if err := ValidatePlatforms(in.Platforms); err != nil {
+		return nil, store.Invalid(err.Error())
 	}
 	srcCtx, err := json.Marshal(orEmpty(in.SourceContext))
 	if err != nil {
 		return nil, err
 	}
-	var out *domain.Post
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	var out *Post
+	err = pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		var org *uuid.UUID
 		if in.OrgID != uuid.Nil {
 			org = &in.OrgID
@@ -183,15 +183,15 @@ func (s *Store) CreatePost(ctx context.Context, in NewPost, actor domain.Actor, 
 		if err != nil {
 			return err
 		}
-		action := domain.ActionCreated
-		if actor == domain.ActorAgent {
-			action = domain.ActionGenerated
+		action := ActionCreated
+		if actor == ActorAgent {
+			action = ActionGenerated
 		}
-		if err := insertAudit(ctx, tx, p.ID, action, actor, "", domain.StatusDraft, "", nil); err != nil {
+		if err := insertAudit(ctx, tx, p.ID, action, actor, "", StatusDraft, "", nil); err != nil {
 			return err
 		}
 		if submit {
-			if p, err = transition(ctx, tx, p, domain.StatusPendingReview, domain.ActionSubmitted, actor, "", nil); err != nil {
+			if p, err = transition(ctx, tx, p, StatusPendingReview, ActionSubmitted, actor, "", nil); err != nil {
 				return err
 			}
 		}
@@ -218,14 +218,14 @@ type PostPatch struct {
 }
 
 // UpdatePost applies an edit with optimistic locking and records the diff in the audit log.
-func (s *Store) UpdatePost(ctx context.Context, id uuid.UUID, version int, patch PostPatch) (*domain.Post, error) {
-	return s.UpdatePostAs(ctx, id, version, patch, domain.ActorReviewer, "")
+func (s *Store) UpdatePost(ctx context.Context, id uuid.UUID, version int, patch PostPatch) (*Post, error) {
+	return s.UpdatePostAs(ctx, id, version, patch, ActorReviewer, "")
 }
 
 // UpdatePostAs is UpdatePost with an explicit actor (agents revising drafts are audited as such).
-func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, patch PostPatch, actor domain.Actor, note string) (*domain.Post, error) {
-	var out *domain.Post
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, patch PostPatch, actor Actor, note string) (*Post, error) {
+	var out *Post
+	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		cur, err := getPostForUpdate(ctx, tx, id)
 		if err != nil {
 			return err
@@ -234,7 +234,7 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 			return domain.ErrVersionConflict
 		}
 		if !cur.Status.Editable() {
-			return invalid(fmt.Sprintf("posts in %s can no longer be edited", cur.Status))
+			return store.Invalid(fmt.Sprintf("posts in %s can no longer be edited", cur.Status))
 		}
 		next := *cur
 		diff := map[string]any{}
@@ -263,8 +263,8 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 		setList("media_urls", &next.MediaURLs, patch.MediaURLs)
 		setList("accounts", &next.Accounts, patch.Accounts)
 		if patch.Platforms != nil {
-			if err := domain.ValidatePlatforms(*patch.Platforms); err != nil {
-				return invalid(err.Error())
+			if err := ValidatePlatforms(*patch.Platforms); err != nil {
+				return store.Invalid(err.Error())
 			}
 			setList("platforms", &next.Platforms, patch.Platforms)
 		}
@@ -277,7 +277,7 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 			next.PublisherConnectorID = *patch.PublisherConnectorID
 		}
 		if strings.TrimSpace(next.Content) == "" && len(next.ThreadParts) == 0 {
-			return invalid("content is required")
+			return store.Invalid("content is required")
 		}
 		if len(diff) == 0 {
 			out = cur
@@ -291,7 +291,7 @@ func (s *Store) UpdatePostAs(ctx context.Context, id uuid.UUID, version int, pat
 		if err != nil {
 			return err
 		}
-		return insertAudit(ctx, tx, id, domain.ActionEdited, actor, cur.Status, cur.Status, note, diff)
+		return insertAudit(ctx, tx, id, ActionEdited, actor, cur.Status, cur.Status, note, diff)
 	})
 	return out, err
 }
@@ -308,10 +308,10 @@ type TransitionOpts struct {
 
 // Transition moves a post to a new status if the state machine allows it, atomically with its
 // audit entry.
-func (s *Store) Transition(ctx context.Context, id uuid.UUID, to domain.Status, action domain.Action,
-	actor domain.Actor, note string, opts *TransitionOpts) (*domain.Post, error) {
-	var out *domain.Post
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+func (s *Store) Transition(ctx context.Context, id uuid.UUID, to Status, action Action,
+	actor Actor, note string, opts *TransitionOpts) (*Post, error) {
+	var out *Post
+	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		cur, err := getPostForUpdate(ctx, tx, id)
 		if err != nil {
 			return err
@@ -322,9 +322,9 @@ func (s *Store) Transition(ctx context.Context, id uuid.UUID, to domain.Status, 
 	return out, err
 }
 
-func transition(ctx context.Context, tx querier, cur *domain.Post, to domain.Status, action domain.Action,
-	actor domain.Actor, note string, opts *TransitionOpts) (*domain.Post, error) {
-	if err := domain.CheckTransition(cur.Status, to); err != nil {
+func transition(ctx context.Context, tx querier, cur *Post, to Status, action Action,
+	actor Actor, note string, opts *TransitionOpts) (*Post, error) {
+	if err := CheckTransition(cur.Status, to); err != nil {
 		return nil, err
 	}
 	sets := []string{"status=$2", "version=version+1", "updated_at=NOW()"}
@@ -333,7 +333,7 @@ func transition(ctx context.Context, tx querier, cur *domain.Post, to domain.Sta
 		args = append(args, v)
 		sets = append(sets, fmt.Sprintf("%s=$%d", col, len(args)))
 	}
-	if to == domain.StatusQueued {
+	if to == StatusQueued {
 		sets = append(sets, "lease_until=NULL")
 	}
 	if opts != nil {
@@ -368,21 +368,21 @@ func transition(ctx context.Context, tx querier, cur *domain.Post, to domain.Sta
 }
 
 func (s *Store) DeletePost(ctx context.Context, id uuid.UUID) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	return pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		cur, err := getPostForUpdate(ctx, tx, id)
 		if err != nil {
 			return err
 		}
 		if !cur.Status.Deletable() {
-			return invalid(fmt.Sprintf("posts in %s cannot be deleted", cur.Status))
+			return store.Invalid(fmt.Sprintf("posts in %s cannot be deleted", cur.Status))
 		}
 		_, err = tx.Exec(ctx, "DELETE FROM posts WHERE id=$1", id)
 		return err
 	})
 }
 
-func insertAudit(ctx context.Context, q querier, postID uuid.UUID, action domain.Action, actor domain.Actor,
-	from, to domain.Status, note string, diff map[string]any) error {
+func insertAudit(ctx context.Context, q querier, postID uuid.UUID, action Action, actor Actor,
+	from, to Status, note string, diff map[string]any) error {
 	var raw []byte
 	if diff != nil {
 		var err error
@@ -395,22 +395,22 @@ func insertAudit(ctx context.Context, q querier, postID uuid.UUID, action domain
 	return err
 }
 
-func (s *Store) AuditLogs(ctx context.Context, postID uuid.UUID) ([]domain.AuditLog, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, post_id, action, actor, from_status, to_status, note, payload_diff, created_at
+func (s *Store) AuditLogs(ctx context.Context, postID uuid.UUID) ([]AuditLog, error) {
+	rows, err := s.Pool().Query(ctx, `SELECT id, post_id, action, actor, from_status, to_status, note, payload_diff, created_at
 		FROM audit_logs WHERE post_id=$1 ORDER BY seq`, postID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []domain.AuditLog{}
+	out := []AuditLog{}
 	for rows.Next() {
-		var a domain.AuditLog
+		var a AuditLog
 		var action, actor, from, to string
 		var diff []byte
 		if err := rows.Scan(&a.ID, &a.PostID, &action, &actor, &from, &to, &a.Note, &diff, &a.CreatedAt); err != nil {
 			return nil, err
 		}
-		a.Action, a.Actor, a.FromStatus, a.ToStatus = domain.Action(action), domain.Actor(actor), domain.Status(from), domain.Status(to)
+		a.Action, a.Actor, a.FromStatus, a.ToStatus = Action(action), Actor(actor), Status(from), Status(to)
 		if len(diff) > 0 {
 			a.PayloadDiff = diff
 		}
@@ -420,12 +420,12 @@ func (s *Store) AuditLogs(ctx context.Context, postID uuid.UUID) ([]domain.Audit
 }
 
 // CountPostsByStatus counts an org's posts per status.
-func (s *Store) CountPostsByStatus(ctx context.Context, org uuid.UUID) (map[domain.Status]int, error) {
-	out := map[domain.Status]int{}
-	for _, st := range domain.AllStatuses {
+func (s *Store) CountPostsByStatus(ctx context.Context, org uuid.UUID) (map[Status]int, error) {
+	out := map[Status]int{}
+	for _, st := range AllStatuses {
 		out[st] = 0
 	}
-	rows, err := s.pool.Query(ctx, "SELECT status, count(*) FROM posts WHERE org_id=$1 GROUP BY status", org)
+	rows, err := s.Pool().Query(ctx, "SELECT status, count(*) FROM posts WHERE org_id=$1 GROUP BY status", org)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +436,7 @@ func (s *Store) CountPostsByStatus(ctx context.Context, org uuid.UUID) (map[doma
 		if err := rows.Scan(&st, &n); err != nil {
 			return nil, err
 		}
-		out[domain.Status(st)] = n
+		out[Status(st)] = n
 	}
 	return out, rows.Err()
 }
@@ -446,13 +446,13 @@ func (s *Store) CountPostsByStatus(ctx context.Context, org uuid.UUID) (map[doma
 // QueueApproved moves every APPROVED post to QUEUED and returns their IDs.
 func (s *Store) QueueApproved(ctx context.Context) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+postColumns+` FROM posts WHERE status='APPROVED'
 			ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100`)
 		if err != nil {
 			return err
 		}
-		var posts []*domain.Post
+		var posts []*Post
 		for rows.Next() {
 			p, err := scanPost(rows)
 			if err != nil {
@@ -466,7 +466,7 @@ func (s *Store) QueueApproved(ctx context.Context) ([]uuid.UUID, error) {
 			return err
 		}
 		for _, p := range posts {
-			if _, err := transition(ctx, tx, p, domain.StatusQueued, domain.ActionQueued, domain.ActorWorker, "", nil); err != nil {
+			if _, err := transition(ctx, tx, p, StatusQueued, ActionQueued, ActorWorker, "", nil); err != nil {
 				return err
 			}
 			ids = append(ids, p.ID)
@@ -477,8 +477,8 @@ func (s *Store) QueueApproved(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 // ClaimQueued leases up to limit unleased QUEUED posts for publishing.
-func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int) ([]*domain.Post, error) {
-	rows, err := s.pool.Query(ctx, `UPDATE posts SET lease_until = NOW() + make_interval(secs => $1),
+func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int) ([]*Post, error) {
+	rows, err := s.Pool().Query(ctx, `UPDATE posts SET lease_until = NOW() + make_interval(secs => $1),
 		attempts = attempts + 1, updated_at = NOW()
 		WHERE id IN (SELECT id FROM posts WHERE status='QUEUED' AND lease_until IS NULL
 			ORDER BY updated_at LIMIT $2 FOR UPDATE SKIP LOCKED)
@@ -487,7 +487,7 @@ func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*domain.Post
+	var out []*Post
 	for rows.Next() {
 		p, err := scanPost(rows)
 		if err != nil {
@@ -502,7 +502,7 @@ func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int)
 // They are failed rather than re-published automatically, because the publish may have
 // succeeded on the platform before the crash.
 func (s *Store) ExpiredLeases(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM posts WHERE status='QUEUED' AND lease_until < NOW()`)
+	rows, err := s.Pool().Query(ctx, `SELECT id FROM posts WHERE status='QUEUED' AND lease_until < NOW()`)
 	if err != nil {
 		return nil, err
 	}
@@ -519,8 +519,8 @@ func (s *Store) ExpiredLeases(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 // PendingReview returns posts awaiting review, oldest first (for digests).
-func (s *Store) PendingReview(ctx context.Context, limit int) ([]*domain.Post, error) {
-	posts, _, err := s.ListPosts(ctx, PostFilter{Statuses: []domain.Status{domain.StatusPendingReview}, Limit: limit})
+func (s *Store) PendingReview(ctx context.Context, limit int) ([]*Post, error) {
+	posts, _, err := s.ListPosts(ctx, PostFilter{Statuses: []Status{StatusPendingReview}, Limit: limit})
 	return posts, err
 }
 
@@ -578,12 +578,12 @@ func uuidEq(a, b *uuid.UUID) bool {
 }
 
 // AddAudit records an event that does not change status (e.g. DISPATCHED).
-func (s *Store) AddAudit(ctx context.Context, postID uuid.UUID, action domain.Action, actor domain.Actor, note string) error {
+func (s *Store) AddAudit(ctx context.Context, postID uuid.UUID, action Action, actor Actor, note string) error {
 	var st string
-	if err := s.pool.QueryRow(ctx, "SELECT status FROM posts WHERE id=$1", postID).Scan(&st); err != nil {
-		return notFound(err)
+	if err := s.Pool().QueryRow(ctx, "SELECT status FROM posts WHERE id=$1", postID).Scan(&st); err != nil {
+		return store.NotFound(err)
 	}
-	return insertAudit(ctx, s.pool, postID, action, actor, domain.Status(st), domain.Status(st), note, nil)
+	return insertAudit(ctx, s.Pool(), postID, action, actor, Status(st), Status(st), note, nil)
 }
 
 func trimmed(s *string) *string {

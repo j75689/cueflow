@@ -38,18 +38,37 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func notFound(err error) error {
+// NotFound maps pgx.ErrNoRows to domain.ErrNotFound.
+func NotFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
 	}
 	return err
 }
 
+// CronValidator is injected by the scheduler so the store does not depend on the cron library.
+type CronValidator func(expr, tz string) error
+
 // ValidationError is a caller error (bad input) as opposed to a storage failure.
 type ValidationError struct{ Msg string }
 
 func (e *ValidationError) Error() string { return e.Msg }
 
-func invalid(msg string) error { return &ValidationError{Msg: msg} }
+// Invalid is a ValidationError for a caller error.
+func Invalid(msg string) error { return &ValidationError{Msg: msg} }
 
 func asPg(err error, target **pgconn.PgError) bool { return errors.As(err, target) }
+
+// CountConnectors counts the connectors for the dashboard (they are global, not per org).
+func (s *Store) CountConnectors(ctx context.Context) (total, active int, err error) {
+	err = s.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM connectors), (SELECT count(*) FROM connectors WHERE is_active)`).Scan(&total, &active)
+	return
+}
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}

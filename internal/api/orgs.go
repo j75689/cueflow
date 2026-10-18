@@ -11,7 +11,7 @@ import (
 const OrgParam = "org"
 
 // reqOrg resolves the org of an org-scoped list or create request.
-func (s *Server) reqOrg(r *http.Request) (*store.Org, error) {
+func (s *Server) ReqOrg(r *http.Request) (*store.Org, error) {
 	o, err := s.Store.ResolveOrg(r.Context(), r.URL.Query().Get(OrgParam))
 	if err != nil {
 		return nil, &store.ValidationError{Msg: "unknown org " + r.URL.Query().Get(OrgParam)}
@@ -22,10 +22,10 @@ func (s *Server) reqOrg(r *http.Request) (*store.Org, error) {
 func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) {
 	orgs, err := s.Store.ListOrgs(r.Context())
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, orgs)
+	WriteJSON(w, http.StatusOK, orgs)
 }
 
 type orgBody struct {
@@ -37,8 +37,8 @@ type orgBody struct {
 
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 	var body orgBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	o := &store.Org{}
@@ -50,7 +50,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.Store.CreateOrg(r.Context(), o)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	if body.SeedAgents {
@@ -59,23 +59,23 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Broker.Publish("org.updated", map[string]any{"id": out.ID})
-	writeJSON(w, http.StatusCreated, out)
+	WriteJSON(w, http.StatusCreated, out)
 }
 
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	cur, err := s.Store.GetOrg(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var body orgBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	if body.Name != nil {
@@ -86,21 +86,21 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.Store.UpdateOrg(r.Context(), cur)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("org.updated", map[string]any{"id": out.ID})
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	if err := s.Store.DeleteOrg(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("org.updated", map[string]any{"id": id})

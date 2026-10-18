@@ -113,17 +113,21 @@ func Slugify(name string) string {
 // ValidCapability is injected by package crew (which owns the tool catalog).
 var ValidCapability = func(string) bool { return true }
 
+// ValidatePlatforms checks an agent's platform list; the content module injects the platform
+// catalog, without it any value is accepted.
+var ValidatePlatforms = func([]string) error { return nil }
+
 func (a *Agent) normalize() error {
 	a.Name = strings.TrimSpace(a.Name)
 	if a.Name == "" {
-		return invalid("name is required")
+		return Invalid("name is required")
 	}
 	a.Slug = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(a.Slug, "@")))
 	if a.Slug == "" {
 		a.Slug = Slugify(a.Name)
 	}
 	if !slugRe.MatchString(a.Slug) {
-		return invalid("slug may only contain lowercase letters, digits and dashes")
+		return Invalid("slug may only contain lowercase letters, digits and dashes")
 	}
 	if strings.TrimSpace(a.Avatar) == "" {
 		a.Avatar = "🤖"
@@ -138,7 +142,7 @@ func (a *Agent) normalize() error {
 		}
 	}
 	if !validRole {
-		return invalid(fmt.Sprintf("unknown role %q", a.Role))
+		return Invalid(fmt.Sprintf("unknown role %q", a.Role))
 	}
 	seen := map[string]bool{}
 	caps := []string{}
@@ -148,15 +152,15 @@ func (a *Agent) normalize() error {
 			continue
 		}
 		if !ValidCapability(c) {
-			return invalid(fmt.Sprintf("unknown capability %q", c))
+			return Invalid(fmt.Sprintf("unknown capability %q", c))
 		}
 		seen[c] = true
 		caps = append(caps, c)
 	}
 	a.Capabilities = caps
 	if len(a.Platforms) > 0 {
-		if err := domain.ValidatePlatforms(a.Platforms); err != nil {
-			return invalid(err.Error())
+		if err := ValidatePlatforms(a.Platforms); err != nil {
+			return Invalid(err.Error())
 		}
 	} else {
 		a.Platforms = []string{}
@@ -179,7 +183,7 @@ func (a *Agent) normalize() error {
 func dupSlug(err error) error {
 	var pg *pgconn.PgError
 	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
-		return invalid("another agent in this org already uses this slug")
+		return Invalid("another agent in this org already uses this slug")
 	}
 	return err
 }
@@ -204,14 +208,14 @@ func (s *Store) ListAgents(ctx context.Context, org uuid.UUID) ([]*Agent, error)
 
 func (s *Store) GetAgent(ctx context.Context, id uuid.UUID) (*Agent, error) {
 	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.id=$1", id))
-	return a, notFound(err)
+	return a, NotFound(err)
 }
 
 // GetAgentBySlug finds an agent of an org by its @slug.
 func (s *Store) GetAgentBySlug(ctx context.Context, org uuid.UUID, slug string) (*Agent, error) {
 	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.org_id=$1 AND a.slug=$2",
 		org, strings.ToLower(strings.TrimPrefix(strings.TrimSpace(slug), "@"))))
-	return a, notFound(err)
+	return a, NotFound(err)
 }
 
 func (s *Store) CountAgents(ctx context.Context, org uuid.UUID) (int, error) {
@@ -225,7 +229,7 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 		return nil, err
 	}
 	if a.OrgID == uuid.Nil {
-		return nil, invalid("org is required")
+		return nil, Invalid("org is required")
 	}
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `INSERT INTO agents (name, slug, avatar, role, description, instructions, capabilities,
@@ -281,7 +285,7 @@ type AgentMemory struct {
 func (s *Store) AddMemory(ctx context.Context, agentID uuid.UUID, content string) (*AgentMemory, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, invalid("memory content is required")
+		return nil, Invalid("memory content is required")
 	}
 	if r := []rune(content); len(r) > 2000 {
 		content = string(r[:2000])
@@ -290,7 +294,7 @@ func (s *Store) AddMemory(ctx context.Context, agentID uuid.UUID, content string
 	err := s.pool.QueryRow(ctx, `INSERT INTO agent_memories (agent_id, content) VALUES ($1,$2)
 		RETURNING id, agent_id, content, created_at`, agentID, content).Scan(&m.ID, &m.AgentID, &m.Content, &m.CreatedAt)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	return &m, nil
 }

@@ -1,7 +1,7 @@
 // Package crew runs CueFlow's agent team. Tasks on the board that are assigned to an agent and in
 // TODO are claimed (with a renewable lease), and the agent works them in a tool loop: researching,
-// drafting posts into the review queue, delegating subtasks to teammates, scheduling recurring work,
-// asking the human, and finally reporting a result. Every step is written to the task thread.
+// using the tools modules add (drafting, say), delegating subtasks to teammates, scheduling recurring
+// work, asking the human, and finally reporting a result. Every step is written to the task thread.
 package crew
 
 import (

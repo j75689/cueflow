@@ -1,7 +1,8 @@
-package domain
+package content
 
 import (
 	"fmt"
+	"github.com/j75689/cueflow/internal/textutil"
 	"strings"
 	"unicode/utf8"
 )
@@ -136,13 +137,4 @@ func hashtagSuffix(tags []string) string {
 }
 
 // FormatHashtags renders tags as "#a #b".
-func FormatHashtags(tags []string) string {
-	out := make([]string, 0, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "#"))
-		if t != "" {
-			out = append(out, "#"+t)
-		}
-	}
-	return strings.Join(out, " ")
-}
+func FormatHashtags(tags []string) string { return textutil.FormatHashtags(tags) }

@@ -4,9 +4,7 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"strings"
 	"sync"
@@ -14,18 +12,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/j75689/cueflow/internal/agent"
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
-	"github.com/j75689/cueflow/internal/store"
 )
 
-var ErrAlreadyRunning = errors.New("pipeline is already running")
+// ErrAlreadyRunning is content.ErrAlreadyRunning.
+var ErrAlreadyRunning = content.ErrAlreadyRunning
 
 type Runner struct {
-	store     *store.Store
+	store     *content.Store
 	hub       *hub.Hub
 	broker    *events.Broker
 	logger    *slog.Logger
@@ -37,7 +34,7 @@ type Runner struct {
 	baseCtx context.Context
 }
 
-func NewRunner(ctx context.Context, st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, publicURL string) *Runner {
+func NewRunner(ctx context.Context, st *content.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, publicURL string) *Runner {
 	return &Runner{store: st, hub: h, broker: b, logger: logger, publicURL: strings.TrimRight(publicURL, "/"),
 		timeout: 30 * time.Minute, baseCtx: ctx}
 }
@@ -92,7 +89,7 @@ type runState struct {
 func (s *runState) log(level, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	s.r.logger.Log(context.Background(), levelOf(level), msg, "run", s.runID)
-	_ = s.r.store.AppendRunLog(context.Background(), s.runID, store.RunLogEntry{At: time.Now().UTC(), Level: level, Msg: msg})
+	_ = s.r.store.AppendRunLog(context.Background(), s.runID, content.RunLogEntry{At: time.Now().UTC(), Level: level, Msg: msg})
 	s.r.broker.Publish("run.updated", map[string]any{"id": s.runID, "pipeline_id": s.pid, "status": "RUNNING"})
 }
 
@@ -149,7 +146,7 @@ func (r *Runner) run(ctx context.Context, st *runState) error {
 	since := time.Now().Add(-time.Duration(p.LookbackHours) * time.Hour)
 	fetched := 0
 	for _, sid := range p.SourceConnectorIDs {
-		n, err := r.hub.FetchSource(ctx, sid, since, 0)
+		n, err := content.FetchSource(ctx, r.hub, r.store, sid, since, 0)
 		if err != nil {
 			st.log("warn", "source %s: %v", sid, err)
 			continue
@@ -185,20 +182,20 @@ func (r *Runner) run(ctx context.Context, st *runState) error {
 
 	// 2. Generate.
 	names := map[uuid.UUID]string{}
-	materials := make([]agent.Material, 0, len(items))
-	byRef := map[string]*store.SourceItem{}
+	materials := make([]Material, 0, len(items))
+	byRef := map[string]*content.SourceItem{}
 	for i, it := range items {
 		if _, ok := names[it.ConnectorID]; !ok {
 			names[it.ConnectorID] = r.connectorName(ctx, it.ConnectorID)
 		}
 		ref := fmt.Sprintf("S%d", i+1)
 		byRef[ref] = it
-		materials = append(materials, agent.Material{Ref: ref, Source: names[it.ConnectorID], Title: it.Title,
+		materials = append(materials, Material{Ref: ref, Source: names[it.ConnectorID], Title: it.Title,
 			URL: it.URL, Author: it.Author, Content: it.Content, PublishedAt: it.PublishedAt})
 	}
-	gen := &agent.Generator{LLM: model, Search: searcher, MaxContentChar: 1500,
+	gen := &Generator{LLM: model, Search: searcher, MaxContentChar: 1500,
 		Logf: func(level, msg string) { st.log(level, "%s", msg) }}
-	res, err := gen.Run(ctx, agent.Input{
+	res, err := gen.Run(ctx, Input{
 		Topic: p.Topic, Instructions: p.Instructions, Language: p.Language, Platforms: p.Platforms,
 		Materials: materials, SearchQueries: p.SearchQueries,
 	})
@@ -213,14 +210,14 @@ func (r *Runner) run(ctx context.Context, st *runState) error {
 
 	// 3. Store drafts as PENDING_REVIEW.
 	groupID := uuid.New()
-	var created []*domain.Post
+	var created []*content.Post
 	for _, d := range res.Drafts {
-		post, err := r.store.CreatePost(ctx, store.NewPost{
+		post, err := r.store.CreatePost(ctx, content.NewPost{
 			GroupID: &groupID, PipelineID: &p.ID, RunID: &st.runID, PublisherConnectorID: p.PublisherConnectorID,
 			Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 			ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform},
 			SourceContext: sourceContext(p, d, byRef, res.SearchResults),
-		}, domain.ActorAgent, true)
+		}, content.ActorAgent, true)
 		if err != nil {
 			return fmt.Errorf("store draft: %w", err)
 		}
@@ -256,7 +253,7 @@ func (r *Runner) connectorName(ctx context.Context, id uuid.UUID) string {
 	return id.String()
 }
 
-func sourceContext(p *store.Pipeline, d agent.Draft, byRef map[string]*store.SourceItem, search []connector.SearchResult) map[string]any {
+func sourceContext(p *content.Pipeline, d content.Draft, byRef map[string]*content.SourceItem, search []connector.SearchResult) map[string]any {
 	type ref struct {
 		Ref   string `json:"ref"`
 		Title string `json:"title"`
@@ -278,35 +275,11 @@ func sourceContext(p *store.Pipeline, d agent.Draft, byRef map[string]*store.Sou
 	return map[string]any{"topic": p.Topic, "pipeline": p.Name, "items": refs, "search": searchRefs}
 }
 
-func (r *Runner) notify(ctx context.Context, notifierID uuid.UUID, pipelineName string, posts []*domain.Post) error {
+func (r *Runner) notify(ctx context.Context, notifierID uuid.UUID, pipelineName string, posts []*content.Post) error {
 	n, _, err := r.hub.Notifier(ctx, notifierID)
 	if err != nil {
 		return err
 	}
 	defer hub.Close(n)
-	return n.Notify(ctx, ReviewDigest(r.publicURL, fmt.Sprintf("[CueFlow] %d new drafts from %q awaiting review", len(posts), pipelineName), posts))
-}
-
-// ReviewDigest renders a review reminder listing posts with links into the dashboard.
-func ReviewDigest(publicURL, subject string, posts []*domain.Post) connector.Notification {
-	var text, h strings.Builder
-	text.WriteString(subject + "\n\n")
-	h.WriteString("<h2>" + html.EscapeString(subject) + "</h2><ul>")
-	for _, p := range posts {
-		link := fmt.Sprintf("%s/posts/view/?id=%s", publicURL, p.ID)
-		title := p.Title
-		if title == "" {
-			title = strings.Join(strings.Fields(p.Content), " ")
-		}
-		if r := []rune(title); len(r) > 80 {
-			title = string(r[:80]) + "…"
-		}
-		fmt.Fprintf(&text, "- [%s] %s\n  %s\n", strings.Join(p.Platforms, ","), title, link)
-		fmt.Fprintf(&h, `<li><b>%s</b> %s — <a href="%s">review</a></li>`,
-			html.EscapeString(strings.Join(p.Platforms, ",")), html.EscapeString(title), html.EscapeString(link))
-	}
-	h.WriteString("</ul>")
-	fmt.Fprintf(&text, "\nOpen the review inbox: %s/\n", publicURL)
-	fmt.Fprintf(&h, `<p><a href="%s/">Open the review inbox</a></p>`, html.EscapeString(publicURL))
-	return connector.Notification{Subject: subject, Text: text.String(), HTML: h.String()}
+	return n.Notify(ctx, content.ReviewDigest(r.publicURL, fmt.Sprintf("[CueFlow] %d new drafts from %q awaiting review", len(posts), pipelineName), posts))
 }

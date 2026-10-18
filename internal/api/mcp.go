@@ -21,7 +21,7 @@ import (
 
 // MCPPath is the operator MCP endpoint: external agents (Claude Code, Codex, Cursor...) manage
 // the board through it with CUEFLOW_MCP_TOKEN. It acts for the operator on tasks, but has no tool
-// that approves, schedules or publishes posts: drafts stay in the human review queue.
+// that approves or publishes anything a module produces: that stays with the human in the dashboard.
 const MCPPath = "/mcp"
 
 // mcpMovableStatuses are the statuses an MCP client may set, matching the board's drop targets.
@@ -46,18 +46,18 @@ func (s *Server) mcpHandler() http.Handler {
 		if strings.HasPrefix(tok, store.AgentTokenPrefix) {
 			a, err := s.Store.AgentByToken(r.Context(), tok)
 			if err != nil {
-				writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or revoked agent token")
+				WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or revoked agent token")
 				return
 			}
 			serve.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentKey{}, a)))
 			return
 		}
 		if s.MCPToken == "" {
-			writeError(w, http.StatusNotFound, "mcp_disabled", "set CUEFLOW_MCP_TOKEN to enable the MCP endpoint")
+			WriteError(w, http.StatusNotFound, "mcp_disabled", "set CUEFLOW_MCP_TOKEN to enable the MCP endpoint")
 			return
 		}
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.MCPToken)) != 1 {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid MCP token")
+			WriteError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid MCP token")
 			return
 		}
 		serve.ServeHTTP(w, r)
@@ -116,7 +116,7 @@ type mcpOrgIn struct {
 type mcpNoInput struct{}
 
 // mcpTool declares a tool of the operator MCP endpoint.
-func mcpTool(name, desc string, readOnly bool) *mcp.Tool {
+func MCPTool(name, desc string, readOnly bool) *mcp.Tool {
 	return &mcp.Tool{Name: name, Description: desc, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly}}
 }
 
@@ -134,7 +134,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
 		Instructions: strings.Join(instructions, " "),
 	})
-	tool := mcpTool
+	tool := MCPTool
 
 	mcp.AddTool(srv, tool("list_orgs", "List the orgs. Each org has its own crew, board, schedules and review queue; the first one is the default.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, any, error) {
@@ -146,14 +146,14 @@ func (s *Server) newMCPServer() *mcp.Server {
 			for i, o := range orgs {
 				out = append(out, map[string]any{"slug": o.Slug, "name": o.Name, "default": i == 0})
 			}
-			return mcpJSON(out)
+			return MCPJSON(out)
 		})
 
 	mcp.AddTool(srv, tool("list_agents", "List an org's crew: each agent's slug, name, role and description. Use the slug to assign tasks.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpOrgIn) (*mcp.CallToolResult, any, error) {
-			org, err := s.mcpOrg(ctx, in.Org)
+			org, err := s.MCPOrg(ctx, in.Org)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			agents, err := s.Store.ListAgents(ctx, org.ID)
 			if err != nil {
@@ -164,14 +164,14 @@ func (s *Server) newMCPServer() *mcp.Server {
 				out = append(out, map[string]any{"slug": a.Slug, "name": a.Name, "role": a.Role,
 					"description": a.Description, "active": a.IsActive})
 			}
-			return mcpJSON(out)
+			return MCPJSON(out)
 		})
 
 	mcp.AddTool(srv, tool("list_tasks", "List board tasks. By default shows top-level tasks, skipping those finished more than two weeks ago.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpListTasksIn) (*mcp.CallToolResult, any, error) {
-			org, err := s.mcpOrg(ctx, in.Org)
+			org, err := s.MCPOrg(ctx, in.Org)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			f := store.TaskFilter{OrgID: &org.ID, Query: in.Query, All: in.All, Limit: in.Limit}
 			if f.Limit <= 0 || f.Limit > 200 {
@@ -180,7 +180,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 			for _, st := range in.Status {
 				ts := store.TaskStatus(strings.ToUpper(strings.TrimSpace(st)))
 				if !ts.Valid() {
-					return mcpError("unknown status %q", st)
+					return MCPError("unknown status %q", st)
 				}
 				f.Statuses = append(f.Statuses, ts)
 			}
@@ -190,7 +190,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 				} else {
 					a, err := s.mcpAgent(ctx, org.ID, in.Assignee)
 					if err != nil {
-						return mcpErr(err)
+						return MCPErr(err)
 					}
 					f.AssigneeID = &a.ID
 				}
@@ -203,14 +203,14 @@ func (s *Server) newMCPServer() *mcp.Server {
 			for _, t := range tasks {
 				out = append(out, mcpTaskSummary(t))
 			}
-			return mcpJSON(out)
+			return MCPJSON(out)
 		})
 
 	mcp.AddTool(srv, tool("get_task", "Show a task with its description, subtasks, what was produced for it (such as drafts) and the latest messages in its thread.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			subs, err := s.Store.ListTasks(ctx, store.TaskFilter{ParentID: &t.ID, All: true})
 			if err != nil {
@@ -243,14 +243,14 @@ func (s *Server) newMCPServer() *mcp.Server {
 				thread = append(thread, map[string]any{"from": from, "kind": m.Kind, "content": m.Content, "at": m.CreatedAt})
 			}
 			out["thread"] = thread
-			return mcpJSON(out)
+			return MCPJSON(out)
 		})
 
 	mcp.AddTool(srv, tool("create_task", "Create a task on the board. An assigned TODO task starts right away; the agent reports back in the task thread.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCreateTaskIn) (*mcp.CallToolResult, any, error) {
-			org, err := s.mcpOrg(ctx, in.Org)
+			org, err := s.MCPOrg(ctx, in.Org)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			nt := store.NewTask{OrgID: org.ID, Title: in.Title, Description: in.Description, Priority: strings.ToLower(in.Priority), Labels: in.Labels}
 			switch st := store.TaskStatus(strings.ToUpper(strings.TrimSpace(in.Status))); st {
@@ -259,27 +259,27 @@ func (s *Server) newMCPServer() *mcp.Server {
 			case store.TaskBacklog:
 				nt.Status = st
 			default:
-				return mcpError("status must be TODO or BACKLOG")
+				return MCPError("status must be TODO or BACKLOG")
 			}
 			if in.Assignee != "" {
 				a, err := s.mcpAgent(ctx, org.ID, in.Assignee)
 				if err != nil {
-					return mcpErr(err)
+					return MCPErr(err)
 				}
 				nt.AssigneeAgentID = &a.ID
 			}
 			t, err := s.createTaskOp(ctx, nt)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
-			return mcpJSON(mcpTaskSummary(t))
+			return MCPJSON(mcpTaskSummary(t))
 		})
 
 	mcp.AddTool(srv, tool("update_task", "Edit a task's title, description, priority, labels, assignee or status. Only the fields you pass change.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUpdateTaskIn) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			patch := store.TaskPatch{Title: in.Title, Description: in.Description, Labels: in.Labels}
 			if in.Priority != nil {
@@ -289,7 +289,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 			if in.Status != nil {
 				st := store.TaskStatus(strings.ToUpper(strings.TrimSpace(*in.Status)))
 				if !slices.Contains(mcpMovableStatuses, st) {
-					return mcpError("status must be one of BACKLOG, TODO, REVIEW, DONE, CANCELED")
+					return MCPError("status must be one of BACKLOG, TODO, REVIEW, DONE, CANCELED")
 				}
 				patch.Status = &st
 			}
@@ -298,7 +298,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 				if ref := strings.TrimSpace(*in.Assignee); ref != "" && !strings.EqualFold(ref, "none") {
 					a, err := s.mcpAgent(ctx, t.OrgID, ref)
 					if err != nil {
-						return mcpErr(err)
+						return MCPErr(err)
 					}
 					id = &a.ID
 				}
@@ -306,51 +306,51 @@ func (s *Server) newMCPServer() *mcp.Server {
 			}
 			after, err := s.updateTaskOp(ctx, t.ID, patch)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
-			return mcpJSON(mcpTaskSummary(after))
+			return MCPJSON(mcpTaskSummary(after))
 		})
 
 	mcp.AddTool(srv, tool("comment_task", "Post a message in a task's thread as the operator. The assigned agent picks it up and continues; this is how you answer an agent that is waiting on you.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpCommentIn) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			if _, err := s.postTaskMessageOp(ctx, t.ID, in.Content); err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			after, err := s.Store.GetTask(ctx, t.ID)
 			if err != nil {
 				return nil, nil, err
 			}
-			return mcpJSON(mcpTaskSummary(after))
+			return MCPJSON(mcpTaskSummary(after))
 		})
 
 	mcp.AddTool(srv, tool("run_task", "Start (or restart) the assigned agent on a task.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			after, err := s.runTaskOp(ctx, t.ID)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
-			return mcpJSON(mcpTaskSummary(after))
+			return MCPJSON(mcpTaskSummary(after))
 		})
 
 	mcp.AddTool(srv, tool("stop_task", "Stop the agent working on a task; the task then waits for you.", false),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
 			after, err := s.cancelTaskOp(ctx, t.ID)
 			if err != nil {
-				return mcpErr(err)
+				return MCPErr(err)
 			}
-			return mcpJSON(mcpTaskSummary(after))
+			return MCPJSON(mcpTaskSummary(after))
 		})
 
 	for _, m := range s.Modules {
@@ -362,7 +362,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 }
 
 // mcpOrg resolves an org slug; blank means the default org.
-func (s *Server) mcpOrg(ctx context.Context, ref string) (*store.Org, error) {
+func (s *Server) MCPOrg(ctx context.Context, ref string) (*store.Org, error) {
 	o, err := s.Store.ResolveOrg(ctx, ref)
 	if errors.Is(err, domain.ErrNotFound) {
 		return nil, &store.ValidationError{Msg: fmt.Sprintf("no org %q (see list_orgs)", ref)}
@@ -374,7 +374,7 @@ func (s *Server) mcpOrg(ctx context.Context, ref string) (*store.Org, error) {
 func (s *Server) mcpResolveTask(ctx context.Context, orgRef, ref string) (*store.Task, error) {
 	ref = strings.TrimSpace(ref)
 	if n, err := strconv.ParseInt(strings.TrimPrefix(ref, "#"), 10, 64); err == nil {
-		org, err := s.mcpOrg(ctx, orgRef)
+		org, err := s.MCPOrg(ctx, orgRef)
 		if err != nil {
 			return nil, err
 		}
@@ -411,7 +411,7 @@ func mcpTaskSummary(t *store.Task) map[string]any {
 	return m
 }
 
-func mcpJSON(v any) (*mcp.CallToolResult, any, error) {
+func MCPJSON(v any) (*mcp.CallToolResult, any, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return nil, nil, err
@@ -419,19 +419,19 @@ func mcpJSON(v any) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil, nil
 }
 
-func mcpError(format string, args ...any) (*mcp.CallToolResult, any, error) {
+func MCPError(format string, args ...any) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(format, args...)}}}, nil, nil
 }
 
 // mcpErr reports caller mistakes as tool errors the model can read and fix; anything else is a
 // server failure.
-func mcpErr(err error) (*mcp.CallToolResult, any, error) {
+func MCPErr(err error) (*mcp.CallToolResult, any, error) {
 	var ve *store.ValidationError
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		return mcpError("not found")
+		return MCPError("not found")
 	case errors.As(err, &ve):
-		return mcpError("%s", ve.Error())
+		return MCPError("%s", ve.Error())
 	}
 	return nil, nil, err
 }

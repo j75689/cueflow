@@ -15,31 +15,31 @@ import (
 )
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
-	org, err := s.reqOrg(r)
+	org, err := s.ReqOrg(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	as, err := s.Store.ListAgents(r.Context(), org.ID)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, as)
+	WriteJSON(w, http.StatusOK, as)
 }
 
 func (s *Server) getAgent(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	a, err := s.Store.GetAgent(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	WriteJSON(w, http.StatusOK, a)
 }
 
 type agentBody struct {
@@ -50,9 +50,9 @@ type agentBody struct {
 	Description        *string      `json:"description"`
 	Instructions       *string      `json:"instructions"`
 	Capabilities       *[]string    `json:"capabilities"`
-	LLMConnectorID     nullableID   `json:"llm_connector_id"`
-	SearchConnectorID  nullableID   `json:"search_connector_id"`
-	RuntimeConnectorID nullableID   `json:"runtime_connector_id"`
+	LLMConnectorID     NullableID   `json:"llm_connector_id"`
+	SearchConnectorID  NullableID   `json:"search_connector_id"`
+	RuntimeConnectorID NullableID   `json:"runtime_connector_id"`
 	SourceConnectorIDs *[]uuid.UUID `json:"source_connector_ids"`
 	ToolConnectorIDs   *[]uuid.UUID `json:"tool_connector_ids"`
 	Language           *string      `json:"language"`
@@ -102,65 +102,65 @@ func (b *agentBody) apply(a *store.Agent) {
 
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	var body agentBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
-	org, err := s.reqOrg(r)
+	org, err := s.ReqOrg(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	a := &store.Agent{OrgID: org.ID, IsActive: true, Language: "en", MaxTurns: 12}
 	body.apply(a)
 	if err := s.checkToolServers(r.Context(), a.ToolConnectorIDs); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	out, err := s.Store.CreateAgent(r.Context(), a)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("agent.updated", map[string]any{"id": out.ID})
-	writeJSON(w, http.StatusCreated, out)
+	WriteJSON(w, http.StatusCreated, out)
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var body agentBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	a, err := s.Store.GetAgent(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	body.apply(a)
 	if err := s.checkToolServers(r.Context(), a.ToolConnectorIDs); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	out, err := s.Store.UpdateAgent(r.Context(), a)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("agent.updated", map[string]any{"id": out.ID})
 	s.Crew.Wake() // an agent may have been re-enabled with TODO work waiting
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	// Stop anything it is running; its tasks become unassigned (FK ON DELETE SET NULL).
@@ -170,7 +170,7 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.Store.DeleteAgent(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("agent.updated", map[string]any{"id": id})
@@ -178,53 +178,53 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	ms, err := s.Store.Memories(r.Context(), id, r.URL.Query().Get("q"), queryInt(r, "limit", 100))
+	ms, err := s.Store.Memories(r.Context(), id, r.URL.Query().Get("q"), QueryInt(r, "limit", 100))
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ms)
+	WriteJSON(w, http.StatusOK, ms)
 }
 
 func (s *Server) addMemory(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var body struct {
 		Content string `json:"content"`
 	}
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	m, err := s.Store.AddMemory(r.Context(), id, body.Content)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, m)
+	WriteJSON(w, http.StatusCreated, m)
 }
 
 func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	mid, err := uuid.Parse(chi.URLParam(r, "memoryId"))
 	if err != nil {
-		s.fail(w, domain.ErrNotFound)
+		s.Fail(w, domain.ErrNotFound)
 		return
 	}
 	if err := s.Store.DeleteMemory(r.Context(), id, mid); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -244,54 +244,54 @@ func (s *Server) checkToolServers(ctx context.Context, ids []uuid.UUID) error {
 // --- agent tokens (self-driven external agents) ---
 
 func (s *Server) listAgentTokens(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	tokens, err := s.Store.ListAgentTokens(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tokens)
+	WriteJSON(w, http.StatusOK, tokens)
 }
 
 func (s *Server) createAgentToken(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	t, plain, err := s.Store.CreateAgentToken(r.Context(), id, body.Name)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": t.ID, "name": t.Name, "token": plain, "created_at": t.CreatedAt,
+	WriteJSON(w, http.StatusCreated, map[string]any{"id": t.ID, "name": t.Name, "token": plain, "created_at": t.CreatedAt,
 		"mcp_url": strings.TrimRight(s.machineURL(), "/") + MCPPath})
 }
 
 func (s *Server) revokeAgentToken(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	tid, err := uuid.Parse(chi.URLParam(r, "tokenId"))
 	if err != nil {
-		s.fail(w, &store.ValidationError{Msg: "bad token id"})
+		s.Fail(w, &store.ValidationError{Msg: "bad token id"})
 		return
 	}
 	if err := s.Store.RevokeAgentToken(r.Context(), id, tid); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

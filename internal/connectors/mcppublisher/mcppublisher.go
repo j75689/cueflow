@@ -41,8 +41,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/mcpx"
+	"github.com/j75689/cueflow/internal/textutil"
 )
 
 // PostIDKey is the ExternalIDs key holding the publisher's post id. Posts made while this was
@@ -355,7 +355,7 @@ func partsFor(ctx context.Context, req connector.PublishRequest, platforms map[s
 	if len(texts) > maxParts {
 		return nil, fmt.Errorf("threads have at most %d parts; this post has %d", maxParts, len(texts))
 	}
-	if tags := domain.FormatHashtags(req.Hashtags); tags != "" {
+	if tags := textutil.FormatHashtags(req.Hashtags); tags != "" {
 		texts[len(texts)-1] = strings.TrimSpace(texts[len(texts)-1] + "\n\n" + tags)
 	}
 	if platforms["threads"] {

@@ -92,7 +92,7 @@ func scanRunner(row pgx.Row) (*Runner, error) {
 	err := row.Scan(&r.ID, &r.Name, &r.Labels, &r.OrgIDs, &r.IsActive, &r.MaxConcurrency, &r.Version, &r.Platform,
 		&r.LastSeenAt, &r.CreatedAt)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	r.fix()
 	return r, nil
@@ -132,7 +132,7 @@ func (s *Store) CreateRegistration(ctx context.Context, labels []string, orgIDs 
 func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, platform string, wantLabels []string, concurrency int) (*Runner, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
-		return nil, "", invalid("a runner name (1-64 characters) is required")
+		return nil, "", Invalid("a runner name (1-64 characters) is required")
 	}
 	if concurrency < 1 {
 		concurrency = 1
@@ -218,7 +218,7 @@ func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (
 	if p.Name != nil {
 		n := strings.TrimSpace(*p.Name)
 		if n == "" || len(n) > 64 {
-			return nil, invalid("a runner name (1-64 characters) is required")
+			return nil, Invalid("a runner name (1-64 characters) is required")
 		}
 		r.Name = n
 	}
@@ -236,7 +236,7 @@ func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (
 	}
 	if p.MaxConcurrency != nil {
 		if *p.MaxConcurrency < 1 || *p.MaxConcurrency > 16 {
-			return nil, invalid("max concurrency must be between 1 and 16")
+			return nil, Invalid("max concurrency must be between 1 and 16")
 		}
 		r.MaxConcurrency = *p.MaxConcurrency
 	}
@@ -293,7 +293,7 @@ func scanJob(row pgx.Row) (*RunnerJob, error) {
 	err := row.Scan(&j.ID, &j.OrgID, &j.TaskID, &j.AgentRunID, &j.Labels, &j.Status, &j.RunnerID, &j.RunnerName, &j.LeaseUntil,
 		&j.Payload, &j.Result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	if j.Labels == nil {
 		j.Labels = []string{}
@@ -387,7 +387,7 @@ func (s *Store) HeartbeatRunnerJob(ctx context.Context, id, runnerID uuid.UUID) 
 	err := s.pool.QueryRow(ctx, `UPDATE runner_jobs SET lease_until = CASE WHEN status='running'
 			THEN NOW() + make_interval(secs => $3) ELSE lease_until END
 		WHERE id=$1 AND runner_id=$2 RETURNING status`, id, runnerID, RunnerLease.Seconds()).Scan(&status)
-	return status, notFound(err)
+	return status, NotFound(err)
 }
 
 // CompleteRunnerJob records the outcome of a job the runner owns. It reports false when the job

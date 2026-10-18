@@ -1,10 +1,14 @@
 // Package domain holds CueFlow's core types and the post review state machine.
-package domain
+// Package content is CueFlow's content workflow: posts and their review state machine, platform
+// rules, the material source connectors collect, simple schedules (pipelines) that draft from it,
+// the agent tools that write drafts, and publishing through a publisher connector once a human has
+// approved. It is mounted on the core as a module (see Module); nothing in the core depends on it.
+package content
 
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/j75689/cueflow/internal/domain"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,24 +72,10 @@ func (s Status) Editable() bool { return s == StatusDraft || s == StatusPendingR
 // Deletable reports whether a post may be removed.
 func (s Status) Deletable() bool { return s == StatusDraft || s == StatusRejected }
 
-var (
-	ErrNotFound        = errors.New("not found")
-	ErrVersionConflict = errors.New("version conflict")
-)
-
-// TransitionError is returned when a requested status change violates the state machine.
-type TransitionError struct {
-	From, To Status
-}
-
-func (e *TransitionError) Error() string {
-	return fmt.Sprintf("invalid transition %s -> %s", e.From, e.To)
-}
-
 // CheckTransition validates from -> to.
 func CheckTransition(from, to Status) error {
 	if !from.CanTransitionTo(to) {
-		return &TransitionError{From: from, To: to}
+		return &domain.TransitionError{From: string(from), To: string(to)}
 	}
 	return nil
 }
@@ -165,3 +155,6 @@ type AuditLog struct {
 	PayloadDiff json.RawMessage `json:"payload_diff"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
+
+// ErrAlreadyRunning is returned when a pipeline is triggered while a run of it is in progress.
+var ErrAlreadyRunning = errors.New("pipeline is already running")

@@ -26,14 +26,14 @@ import (
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/connectors/mcppublisher"
+	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/content/dispatch"
+	"github.com/j75689/cueflow/internal/content/pipeline"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
-	"github.com/j75689/cueflow/internal/dispatch"
-	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/llm"
-	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/publishermock"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
@@ -81,6 +81,7 @@ type env struct {
 	t      *testing.T
 	pool   *pgxpool.Pool
 	store  *store.Store
+	cs     *content.Store
 	runner *pipeline.Runner
 	worker *dispatch.Worker
 	crew   *crew.Crew
@@ -110,12 +111,16 @@ func setup(t *testing.T) *env {
 	key := make([]byte, 32)
 	box, _ := secret.New(key)
 	st := store.New(pool, box)
+	cs := content.NewStore(st)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broker := events.NewBroker()
 	h := hub.New(st, logger)
-	runner := pipeline.NewRunner(ctx, st, h, broker, logger, "http://localhost:3000")
-	worker := dispatch.NewWorker(st, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
-	sched := scheduler.New(st, runner, h, logger, "", "http://localhost:3000")
+	sched := scheduler.New(st, logger)
+	runner := pipeline.NewRunner(ctx, cs, h, broker, logger, "http://localhost:3000")
+	worker := dispatch.NewWorker(cs, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
+	module := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner, Dispatcher: worker,
+		Logger: logger, PublicURL: "http://localhost:3000"}
+	module.Attach("")
 	team := crew.New(st, h, broker, logger, false)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 
@@ -123,12 +128,12 @@ func setup(t *testing.T) *env {
 	mockSrv := httptest.NewServer(mock.Handler())
 	t.Cleanup(mockSrv.Close)
 
-	server := &api.Server{Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched,
-		Dispatcher: worker, Crew: team, Logger: logger, MCPToken: testMCPToken, Modules: []api.Module{api.Content{}}}
+	server := &api.Server{Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team, Logger: logger,
+		MCPToken: testMCPToken, Modules: []api.Module{module}}
 	apiSrv := httptest.NewServer(server.Handler())
 	t.Cleanup(apiSrv.Close)
 
-	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
+	e := &env{t: t, pool: pool, store: st, cs: cs, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
 	t.Setenv("PUBLISHER_URL", mockSrv.URL)
 	return e
 }
@@ -200,7 +205,7 @@ func TestFullChain(t *testing.T) {
 	}
 
 	// --- pipeline ---
-	var p store.Pipeline
+	var p content.Pipeline
 	code := e.do("POST", "/pipelines", map[string]any{
 		"name": "Daily", "cron_expr": "0 8 * * *", "timezone": "Asia/Taipei", "topic": "AI agents",
 		"platforms": []string{"threads", "instagram"}, "llm_connector_id": model.ID,
@@ -218,7 +223,7 @@ func TestFullChain(t *testing.T) {
 		t.Fatalf("run: %d", code)
 	}
 	e.runner.Wait()
-	var run store.Run
+	var run content.Run
 	e.do("GET", "/runs/"+started["run_id"], nil, &run)
 	if run.Status != "SUCCEEDED" || run.Stats["posts_created"].(float64) != 2 || run.Stats["items_fetched"].(float64) != 2 {
 		t.Fatalf("run: %+v", run)
@@ -233,14 +238,14 @@ func TestFullChain(t *testing.T) {
 	}
 
 	var list struct {
-		Items []domain.Post `json:"items"`
-		Total int           `json:"total"`
+		Items []content.Post `json:"items"`
+		Total int            `json:"total"`
 	}
 	e.do("GET", "/posts?status=PENDING_REVIEW", nil, &list)
 	if list.Total != 2 {
 		t.Fatalf("pending posts: %d", list.Total)
 	}
-	var threads, insta domain.Post
+	var threads, insta content.Post
 	for _, post := range list.Items {
 		switch post.Platforms[0] {
 		case "threads":
@@ -267,7 +272,7 @@ func TestFullChain(t *testing.T) {
 		t.Fatalf("stale version: %d", code)
 	}
 	// The reviewer edits the text and picks the account the publisher will post to.
-	var edited domain.Post
+	var edited content.Post
 	if code := e.do("PATCH", "/posts/"+threads.ID.String(), map[string]any{"version": threads.Version, "content": "Edited by a human.",
 		"accounts": []string{"th1"}}, &edited); code != 200 {
 		t.Fatalf("edit: %d", code)
@@ -278,16 +283,16 @@ func TestFullChain(t *testing.T) {
 		t.Fatalf("approve: %d", code)
 	}
 	e.worker.Tick(ctx)
-	var got domain.Post
+	var got content.Post
 	e.do("GET", "/posts/"+threads.ID.String(), nil, &got)
-	if got.Status != domain.StatusPublished || got.ExternalPostIDs[mcppublisher.PostIDKey] == "" || got.PublishedAt == nil {
+	if got.Status != content.StatusPublished || got.ExternalPostIDs[mcppublisher.PostIDKey] == "" || got.PublishedAt == nil {
 		t.Fatalf("threads post not published: %+v", got)
 	}
 	if posts := e.mock.Posts(); len(posts) != 1 || !strings.Contains(posts[0].Text(), "Edited by a human.") ||
 		strings.Join(posts[0].Request.Accounts, ",") != "th1" {
 		t.Fatalf("the publisher did not receive the edited post for the picked account: %+v", posts)
 	}
-	var audit []domain.AuditLog
+	var audit []content.AuditLog
 	e.do("GET", "/posts/"+threads.ID.String()+"/audit", nil, &audit)
 	var actions []string
 	for _, a := range audit {
@@ -310,7 +315,7 @@ func TestFullChain(t *testing.T) {
 	e.do("POST", "/posts/"+insta.ID.String()+"/approve", map[string]any{}, nil)
 	e.worker.Tick(ctx)
 	e.do("GET", "/posts/"+insta.ID.String(), nil, &got)
-	if got.Status != domain.StatusFailed || !strings.Contains(got.ErrorMessage, "simulated rate limit") {
+	if got.Status != content.StatusFailed || !strings.Contains(got.ErrorMessage, "simulated rate limit") {
 		t.Fatalf("expected FAILED with reason: %+v", got)
 	}
 	e.mock.Fail.Store(false)
@@ -319,7 +324,7 @@ func TestFullChain(t *testing.T) {
 	}
 	e.worker.Tick(ctx)
 	e.do("GET", "/posts/"+insta.ID.String(), nil, &got)
-	if got.Status != domain.StatusPublished || got.ErrorMessage != "" || got.Attempts != 2 {
+	if got.Status != content.StatusPublished || got.ErrorMessage != "" || got.Attempts != 2 {
 		t.Fatalf("retry did not publish: %+v", got)
 	}
 
@@ -341,18 +346,18 @@ func TestFullChain(t *testing.T) {
 func TestCrashedWorkerLeaseFailsInsteadOfDoublePosting(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
-	var post domain.Post
+	var post content.Post
 	if code := e.do("POST", "/posts", map[string]any{"content": "manual", "platforms": []string{"threads"}, "submit": true}, &post); code != 201 {
 		t.Fatalf("create: %d", code)
 	}
-	if post.Status != domain.StatusPendingReview {
+	if post.Status != content.StatusPendingReview {
 		t.Fatalf("status %s", post.Status)
 	}
 	e.do("POST", "/posts/"+post.ID.String()+"/approve", map[string]any{}, nil)
-	if _, err := e.store.QueueApproved(ctx); err != nil {
+	if _, err := e.cs.QueueApproved(ctx); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := e.store.ClaimQueued(ctx, time.Minute, 5)
+	claimed, err := e.cs.ClaimQueued(ctx, time.Minute, 5)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim: %v %d", err, len(claimed))
 	}
@@ -361,8 +366,8 @@ func TestCrashedWorkerLeaseFailsInsteadOfDoublePosting(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.worker.Tick(ctx)
-	got, _ := e.store.GetPost(ctx, post.ID)
-	if got.Status != domain.StatusFailed || !strings.Contains(got.ErrorMessage, "check the platform") {
+	got, _ := e.cs.GetPost(ctx, post.ID)
+	if got.Status != content.StatusFailed || !strings.Contains(got.ErrorMessage, "check the platform") {
 		t.Fatalf("expired lease should fail the post: %+v", got)
 	}
 	if len(e.mock.Posts()) != 0 {
@@ -372,12 +377,12 @@ func TestCrashedWorkerLeaseFailsInsteadOfDoublePosting(t *testing.T) {
 
 func TestPublishWithoutPublisherFails(t *testing.T) {
 	e := setup(t)
-	var post domain.Post
+	var post content.Post
 	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "submit": true}, &post)
 	e.do("POST", "/posts/"+post.ID.String()+"/approve", map[string]any{}, nil)
 	e.worker.Tick(context.Background())
-	got, _ := e.store.GetPost(context.Background(), post.ID)
-	if got.Status != domain.StatusFailed || !strings.Contains(got.ErrorMessage, "no active publisher") {
+	got, _ := e.cs.GetPost(context.Background(), post.ID)
+	if got.Status != content.StatusFailed || !strings.Contains(got.ErrorMessage, "no active publisher") {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -469,11 +474,11 @@ func TestSecretKeyRotation(t *testing.T) {
 
 func TestRejectWithoutReason(t *testing.T) {
 	e := setup(t)
-	var a, b domain.Post
+	var a, b content.Post
 	e.do("POST", "/posts", map[string]any{"content": "one", "platforms": []string{"threads"}, "submit": true}, &a)
 	e.do("POST", "/posts", map[string]any{"content": "two", "platforms": []string{"threads"}, "submit": true}, &b)
-	var got domain.Post
-	if code := e.do("POST", "/posts/"+a.ID.String()+"/reject", nil, &got); code != 200 || got.Status != domain.StatusRejected || got.ReviewNote != "" {
+	var got content.Post
+	if code := e.do("POST", "/posts/"+a.ID.String()+"/reject", nil, &got); code != 200 || got.Status != content.StatusRejected || got.ReviewNote != "" {
 		t.Fatalf("reject with no body: %d %s %q", code, got.Status, got.ReviewNote)
 	}
 	if code := e.do("POST", "/posts/"+b.ID.String()+"/reject", map[string]any{"reason": " off-brand "}, &got); code != 200 || got.ReviewNote != "off-brand" {

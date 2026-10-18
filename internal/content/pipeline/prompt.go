@@ -1,11 +1,10 @@
-package agent
+package pipeline
 
 import (
 	"fmt"
+	"github.com/j75689/cueflow/internal/content"
 	"strings"
 	"time"
-
-	"github.com/j75689/cueflow/internal/domain"
 )
 
 const systemPrompt = `You are the content agent inside CueFlow, a self-hosted social media operations console.
@@ -49,7 +48,7 @@ func buildUserPrompt(in Input, maxContent int) string {
 
 	b.WriteString("\nPlatforms to write for (one draft each):\n")
 	for _, id := range in.Platforms {
-		p, ok := domain.PlatformByID(id)
+		p, ok := content.PlatformByID(id)
 		if !ok {
 			continue
 		}

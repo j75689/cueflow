@@ -14,7 +14,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -186,8 +186,8 @@ func TestExternalACPAgentRun(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "bash_refused=true") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.store.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != domain.StatusPendingReview {
+	posts, _ := e.cs.PostsForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
 		t.Fatalf("draft not created through MCP: %+v", posts)
 	}
 

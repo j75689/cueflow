@@ -169,3 +169,15 @@ func Clip(s string, n int) string {
 	}
 	return s
 }
+
+// FormatHashtags renders tags as "#a #b", adding the missing # and skipping blanks.
+func FormatHashtags(tags []string) string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "#"))
+		if t != "" {
+			out = append(out, "#"+t)
+		}
+	}
+	return strings.Join(out, " ")
+}
