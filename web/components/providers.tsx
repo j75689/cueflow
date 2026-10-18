@@ -73,6 +73,15 @@ interface MetaState {
 const MetaCtx = createContext<MetaState>({ meta: null, error: null, reload: () => {} });
 export const useMeta = () => useContext(MetaCtx);
 
+/**
+ * Whether a feature module is mounted on the server. Until /meta has loaded (or on servers that
+ * predate the field) every module counts as present, so nothing flickers or disappears.
+ */
+export function useModule(id: string): boolean {
+  const { meta } = useMeta();
+  return !meta?.modules || meta.modules.includes(id);
+}
+
 /* ------------------------------ Server events ------------------------------ */
 
 type Listener = (data: Record<string, unknown>) => void;
