@@ -237,15 +237,16 @@ export default function BoardPage() {
                   dragId && !droppable && "opacity-60",
                 )}
               >
-                <header className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
-                  <div className="min-w-0">
-                    <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                {/* Every column reserves the same rows (title, hint, add) so the lists start at one height. */}
+                <header className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="flex h-6 items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                       {col.label}
                       <span className="rounded bg-zinc-200 px-1.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                         {list.length}
                       </span>
                     </h2>
-                    {col.hint && <p className="truncate text-[11px] text-zinc-500">{col.hint}</p>}
+                    <p className="h-4 truncate text-[11px] leading-4 text-zinc-500">{col.hint ?? "\u00a0"}</p>
                   </div>
                   {col.addable && (
                     <button
@@ -257,7 +258,11 @@ export default function BoardPage() {
                     </button>
                   )}
                 </header>
-                {col.addable && <InlineAdd status={col.drop as TaskStatus} agents={agentList} onCreated={() => void tasks.reload()} />}
+                {col.addable ? (
+                  <InlineAdd status={col.drop as TaskStatus} agents={agentList} onCreated={() => void tasks.reload()} />
+                ) : (
+                  <div className="mx-2 mb-2 h-6" aria-hidden />
+                )}
                 <div className="flex min-h-[80px] flex-1 flex-col gap-2 px-2 pb-3">
                   {list.map((t, i) => (
                     <div key={t.id}>
@@ -409,7 +414,7 @@ function InlineAdd({ status, agents, onCreated }: { status: TaskStatus; agents: 
     return (
       <button
         onClick={() => setOpen(true)}
-        className="mx-2 mb-2 rounded-md px-2 py-1 text-left text-xs text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        className="mx-2 mb-2 h-6 rounded-md px-2 text-left text-xs leading-6 text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
       >
         + Add task
       </button>
