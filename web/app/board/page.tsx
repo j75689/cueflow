@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type DragEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentAvatar,
   AgentSelect,
@@ -42,9 +42,17 @@ const CANCELED_COLUMN: Column = { key: "canceled", label: "Canceled", statuses: 
 const DONE_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const STEP = 1024;
 
+// Cards a column shows before "Show more"; finished columns grow every day.
+const PAGE = 20;
+
 function sortTasks(a: Task, b: Task) {
   if (a.position !== b.position) return a.position - b.position;
   return a.created_at.localeCompare(b.created_at);
+}
+
+// Finished columns read like a log: most recently finished first.
+function sortFinished(a: Task, b: Task) {
+  return (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at);
 }
 
 export default function BoardPage() {
@@ -78,7 +86,10 @@ export default function BoardPage() {
 
   const byColumn = useMemo(() => {
     const m: Record<string, Task[]> = {};
-    for (const c of columns) m[c.key] = filtered.filter((t) => c.statuses.includes(t.status)).sort(sortTasks);
+    for (const c of columns) {
+      const finished = c.key === "done" || c.key === "canceled";
+      m[c.key] = filtered.filter((t) => c.statuses.includes(t.status)).sort(finished ? sortFinished : sortTasks);
+    }
     return m;
   }, [filtered, columns]);
 
@@ -88,6 +99,23 @@ export default function BoardPage() {
 
   const dragged = dragId ? (tasks.data?.items ?? []).find((t) => t.id === dragId) : undefined;
   const boardRef = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<Record<string, number>>({});
+
+  // From md up the board fills the rest of the window and each column scrolls on its own, so a long
+  // Done column doesn't stretch the page. Phones keep the normal page scroll.
+  const [boardHeight, setBoardHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const el = boardRef.current;
+      if (!el || !window.matchMedia("(min-width: 768px)").matches) return setBoardHeight(null);
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setBoardHeight(Math.max(360, window.innerHeight - top - 24));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // Re-measure when the board first renders and when the filter chips (one per agent) may wrap.
+  }, [tasks.data === undefined, showCanceled, agents.data?.length]);
 
   // Scroll the board sideways while a card is held near its left or right edge.
   function autoScroll(e: DragEvent) {
@@ -216,6 +244,7 @@ export default function BoardPage() {
           ref={boardRef}
           onDragOverCapture={autoScroll}
           className="-mx-4 flex flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+          style={boardHeight ? { height: boardHeight, flex: "none" } : undefined}
         >
           {columns.map((col) => {
             const list = byColumn[col.key] ?? [];
@@ -266,8 +295,8 @@ export default function BoardPage() {
                 ) : (
                   <div className="mx-2 mb-2 h-6" aria-hidden />
                 )}
-                <div className="flex min-h-[80px] flex-1 flex-col gap-2 px-2 pb-3">
-                  {list.map((t, i) => (
+                <div className="flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-3 md:min-h-0">
+                  {list.slice(0, shown[col.key] ?? PAGE).map((t, i) => (
                     <div key={t.id}>
                       {isOver && over?.index === i && dragId !== t.id && <DropLine />}
                       <TaskCard
@@ -288,6 +317,15 @@ export default function BoardPage() {
                     </div>
                   ))}
                   {isOver && over?.index === list.length && <DropLine />}
+                  {list.length > (shown[col.key] ?? PAGE) && (
+                    <button
+                      onClick={() => setShown({ ...shown, [col.key]: (shown[col.key] ?? PAGE) + PAGE })}
+                      className="rounded-md px-2 py-1.5 text-xs text-fg-3 hover:bg-subtle hover:text-fg"
+                    >
+                      Show {Math.min(PAGE, list.length - (shown[col.key] ?? PAGE))} more of{" "}
+                      {list.length - (shown[col.key] ?? PAGE)}
+                    </button>
+                  )}
                   {list.length === 0 && !isOver && (
                     <p className="px-2 py-6 text-center text-xs text-fg-4">
                       {col.key === "waiting" ? "Nothing waiting on you" : "No tasks"}
