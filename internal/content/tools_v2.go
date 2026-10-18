@@ -12,24 +12,25 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/store"
 	"github.com/j75689/cueflow/internal/textutil"
 )
 
-// The post flow on deliverables: the capability post_deliverables offers the same three tools as
-// drafting (create_post_draft, list_posts, revise_draft), with the same arguments, so an agent's
-// instructions need no change when it is moved over; the drafts land in deliverables (kind post)
-// instead of the posts table. An agent should have one of the two capabilities, not both.
+// Drafting: create_post_draft, list_posts and revise_draft write and read post deliverables. The
+// capability keeps the id post_deliverables it had while the posts table was still in use, so the
+// agents that were moved over keep working.
 
 // PostDeliverablesCapability is the capability id.
 const PostDeliverablesCapability = "post_deliverables"
 
 func registerPostTools() {
-	crew.RegisterCapability(crew.Capability{ID: PostDeliverablesCapability, Name: "Drafting (deliverables)",
-		Description: "Write social post drafts as deliverables (the review queue under Deliverables) and revise them while pending. Same tools as Drafting; use one or the other.",
+	crew.RegisterCapability(crew.Capability{ID: PostDeliverablesCapability, Name: "Drafting", Default: true,
+		Description: "Write social post drafts into the human review queue (Deliverables) and revise them while they are pending.",
 		Prompt: func(a *store.Agent) string {
 			p := contentPrompt
 			if len(a.Platforms) > 0 {
@@ -37,10 +38,14 @@ func registerPostTools() {
 			}
 			return p
 		}})
+	crew.RegisterCapability(crew.Capability{ID: "imaging", Name: "Images",
+		Description: "Generate images for post drafts with the image connector (each image costs money; at most a few per run)."})
 	for _, t := range postTools {
 		crew.RegisterTool(t)
 	}
 }
+
+const maxImagesPerRun = 2
 
 var postTools = []crew.ToolSpec{
 	{Name: "create_post_draft", Capability: PostDeliverablesCapability, Description: "Create one social post draft for one platform. It goes to the human review queue; it is NOT published.",
@@ -67,6 +72,72 @@ var postTools = []crew.ToolSpec{
 			"link": crew.Str("New link card URL (empty removes it)"), "note": crew.Str("Why you changed it"),
 			"media_urls": crew.StrList("Replace the attached images or videos (CueFlow media URLs like /media/... returned by tools, or public https URLs); an empty list removes them"),
 		}, "post_id"), Run: toolRevisePostDeliverable},
+	{Name: "generate_image", Capability: "imaging", Description: fmt.Sprintf("Generate an image for a post draft that is still DRAFT or PENDING_REVIEW and attach it. Uses the draft's image_prompt unless you give a prompt. Costs money: at most %d per run.", maxImagesPerRun),
+		Schema: crew.Obj(map[string]any{
+			"post_id": crew.Str("Draft (post) ID"),
+			"prompt":  crew.Str("Image prompt in English: subject, style, composition, no text in the image (optional; defaults to the draft's image_prompt)"),
+			"aspect":  map[string]any{"type": "string", "enum": connector.Aspects, "description": "Aspect ratio (default 4:5 for Instagram, else 1:1)"},
+		}, "post_id"), Run: toolGenerateImage},
+}
+
+func toolGenerateImage(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
+	var a struct {
+		PostID string `json:"post_id"`
+		Prompt string `json:"prompt"`
+		Aspect string `json:"aspect"`
+	}
+	if err := crew.DecodeArgs(raw, &a); err != nil {
+		return "", err
+	}
+	if r.Count("images") >= maxImagesPerRun {
+		return "", fmt.Errorf("image limit reached (%d per run)", maxImagesPerRun)
+	}
+	id, err := uuid.Parse(strings.TrimSpace(a.PostID))
+	if err != nil {
+		return "", errors.New("post_id must be a post UUID")
+	}
+	ds := deliverable.NewStore(r.Store)
+	cur, err := ds.Get(ctx, id)
+	if err == nil && (cur.OrgID != r.Task.OrgID || cur.Kind != PostKind) {
+		err = domain.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if !cur.Status.Editable() {
+		return "", fmt.Errorf("post is %s and can no longer be edited", cur.Status)
+	}
+	p, err := DecodePostPayload(cur.Payload)
+	if err != nil {
+		return "", err
+	}
+	prompt := strings.TrimSpace(a.Prompt)
+	if prompt == "" {
+		prompt = p.ImagePrompt
+	}
+	aspect := a.Aspect
+	if aspect == "" {
+		aspect = "1:1"
+		if slices.Contains(p.Platforms, "instagram") {
+			aspect = "4:5"
+		}
+	}
+	r.Inc("images") // count attempts too: a failed generation may still be billed
+	m, err := (&media.Service{Store: r.Store, Hub: r.Hub}).Generate(ctx, media.GenerateRequest{Prompt: prompt, Aspect: aspect, CreatedBy: r.Agent.Slug})
+	if err != nil {
+		return "", err
+	}
+	p.MediaURLs = append(p.MediaURLs, media.URL(m.ID))
+	rawPayload, err := json.Marshal(p)
+	if err != nil {
+		return "", err
+	}
+	item, err := ds.Update(ctx, id, cur.Version, deliverable.Patch{Payload: rawPayload}, deliverable.ActorAgent, fmt.Sprintf("image generated by @%s", r.Agent.Slug))
+	if err != nil {
+		return "", err
+	}
+	r.Broker.Publish("deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
+	return fmt.Sprintf("Image %s generated (%s) and attached to draft %s. The reviewer sees it with the draft.", media.URL(m.ID), aspect, item.ID), nil
 }
 
 func toolCreatePostDeliverable(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
@@ -146,8 +217,7 @@ func toolCreatePostDeliverable(ctx context.Context, r *crew.Run, raw json.RawMes
 	return msg, nil
 }
 
-// toolListPostDeliverables lists post deliverables and, so an agent moved over still sees what it
-// wrote before the move, the posts table's rows, newest first.
+// toolListPostDeliverables lists post deliverables, newest first.
 func toolListPostDeliverables(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		Status string
@@ -193,26 +263,9 @@ func toolListPostDeliverables(ctx context.Context, r *crew.Run, raw json.RawMess
 		}
 		st := string(it.Status)
 		if it.Status == deliverable.StatusDone {
-			st = string(StatusPublished)
+			st = "PUBLISHED"
 		}
 		out = append(out, row{it.ID, st, p.Platforms, it.Title, textutil.Clip(p.Content, 240), p.Warnings, it.UpdatedAt})
-	}
-	pf := PostFilter{OrgID: &r.Task.OrgID, Limit: limit}
-	if status != "" {
-		if st := Status(status); st.Valid() {
-			pf.Statuses = []Status{st}
-		} else {
-			pf.Limit = 0 // a status only deliverables have (DONE): nothing from the posts table
-		}
-	}
-	if pf.Limit > 0 {
-		posts, _, err := NewStore(r.Store).ListPosts(ctx, pf)
-		if err != nil {
-			return "", err
-		}
-		for _, p := range posts {
-			out = append(out, row{p.ID, string(p.Status), p.Platforms, p.Title, textutil.Clip(p.Content, 240), p.Warnings, p.UpdatedAt})
-		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].updated.After(out[j].updated) })
 	if len(out) > limit {

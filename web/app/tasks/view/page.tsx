@@ -1170,35 +1170,6 @@ function Sidebar({
 
       <Card>
         <CardHeader
-          title="Drafts"
-          subtitle="Posts written for this task (they wait in Review)"
-        />
-        {(t.posts ?? []).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-zinc-500">No drafts yet.</p>
-        ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {t.posts!.map((p) => (
-              <li key={p.id}>
-                <Link
-                  href={`/posts/view/?id=${p.id}`}
-                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    {p.title || "(untitled draft)"}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-zinc-500">
-                    {(p.platforms ?? []).join(", ")}
-                  </span>
-                  <StatusBadge status={p.status} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card>
-        <CardHeader
           title="Deliverables"
           subtitle="Documents and other items produced for this task (they wait in Deliverables)"
         />

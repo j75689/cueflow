@@ -21,7 +21,6 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `CUEFLOW_DIGEST_CRON` | | 例如 `0 9 * * *`：每天寄一次待審摘要 |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |

@@ -36,8 +36,6 @@ import (
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
-	"github.com/j75689/cueflow/internal/content/dispatch"
-	"github.com/j75689/cueflow/internal/content/pipeline"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/deliverable"
@@ -163,11 +161,6 @@ func serve() error {
 	// "Everything running is stale" is only true when this is the one process. In the cloud, other
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
 	cs := content.NewStore(st)
-	if !cfg.Cloud() {
-		if err := cs.FailStaleRuns(ctx); err != nil {
-			logger.Warn("clean stale runs", "err", err)
-		}
-	}
 	broker := events.NewBroker()
 	broker.Attach(pool, logger)
 	go broker.Run(ctx)
@@ -182,20 +175,10 @@ func serve() error {
 	var workers []func(context.Context)
 	var queued []*jobs.Queue
 	if cfg.Enabled("content") {
-		// Simple schedules, the publish worker and everything around posts.
-		runner := pipeline.NewRunner(ctx, cs, h, broker, logger, cfg.PublicURL)
-		worker := dispatch.NewWorker(cs, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
-		worker.MediaBaseURL = cfg.MediaBaseURL
-		contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner,
-			Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL, MediaBaseURL: cfg.MediaBaseURL}
-		contentModule.Attach(cfg.DigestCron)
+		// The post kind, source connectors and the agents' drafting tools.
+		contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: cfg.MediaBaseURL}
+		contentModule.Attach()
 		modules = append(modules, contentModule)
-		handlers[content.KindDispatch] = func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) }
-		handlers[content.KindPipeline] = func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") }
-		sweeps = append(sweeps, worker.Sweep)
-		workers = append(workers, worker.Run)
-		queued = append(queued, &worker.Queue)
-		defer runner.Wait()
 	}
 	if cfg.Enabled("deliverables") {
 		// Typed items any agent can produce, reviewed by a human, then acted on.

@@ -201,3 +201,29 @@ func MediaFor(st *Store, mediaBase string, raw []string) ([]string, []connector.
 	}
 	return urls, files
 }
+
+// nonNil trims a list and drops blanks, never returning nil.
+func nonNil(s []string) []string {
+	out := make([]string, 0, len(s))
+	for _, v := range s {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// cleanTags normalizes hashtags: no leading #, no blanks, no duplicates (case-insensitive).
+func cleanTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "#"))
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		out = append(out, t)
+	}
+	return out
+}

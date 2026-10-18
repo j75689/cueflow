@@ -9,7 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -51,7 +51,7 @@ func TestSelfDrivenAgent(t *testing.T) {
 	}
 	mk := func(name, slug string) store.Agent {
 		var a store.Agent
-		if code := e.do("POST", "/agents", map[string]any{"name": name, "slug": slug, "capabilities": []string{"drafting"},
+		if code := e.do("POST", "/agents", map[string]any{"name": name, "slug": slug, "capabilities": []string{"post_deliverables"},
 			"runtime_connector_id": rt.ID}, &a); code != 201 {
 			t.Fatalf("create agent: %d", code)
 		}
@@ -110,8 +110,8 @@ func TestSelfDrivenAgent(t *testing.T) {
 	if got.Status != store.TaskReview || got.Result != "Done from outside." {
 		t.Fatalf("task after completion: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.cs.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
+	posts, _ := e.ds.ForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != deliverable.StatusPendingReview {
 		t.Fatalf("draft not in review: %+v", posts)
 	}
 	var runs []store.AgentRun

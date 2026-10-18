@@ -75,7 +75,7 @@ func TestOperatorMCP(t *testing.T) {
 			t.Fatalf("operator MCP must not expose %s", tl.Name)
 		}
 	}
-	if len(names) != 11 {
+	if len(names) != 10 {
 		t.Fatalf("tools: %v", names)
 	}
 
@@ -116,8 +116,8 @@ func TestOperatorMCP(t *testing.T) {
 	if out, isErr := callTool(t, cs, "list_tasks", map[string]any{"assignee": "writer", "status": []string{"WAITING_HUMAN"}}); isErr || !strings.Contains(out, "Post about MCP") {
 		t.Fatalf("list_tasks: %s", out)
 	}
-	if out, isErr := callTool(t, cs, "list_drafts", nil); isErr || !strings.Contains(out, `"total": 0`) {
-		t.Fatalf("list_drafts: %s", out)
+	if out, isErr := callTool(t, cs, "list_deliverables", map[string]any{"kind": "post"}); isErr || !strings.Contains(out, `"total": 0`) {
+		t.Fatalf("list_deliverables: %s", out)
 	}
 	if out, isErr := callTool(t, cs, "get_task", map[string]any{"task": "#999"}); !isErr || !strings.Contains(out, "not found") {
 		t.Fatalf("missing task: %s", out)

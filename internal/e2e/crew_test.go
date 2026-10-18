@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/crew"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
@@ -190,8 +190,8 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 
 	var got struct {
 		store.Task
-		Subtasks []store.Task      `json:"subtasks"`
-		Posts    []content.PostRef `json:"posts"`
+		Subtasks     []store.Task      `json:"subtasks"`
+		Deliverables []deliverable.Ref `json:"deliverables"`
 	}
 	e.do("GET", "/tasks/"+task.ID.String(), nil, &got)
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "waiting for review") {
@@ -208,9 +208,9 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 
 	// The writer's draft is in the review queue, linked to its subtask, and was not published.
 	var posts struct {
-		Items []content.Post `json:"items"`
+		Items []deliverable.Deliverable `json:"items"`
 	}
-	e.do("GET", "/posts?status=PENDING_REVIEW", nil, &posts)
+	e.do("GET", "/deliverables?status=PENDING_REVIEW&kind=post", nil, &posts)
 	if len(posts.Items) != 1 || posts.Items[0].TaskID == nil {
 		t.Fatalf("draft not queued for review: %+v", posts.Items)
 	}

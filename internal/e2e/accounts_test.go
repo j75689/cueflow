@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/j75689/cueflow/internal/llm"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -57,31 +59,34 @@ func TestPerAccountPublishAndPartialRetry(t *testing.T) {
 		t.Fatalf("accounts: %d %+v", code, accts)
 	}
 
-	var post content.Post
-	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "accounts": []string{"a1"},
-		"topic": " AI 新聞 ", "link_url": "https://example.com/a", "publisher_connector_id": pub.ID, "submit": true}, &post)
-	if post.Topic != "AI 新聞" || post.LinkURL != "https://example.com/a" {
-		t.Fatalf("topic/link not stored: %q %q", post.Topic, post.LinkURL)
+	var post deliverable.Deliverable
+	e.do("POST", "/deliverables", map[string]any{"kind": "post", "title": "hi", "payload": map[string]any{"content": "hi", "platforms": []string{"threads"},
+		"accounts": []string{"a1"}, "topic": " AI 新聞 ", "link_url": "https://example.com/a", "publisher_connector_id": pub.ID}, "submit": true}, &post)
+	pp, err := content.DecodePostPayload(post.Payload)
+	if err != nil || pp.Topic != "AI 新聞" || pp.LinkURL != "https://example.com/a" {
+		t.Fatalf("topic/link not stored: %+v %v", pp, err)
 	}
-	if code := e.do("PATCH", "/posts/"+post.ID.String(), map[string]any{"version": post.Version, "accounts": []string{"a1", "a2"}}, &post); code != 200 {
+	pp.Accounts = []string{"a1", "a2"}
+	payload, _ := json.Marshal(pp)
+	if code := e.do("PATCH", "/deliverables/"+post.ID.String(), map[string]any{"version": post.Version, "payload": json.RawMessage(payload)}, &post); code != 200 {
 		t.Fatalf("update accounts: %d", code)
 	}
-	if len(post.Accounts) != 2 {
-		t.Fatalf("accounts not stored: %+v", post.Accounts)
+	if pp, _ = content.DecodePostPayload(post.Payload); len(pp.Accounts) != 2 {
+		t.Fatalf("accounts not stored: %+v", pp.Accounts)
 	}
 
-	e.do("POST", "/posts/"+post.ID.String()+"/approve", map[string]any{}, nil)
-	e.worker.Tick(ctx)
-	got, _ := e.cs.GetPost(ctx, post.ID)
-	if got.Status != content.StatusFailed || got.ExternalPostIDs["remote"] != "r1" {
-		t.Fatalf("partial failure must keep external ids: %s %v", got.Status, got.ExternalPostIDs)
+	e.do("POST", "/deliverables/"+post.ID.String()+"/approve", map[string]any{}, nil)
+	e.deliverer.Tick(ctx)
+	got, _ := e.ds.Get(ctx, post.ID)
+	if got.Status != deliverable.StatusFailed || got.ExternalIDs["remote"] != "r1" {
+		t.Fatalf("partial failure must keep external ids: %s %v", got.Status, got.ExternalIDs)
 	}
 
-	e.do("POST", "/posts/"+post.ID.String()+"/retry", nil, nil)
-	e.worker.Tick(ctx)
-	got, _ = e.cs.GetPost(ctx, post.ID)
-	if got.Status != content.StatusPublished || got.ExternalPostIDs["threads @two"] != "url2" {
-		t.Fatalf("retry: %s %v", got.Status, got.ExternalPostIDs)
+	e.do("POST", "/deliverables/"+post.ID.String()+"/retry", nil, nil)
+	e.deliverer.Tick(ctx)
+	got, _ = e.ds.Get(ctx, post.ID)
+	if got.Status != deliverable.StatusDone || got.ExternalIDs["threads @two"] != "url2" {
+		t.Fatalf("retry: %s %v", got.Status, got.ExternalIDs)
 	}
 	accountsMu.Lock()
 	defer accountsMu.Unlock()
@@ -136,11 +141,12 @@ func TestSchedulePublishDefaultsReachDrafts(t *testing.T) {
 	if !strings.Contains(refused, "publishes only to threads") {
 		t.Fatalf("instagram draft should be refused: %q", refused)
 	}
-	posts, _ := e.cs.PostsForTask(ctx, tasks[0].ID)
+	posts, _ := e.ds.ForTask(ctx, tasks[0].ID)
 	if len(posts) != 1 {
 		t.Fatalf("posts: %+v", posts)
 	}
-	p, _ := e.cs.GetPost(ctx, posts[0].ID)
+	d, _ := e.ds.Get(ctx, posts[0].ID)
+	p, _ := content.DecodePostPayload(d.Payload)
 	if p.LinkURL != "https://example.com/story" {
 		t.Fatalf("link card should default to the first source URL: %q", p.LinkURL)
 	}

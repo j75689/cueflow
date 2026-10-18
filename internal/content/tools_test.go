@@ -36,7 +36,7 @@ func TestCleanMediaURLs(t *testing.T) {
 func TestDraftingPromptLines(t *testing.T) {
 	register()
 	task := &store.Task{Number: 7}
-	writer := &store.Agent{Name: "Writer", Role: "writer", Capabilities: []string{"drafting"}, Platforms: []string{"threads"}}
+	writer := &store.Agent{Name: "Writer", Role: "writer", Capabilities: []string{PostDeliverablesCapability}, Platforms: []string{"threads"}}
 	got := crew.SystemPrompt(writer, task, nil, nil)
 	for _, s := range []string{"cannot publish to social media", "human review queue", "draft IDs", "write drafts for: threads"} {
 		if !strings.Contains(got, s) {

@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/api"
-	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/crew"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
@@ -216,7 +216,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 	if c := post(work, "good"); c != http.StatusInternalServerError {
 		t.Fatalf("a failing handler must answer 500 so the queue retries, got %d", c)
 	}
-	if c := post(jobs.WorkPath(content.KindDispatch, id), "good"); c != http.StatusNotFound {
+	if c := post(jobs.WorkPath(deliverable.KindDeliver, id), "good"); c != http.StatusNotFound {
 		t.Fatalf("a kind without a handler: %d", c)
 	}
 	if c := post("/internal/work/crew/not-a-uuid", "good"); c != http.StatusBadRequest {
@@ -268,7 +268,7 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 		t.Fatalf("create runtime connector: %d", code)
 	}
 	var agent store.Agent
-	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"drafting"},
+	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"post_deliverables"},
 		"runtime_connector_id": rt.ID}, &agent); code != 201 {
 		t.Fatalf("create agent: %d", code)
 	}
@@ -290,8 +290,8 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "Done via ACP") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.cs.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
+	posts, _ := e.ds.ForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != deliverable.StatusPendingReview {
 		t.Fatalf("the draft made through instance B is missing: %+v", posts)
 	}
 	var tokens int

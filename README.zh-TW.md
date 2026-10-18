@@ -10,7 +10,7 @@
                      需要你決定 / 有風險的工具呼叫 ─▶ 你在對話串裡核准 ─▶ 它繼續
 ```
 
-內建一套**內容工作流程**當範例：agent 收集素材（RSS、信箱、網路搜尋），依各平台風格寫草稿，每一篇都先交給人審核，核准後才交給發布器：任何符合四個工具的[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器。Agent 永遠不會發文：沒有任何 agent 工具能發文，發布器也只接受發布 worker 針對「那一篇已核准的貼文」給的授權。
+Agent 產出的每樣東西都是一份 **deliverable**，等人審核：可以是一份文件，或是內建內容模組裡的社群貼文：agent 從收集到的素材（RSS、信箱、網路搜尋）寫草稿，核准後才交給發布器，也就是任何符合四個工具的[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器。Agent 永遠不會對自己的產出動手：沒有任何 agent 工具能發文，發布器與 action connector 也只接受 worker 針對「那一份已核准的項目」給的授權。
 
 ## 運作方式
 
@@ -24,10 +24,10 @@
 
 ## 特色
 
-- **從架構上保證人工審核。** 貼文遵循嚴格的狀態機（`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED`），每次變動都寫入稽核紀錄，包含審核者修改前後的差異。
+- **從架構上保證人工審核。** Deliverable 遵循嚴格的狀態機（`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`），每次變動都寫入稽核紀錄，包含審核者修改前後的差異。
 - **一切都是 connector 插件。** 發布器、資料來源、搜尋引擎、LLM、通知、圖片生成都實作簡單的 Go 介面，並附設定 schema 自行註冊，UI 會自動產生設定表單。
 - **預設私有。** 在自己機器上只做主動連線，伺服器只綁 `127.0.0.1:3000`；在雲端，儀表板放在 Cloudflare Access 後面，機器之間的呼叫都帶 Google 簽發的身分。connector 機密以 AES-256-GCM 加密儲存。
-- **發布不怕當機。** 發布使用租約；worker 若在發布途中掛掉，貼文會標成 `FAILED` 並提醒「重試前請先確認平台」，而不是默默重複發文。
+- **動作不怕當機。** worker 使用租約；若在執行途中掛掉，項目會標成 `FAILED` 並提醒「重試前請先確認」，而不是默默做第二次。
 - **單一 binary，哪裡都能跑。** Go 的 API、排程與 worker，加上內嵌的 Next.js 控制台。自己的硬體用 Docker Compose；或 Cloud Run 搭配 Cloud Tasks 與 Cloud Scheduler，沒工作時不佔資源。
 
 ## 快速開始（Docker）
@@ -43,7 +43,7 @@ CueFlow 在 <http://localhost:3000>。接著：
 
 1. **Connectors**：一個 LLM（例如 *Anthropic Claude*，或指向 Ollama 的 *OpenAI-compatible*）；一個資料來源，例如 RSS feed；一個發布器：*MCP publisher* 指向符合[發布器約定](docs/publisher-mcp.md)（英文）的伺服器，或用內附的 mock（`docker compose --profile mock up -d`，endpoint `http://mock-publisher:4010/mcp`、token `dev-token`）先跑通流程、不會真的發出去。
 2. **Command**：直接告訴 agent 團隊要做什麼，或建立 **Schedule** 定時執行。
-3. **Review**：修改、勾選帳號、核准或退回。核准的貼文幾秒內就會交給發布器。
+3. **Deliverables**：修改、勾選帳號、核准或退回。核准的貼文幾秒內就會交給發布器。
 
 映像版本、網頁搜尋、mock 發布器、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。
 
@@ -67,7 +67,6 @@ CueFlow 在 <http://localhost:3000>。接著：
 - [內建 connector](docs/zh-TW/builtin-connectors.md)
 - [外部 agent、Runner 與 MCP](docs/zh-TW/external-agents.md)
 - [圖片與影片](docs/zh-TW/media.md)
-- [Prompt 範本](docs/zh-TW/prompt-templates.md)
 - 英文文件：[REST API](docs/api.md) · [Connector 插件開發](docs/connectors.md) · [發布器 MCP 約定](docs/publisher-mcp.md) · [部署到 Google Cloud Run](deploy/cloudrun/README.md) · [容器裡的 Runner](deploy/runner/README.md)
 
 ## 開發與參與貢獻
