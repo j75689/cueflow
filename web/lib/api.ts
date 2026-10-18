@@ -196,7 +196,8 @@ export const api = {
   listAgents: () => request<Agent[]>("GET", "/agents"),
   getAgent: (id: string) => request<Agent>("GET", `/agents/${id}`),
   createAgent: (body: Partial<AgentInput>) => request<Agent>("POST", "/agents", body),
-  importTeam: (team: TeamTemplate) => request<{ created: Agent[]; skipped: string[] }>("POST", "/agents/template", team),
+  importTeam: (team: TeamTemplate) =>
+    request<{ created: Agent[]; skipped: string[] }>("POST", "/agents/template", team),
   exportTeam: () => request<TeamTemplate>("GET", "/agents/template"),
   updateAgent: (id: string, body: Partial<AgentInput>) => request<Agent>("PATCH", `/agents/${id}`, body),
   deleteAgent: (id: string) => request<void>("DELETE", `/agents/${id}`),

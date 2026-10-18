@@ -5,7 +5,21 @@ import { useState } from "react";
 import { AgentAvatar, NewTaskModal, ROLE_LABEL, useAgents } from "@/components/agents";
 import { useMeta, useToast } from "@/components/providers";
 import { useOrg } from "@/components/org";
-import { Button, Card, EmptyState, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Pill, Textarea, Toggle } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorBox,
+  Field,
+  Icon,
+  Loading,
+  Modal,
+  PageHeader,
+  Pill,
+  Textarea,
+  Toggle,
+  cx,
+} from "@/components/ui";
 import { api } from "@/lib/api";
 import type { Agent, TeamTemplate } from "@/lib/types";
 
@@ -230,7 +244,11 @@ function ImportTeamModal({
             type="file"
             accept="application/json,.json"
             onChange={(e) => pick(e.target.files?.[0])}
-            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-900 hover:file:bg-zinc-200 dark:text-zinc-400 dark:file:bg-zinc-800 dark:file:text-zinc-100 dark:hover:file:bg-zinc-700"
+            className={cx(
+              "block w-full text-sm text-zinc-600 dark:text-zinc-400",
+              "file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium",
+              "file:text-zinc-900 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-100 dark:hover:file:bg-zinc-700",
+            )}
           />
         </Field>
         <Field label="Or paste it">
@@ -254,7 +272,9 @@ function ImportTeamModal({
                   <li key={`${a.slug}-${i}`} className="flex items-start gap-2 text-sm">
                     <span className="w-6 shrink-0 text-center">{a.avatar ?? "🤖"}</span>
                     <span className="min-w-0 flex-1">
-                      <span className={present ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>{a.name}</span>
+                      <span className={present ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>
+                        {a.name}
+                      </span>
                       <span className="ml-2 font-mono text-xs text-zinc-500">@{a.slug}</span>
                       {a.role && <span className="ml-2 text-xs text-zinc-500">{ROLE_LABEL[a.role] ?? a.role}</span>}
                       {present && <span className="ml-2 text-xs text-zinc-500">already here</span>}
