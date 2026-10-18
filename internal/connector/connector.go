@@ -1,4 +1,4 @@
-// Package connector is CueFlow's plugin system. Every integration - publishers (Postiz),
+// Package connector is CueFlow's plugin system. Every integration - publishers (MCP servers),
 // sources (RSS, IMAP), search engines, LLM providers and notifiers - is a connector type that
 // registers a Spec (its config form) and a Factory. Adding an integration means adding one package
 // under internal/connectors and blank-importing it from internal/connectors/all.
@@ -58,7 +58,7 @@ type TestResult struct {
 	Details map[string]any `json:"details,omitempty"`
 }
 
-// Publisher hands an approved post to a social platform (directly or via a driver like Postiz).
+// Publisher hands an approved post to a social platform (directly or through a publisher MCP server).
 // Implementations never need to check authorization themselves: Build wraps every publisher so
 // Publish fails unless the context carries a dispatch grant for req.PostID (see package guard).
 type Publisher interface {

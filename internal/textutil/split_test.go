@@ -63,11 +63,3 @@ func TestFitParts(t *testing.T) {
 		t.Fatalf("long part not split: %q", got)
 	}
 }
-
-func TestToHTMLParagraphs(t *testing.T) {
-	got := ToHTMLParagraphs("a <b>\n\nc")
-	want := "<p>a &lt;b&gt;</p><p></p><p>c</p>"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}

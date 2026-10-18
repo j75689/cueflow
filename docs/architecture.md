@@ -12,7 +12,7 @@
 |---|---|
 | **Human-in-the-loop first** | Every post follows a strict state machine; only a human can move a post to `APPROVED`; publishers are wrapped in an authorization check so only the dispatch worker can call them, and only for that one approved post |
 | **Zero public exposure** | Everything is outbound polling (RSS / IMAP / MCP calls), no webhooks needed; binds to `127.0.0.1:3000` by default |
-| **Protocol-driven** | The core depends on no social platform SDK; publishing goes through MCP to Postiz, and Postiz itself is just a connector plugin |
+| **Protocol-driven** | The core depends on no social platform SDK; publishing goes through MCP to a publisher server that owns the platforms, and that publisher is just a connector plugin |
 | **Everything is a plugin** | Publishers, sources, search, LLMs and notifiers are all connectors sharing one registration / configuration / encryption mechanism |
 | **One process, easy to deploy** | A single Go binary (API + scheduler + publish worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL |
 | **Observable and auditable** | Every post status change and human edit is written to `audit_logs`; every agent step is written to the task thread and `agent_runs` |
@@ -45,10 +45,10 @@ flowchart TB
         Search["search: SearXNG · Tavily"]
         LLM["llm: OpenAI-compatible (OpenRouter · Azure) · Claude API · Bedrock · Vertex (Claude, Gemini)"]
         Notif["notifier: SMTP"]
-        Pub["publisher: Postiz (MCP)"]
+        Pub["publisher: MCP publisher"]
     end
 
-    Postiz["Postiz MCP Server → Postiz Core<br/>Threads · Instagram · X · LinkedIn"]
+    Publisher["Publisher MCP server<br/>Threads · Instagram · YouTube"]
 
     UI <-->|"JSON / SSE"| API
     API --> Store
@@ -64,7 +64,7 @@ flowchart TB
     Hub --> Reg
     Reg --> Src & Search & LLM & Notif & Pub
     Pub -.->|"must pass"| Guard
-    Pub -->|"JSON-RPC over HTTP"| Postiz
+    Pub -->|"JSON-RPC over HTTP"| Publisher
     Store --> DB
     Pipe & Crew & Disp -->|"events"| Broker
 ```
@@ -74,7 +74,7 @@ flowchart TB
 | Package | Responsibility |
 |---|---|
 | `cmd/cueflow` | Entry point: load config, connect to the DB, run migrations, wire all components, graceful shutdown; subcommands `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
-| `cmd/mock-postiz-mcp` | Postiz MCP stand-in for development (`internal/postizmock`) |
+| `cmd/mock-publisher-mcp` | A publisher MCP server that posts nowhere, for development and demos (`internal/publishermock`) |
 | `internal/config` | Load settings from environment variables (`CUEFLOW_*`, `DATABASE_URL`) |
 | `internal/db` | Connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) |
 | `internal/domain` | Post state machine, platform rules (character limits, hashtags, thread support, media requirement) |
@@ -176,7 +176,7 @@ classDiagram
     Instance <|-- Searcher
     Instance <|-- LLM
     Instance <|-- Notifier
-    Publisher <|.. PostizMCP
+    Publisher <|.. MCPPublisher
     Source <|.. RSS
     Source <|.. IMAP
     Searcher <|.. SearXNG
@@ -241,7 +241,7 @@ stateDiagram-v2
     PENDING_REVIEW --> APPROVED: human approves
     PENDING_REVIEW --> REJECTED: human rejects (reason required)
     APPROVED --> QUEUED: picked up by the publish worker
-    QUEUED --> PUBLISHED: accepted by Postiz
+    QUEUED --> PUBLISHED: accepted by the publisher
     QUEUED --> FAILED: publish error / worker died mid-publish
     FAILED --> QUEUED: manual retry
     REJECTED --> [*]
@@ -260,8 +260,8 @@ sequenceDiagram
     participant API
     participant DB as PostgreSQL
     participant W as Dispatch Worker
-    participant P as Postiz Connector
-    participant Z as Postiz MCP
+    participant P as MCP publisher connector
+    participant Z as Publisher MCP server
 
     R->>API: POST /posts/{id}/approve
     API->>DB: PENDING_REVIEW → APPROVED (+ audit)
@@ -271,18 +271,18 @@ sequenceDiagram
     W->>W: ctx = WithPublishGrant(postID)
     W->>P: Publish(ctx, req)
     P->>P: guard.CheckPublish(ctx, postID)
-    P->>Z: integrationList → uploadFromUrlTool → integrationSchedulePostTool
+    P->>Z: list_accounts → create_upload (videos) → create_post
     alt success
-        Z-->>P: postId
+        Z-->>P: id, results
         W->>DB: QUEUED → PUBLISHED, external_post_ids
-    else failure (including Postiz validation errors)
+    else failure (including the publisher refusing the post)
         W->>DB: QUEUED → FAILED, error_message
     end
 ```
 
 ### 5.3 Preventing duplicate posts
 
-The worker takes a lease (`lease_until`) before publishing. If it dies mid-publish and the lease expires, the post is marked `FAILED` on the next start with a note that it "may have been published; check the platform before retrying". It is **never retried automatically**: we cannot know whether Postiz already received it, so an automatic retry could double-post.
+The worker takes a lease (`lease_until`) before publishing. If it dies mid-publish and the lease expires, the post is marked `FAILED` on the next start with a note that it "may have been published; check the platform before retrying". It is **never retried automatically**: we cannot know whether the publisher already received it, so an automatic retry could double-post.
 
 ### 5.4 Simple schedules (pipelines)
 
@@ -322,18 +322,15 @@ flowchart LR
     subgraph Host["Single host (NAS / home lab / local Docker)"]
         direction LR
         CF["cueflow<br/>127.0.0.1:3000"] --> CFDB[("cueflow-db<br/>postgres:17")]
-        CF -->|"http://postiz:5000/api/mcp"| PZ["postiz<br/>127.0.0.1:4007"]
-        PZ --> PZDB[("postiz-db")]
-        PZ --> RD[("postiz-redis")]
-        PZ --> TP["temporal"] --> TPDB[("temporal-db")]
+        CF --> SX["searxng<br/>127.0.0.1:8888"]
     end
-    PZ -->|"OAuth / publish APIs"| SNS["Threads · Instagram · X · LinkedIn"]
+    CF -->|"MCP (publisher contract)"| PUB["Publisher MCP server"] -->|"OAuth / publish APIs"| SNS["Threads · Instagram · YouTube"]
     CF -->|"HTTPS"| EXT["LLM APIs · search · RSS · IMAP"]
 ```
 
 - `deploy/docker-compose.yml`: `cd deploy && docker compose up -d` brings up every service; all ports are bound to `127.0.0.1`. For remote access use an SSH tunnel or Tailscale.
 - The CueFlow image is distroless and non-root, with a built-in `healthcheck` subcommand.
-- For development or a trial run, `--profile mock` starts a mock Postiz MCP server.
+- For development or a trial run, `--profile mock` starts a mock publisher MCP server that posts nowhere.
 - The local deployment is **single-instance**: in-process loops, in-process cron. Task and publish claiming use database leases and `SKIP LOCKED`, so two instances would not process the same work twice, but cron would fire once per instance. For several instances use the cloud mode below.
 
 ### 8.1 Cloud deployment (Cloud Run + Cloud Tasks + Cloud Scheduler)

@@ -63,4 +63,4 @@ connector 的憑證都用 `CUEFLOW_SECRET_KEY` 加密；金鑰弄丟就得重新
 2. 全部重新加密：`docker compose exec cueflow cueflow rotate-key`（可以先加 `--dry-run` 試跑）。只要有任何一個 connector 解不開，就不會修改任何資料。
 3. 拿掉 `CUEFLOW_SECRET_KEY_PREVIOUS`，再重啟一次。
 
-注意：`docker compose down -v` 會刪除 volume，也就是 CueFlow 和 Postiz 的資料庫。
+注意：`docker compose down -v` 會刪除 volume，也就是 CueFlow 的資料庫。

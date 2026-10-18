@@ -79,7 +79,7 @@ The default names and instructions are in English; the language agents write in 
 **Tool permissions have three layers of defense:**
 
 1. **Declaration**: the tool list sent to the LLM contains only tools within the agent's capabilities.
-2. **Execution**: if the model calls a tool outside its list (e.g. it is tricked into calling Postiz's `integrationSchedulePostTool`), the runner returns an error result "Tool is not available to you" and records it in the thread.
+2. **Execution**: if the model calls a tool outside its list (e.g. it is tricked into calling a publisher's `create_post`), the runner returns an error result "Tool is not available to you" and records it in the thread.
 3. **Publishing**: even if someone wired a publisher into an agent by mistake, agent runs carry the `guard.WithAgent` marker and `guardedPublisher` always refuses.
 
 ## 5. Task state machine
@@ -220,7 +220,7 @@ Rules:
 | Start a comment with `@slug` | First hands the task to that agent (a running run is stopped), then behaves as above |
 | Press Stop or drag a running card away | Cancels the run's context, aborting the LLM call; the task stays in `WAITING_HUMAN` or the column you dropped it in |
 | Reassign to another agent | A running run is stopped |
-| Review drafts | Agent drafts are like any other draft: they reach Postiz only after approval in Review |
+| Review drafts | Agent drafts are like any other draft: they reach the publisher only after approval in Review |
 
 ## 9. Schedules
 
@@ -336,7 +336,7 @@ In Command, the user types: "Every morning at 8, summarize AI news and draft a T
 2. **Chief, run 1**: recognises a recurring request. If the time were unclear it would `ask_human`; here 8 a.m. is given, so it calls `schedule_task` directly (`0 8 * * *`, `Asia/Taipei`, assigned to Writer, with a description asking it to gather the previous day's AI news and write a draft), uses `remember` to note "the user wants AI news drafts every day at 8", and finally `complete_task` reports what it set up. #1 → `REVIEW`.
 3. The next day at 08:00, the schedule creates task #2 "Summarize AI news and draft a Threads post · 2026-10-05", assigned to Writer, which starts automatically.
 4. **Writer, run**: `fetch_sources` → `search_materials` → `web_search` / `read_url` to verify when needed → `create_post_draft` (Threads; anything over 500 characters is split into a thread automatically) → `complete_task` reports the draft ID. #2 → `REVIEW`.
-5. You see the draft on the Review page, edit and approve it → the publish worker hands it to Postiz.
+5. You see the draft on the Review page, edit and approve it → the publish worker hands it to the publisher.
 6. To adjust the style, comment on #2 "make it punchier and end with a question"; Writer reruns and uses `revise_draft` on the not-yet-approved draft. Or use `@editor please check this` to hand the task to Editor.
 
 ## 13. Known limitations and future work

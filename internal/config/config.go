@@ -27,7 +27,7 @@ type Config struct {
 	// PublicURL is used to build links in notification emails.
 	PublicURL string
 	// MediaBaseURL prefixes stored images ("/media/{id}") when handing them to publishers; it must
-	// be reachable from the publishing service (e.g. http://cueflow:3000 for Postiz in compose).
+	// be reachable from the publishing service (e.g. http://cueflow:3000 for a publisher in the same compose file).
 	MediaBaseURL string
 	// MediaStorage is where new media bytes go: empty (the database) or file:///data/media.
 	MediaStorage string

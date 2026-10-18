@@ -7,7 +7,7 @@ their forms are generated from the plugin's config schema. To write a new one, s
 
 | Kind | Types |
 |---|---|
-| Publisher | `postiz_mcp` - Postiz over MCP (Streamable HTTP / SSE / stdio), channels optionally picked per post · `mcp_publisher` - any MCP server that follows the [publisher contract](publisher-mcp.md), posting to the Threads/Instagram accounts picked per post (threads, carousels, videos and reels; videos are uploaded straight to the server) |
+| Publisher | `mcp_publisher` - any MCP server that follows the [publisher contract](publisher-mcp.md), posting to the Threads/Instagram accounts picked per post (threads, carousels, videos and reels; videos are uploaded straight to the server) |
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |

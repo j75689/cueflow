@@ -64,7 +64,7 @@ export function effectivePublisher(
 
 /**
  * How a publisher takes accounts: "required" (MCP publisher: every post names its accounts),
- * "optional" (Postiz: unpicked platforms use its channel mapping), or null.
+ * "optional" (a publisher that falls back to its own defaults for unpicked platforms), or null.
  */
 export function accountMode(c: Connector | undefined, types: ConnectorSpec[]): "required" | "optional" | null {
   const spec = c && types.find((t) => t.type === c.type);

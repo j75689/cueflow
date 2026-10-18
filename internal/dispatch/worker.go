@@ -228,7 +228,7 @@ func (w *Worker) resolvePublisher(ctx context.Context, p *domain.Post) (uuid.UUI
 	}
 	c, err := w.store.FirstActiveConnector(ctx, connector.KindPublisher)
 	if errors.Is(err, domain.ErrNotFound) {
-		return uuid.Nil, errors.New("no active publisher connector configured (add a Postiz connector under Connectors)")
+		return uuid.Nil, errors.New("no active publisher connector configured (add an MCP publisher under Connectors)")
 	}
 	if err != nil {
 		return uuid.Nil, err

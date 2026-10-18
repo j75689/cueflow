@@ -22,7 +22,7 @@ export DATABASE_URL="postgres://cueflow:cueflow@localhost:55432/cueflow?sslmode=
 export CUEFLOW_SECRET_KEY=$(go run ./cmd/cueflow genkey)
 
 go run ./cmd/cueflow              # API on :3000
-go run ./cmd/mock-postiz-mcp      # mock Postiz on :4007 (key dev-key)
+go run ./cmd/mock-publisher-mcp   # mock publisher on :4010 (token dev-token)
 cd web && npm install && npm run dev   # dashboard on :3001, proxies /api to :3000
 ```
 

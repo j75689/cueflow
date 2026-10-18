@@ -16,9 +16,9 @@ Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](doc
 ```
 
 It ships with a **content workflow** as its built-in example: agents collect material (RSS, mailboxes, web
-search), write platform-specific drafts, a human reviews every draft, and only then it is published through
-[Postiz](https://github.com/gitroomhq/postiz-app) over MCP. Agents never publish: no agent tool can, and
-publishers refuse unless the dispatch worker attached a grant for that exact, human-approved post.
+search), write platform-specific drafts, a human reviews every draft, and only then it is handed to a publisher:
+any MCP server that follows the four-tool [publisher contract](docs/publisher-mcp.md). Agents never publish: no
+agent tool can, and publishers refuse unless the dispatch worker attached a grant for that exact, human-approved post.
 
 ## How it works
 
@@ -56,23 +56,24 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
 cp .env.example .env
-# fill in CUEFLOW_SECRET_KEY (openssl rand -base64 32) and POSTIZ_JWT_SECRET (openssl rand -hex 32)
+# fill in CUEFLOW_SECRET_KEY (openssl rand -base64 32) and SEARXNG_SECRET (openssl rand -hex 32)
 docker compose up -d
 ```
 
-CueFlow is at <http://localhost:3000>, Postiz at <http://localhost:4007>. Then:
+CueFlow is at <http://localhost:3000>. Then:
 
-1. **Postiz**: create an account, connect your channels, copy the API key from *Settings → Developers*.
-2. **CueFlow → Connectors**: *Postiz (MCP)* with endpoint `http://postiz:5000/api/mcp` and that key; an LLM
-   (e.g. *Anthropic Claude*, or *OpenAI-compatible* pointing at Ollama); a source such as an RSS feed.
-3. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
-4. **Review**: edit, approve or reject. Approved posts reach Postiz within seconds.
+1. **Connectors**: an LLM (e.g. *Anthropic Claude*, or *OpenAI-compatible* pointing at Ollama); a source such
+   as an RSS feed; a publisher: *MCP publisher* pointing at a server that follows the
+   [publisher contract](docs/publisher-mcp.md), or the bundled mock (`docker compose --profile mock up -d`,
+   endpoint `http://mock-publisher:4010/mcp`, token `dev-token`) to try the flow without posting anywhere.
+2. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
+3. **Review**: edit, pick the accounts, approve or reject. Approved posts reach the publisher within seconds.
 
-Image variants, web search, trying it without Postiz, remote access: [docs/docker.md](docs/docker.md).
+Image variants, web search, the mock publisher, remote access: [docs/docker.md](docs/docker.md).
 
 ## Connectors
 
-Publishers (Postiz, or any MCP server that follows the [publisher contract](docs/publisher-mcp.md)), sources
+Publishers (any MCP server that follows the [publisher contract](docs/publisher-mcp.md)), sources
 (RSS, IMAP), search (SearXNG, Tavily), LLMs (OpenAI-compatible, Claude on the API, Bedrock or Vertex AI, Gemini
 on Vertex AI), SMTP notifications, image generation (OpenAI, Gemini, Vertex, ComfyUI) and any MCP server as
 agent tools. Full list and authentication options: [docs/builtin-connectors.md](docs/builtin-connectors.md).

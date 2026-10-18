@@ -67,13 +67,13 @@ Static info the UI uses to render forms and badges.
 `ConnectorSpec` - plugin descriptor. The UI renders the create/edit form from `fields`.
 ```json
 {
-  "type": "postiz_mcp",
+  "type": "mcp_publisher",
   "kind": "publisher",            // publisher | source | search | llm | notifier | runtime
-  "name": "Postiz (MCP)",
-  "description": "Publish through a Postiz MCP server",
+  "name": "MCP publisher",
+  "description": "Publishes approved posts through an MCP server that follows the publisher contract",
   "fields": [
     {"key":"endpoint_url","label":"MCP endpoint","type":"string","required":true,"secret":false,
-     "placeholder":"http://postiz:5000/api/mcp","help":"...","default":null,"options":null}
+     "placeholder":"https://social.example.com/mcp","help":"...","default":null,"options":null}
   ]
 }
 ```
@@ -145,9 +145,9 @@ Posts and pipelines of the org; connectors are global.
 `Connector`:
 ```json
 {
-  "id":"uuid","name":"My Postiz","kind":"publisher","type":"postiz_mcp","is_active":true,
-  "config":{"endpoint_url":"http://...","transport":"streamable_http"},   // non-secret fields only
-  "secrets_set":["api_key"],          // secret field keys that currently have a value
+  "id":"uuid","name":"My publisher","kind":"publisher","type":"mcp_publisher","is_active":true,
+  "config":{"endpoint_url":"https://..."},   // non-secret fields only
+  "secrets_set":["auth_token"],       // secret field keys that currently have a value
   "last_status":"ok|error|null","last_error":"string","last_checked_at":"...|null",
   "created_at":"...","updated_at":"..."
 }

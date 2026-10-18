@@ -54,7 +54,7 @@ func Connect(ctx context.Context, o Options) (*mcp.ClientSession, error) {
 		t = &mcp.StreamableClientTransport{
 			Endpoint:             o.Endpoint,
 			HTTPClient:           withHeaders(o.HTTPClient, o.Headers),
-			DisableStandaloneSSE: true, // request/response only; stateless servers (Postiz) reject the GET stream
+			DisableStandaloneSSE: true, // request/response only; stateless servers reject the GET stream
 			MaxRetries:           2,
 		}
 	default:

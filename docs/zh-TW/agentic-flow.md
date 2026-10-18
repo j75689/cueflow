@@ -78,7 +78,7 @@ flowchart LR
 **工具權限是三層防護：**
 
 1. **宣告層**：送給 LLM 的工具清單只包含該 agent 能力內的工具。
-2. **執行層**：模型若呼叫清單外的工具（例如被誘導呼叫 Postiz 的 `integrationSchedulePostTool`），runner 會直接回傳錯誤結果「Tool is not available to you」，並記錄在對話串。
+2. **執行層**：模型若呼叫清單外的工具（例如被誘導呼叫發布器的 `create_post`），runner 會直接回傳錯誤結果「Tool is not available to you」，並記錄在對話串。
 3. **發布層**：即使未來有人誤把發布器接進 agent，agent 執行時的 context 帶有 `guard.WithAgent` 標記，`guardedPublisher` 一律拒絕。
 
 ## 5. 任務狀態機
@@ -219,7 +219,7 @@ sequenceDiagram
 | 留言以 `@slug` 開頭 | 先把任務轉給該 agent（正在執行的會被停止），再照上一列處理 |
 | 按「Stop」或把執行中的卡片拖走 | 取消該次執行的 context，LLM 呼叫中止，任務停在 `WAITING_HUMAN` 或你拖到的欄位 |
 | 改派給別的 agent | 正在執行的會被停止 |
-| 審核草稿 | Agent 產生的草稿與一般草稿一樣，在 Review 頁核准後才會交給 Postiz |
+| 審核草稿 | Agent 產生的草稿與一般草稿一樣，在 Review 頁核准後才會交給發布器 |
 
 ## 9. 排程
 
@@ -317,7 +317,7 @@ sequenceDiagram
 2. **Chief Run 1**：判斷這是週期性需求，但時間點不明確時會 `ask_human`；這裡已經說了 8 點，所以直接 `schedule_task`（`0 8 * * *`、`Asia/Taipei`，指派 Writer，描述寫清楚要蒐集前一天的 AI 新聞並寫草稿），再用 `remember` 記住「使用者偏好每天 8 點收 AI 新聞草稿」，最後 `complete_task` 回報設定了什麼。#1 → `REVIEW`。
 3. 隔天 08:00：排程建立任務 #2「整理 AI 新聞寫成 Threads 草稿 · 2026-10-05」，指派 Writer，自動開始。
 4. **Writer Run**：`fetch_sources` → `search_materials` → 需要時 `web_search` / `read_url` 查證 → `create_post_draft`（Threads，超過 500 字會自動拆成串文）→ `complete_task` 回報草稿 ID。#2 → `REVIEW`。
-5. 你在 Review 頁看到草稿，修改後核准 → 發布 worker 交給 Postiz 發出。
+5. 你在 Review 頁看到草稿，修改後核准 → 發布 worker 交給發布器發出。
 6. 想調整風格時，直接在 #2 留言「語氣再犀利一點，結尾加問題」，Writer 會重跑並用 `revise_draft` 修改尚未核准的草稿；或者用 `@editor 幫我檢查` 把任務轉給 Editor。
 
 ## 13. 已知限制與後續方向

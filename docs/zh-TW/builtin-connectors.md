@@ -4,7 +4,7 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 
 | 類型 | 型別 |
 |---|---|
-| 發布器 | `postiz_mcp`：透過 MCP 連 Postiz（Streamable HTTP / SSE / stdio），可逐篇選擇頻道 · `mcp_publisher`：連任何符合[發布器約定](../publisher-mcp.md)（英文）的 MCP 伺服器，發到每篇貼文勾選的 Threads/Instagram 帳號（串文、輪播、影片與 Reels；影片直接上傳給伺服器） |
+| 發布器 | `mcp_publisher`：連任何符合[發布器約定](../publisher-mcp.md)（英文）的 MCP 伺服器，發到每篇貼文勾選的 Threads/Instagram 帳號（串文、輪播、影片與 Reels；影片直接上傳給伺服器） |
 | 資料來源 | `rss`（RSS/Atom，以 GUID 去重）· `imap`（信箱資料夾，唯讀） |
 | 搜尋 | `searxng`（自託管）· `tavily` |
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |

@@ -77,7 +77,7 @@ func (s *Server) generateMedia(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
-// serveMedia serves a stored image. It is public (publishers such as Postiz fetch it without the
+// serveMedia serves a stored image. It is public (publishers fetch it without the
 // admin token); the random UUID is the capability.
 func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 	id, ok := media.IDFromURL(media.PathPrefix + chi.URLParam(r, "file"))

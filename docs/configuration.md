@@ -67,4 +67,4 @@ credential, so keep a copy in a password manager. To change it without downtime 
    nothing if any connector can't be decrypted.
 3. Remove `CUEFLOW_SECRET_KEY_PREVIOUS` and restart.
 
-Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow and Postiz databases.
+Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow database.

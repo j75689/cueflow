@@ -14,7 +14,7 @@ web:
 ## build: build the cueflow binary with the dashboard embedded
 build: web
 	CGO_ENABLED=0 go build -trimpath -o bin/cueflow ./cmd/cueflow
-	CGO_ENABLED=0 go build -trimpath -o bin/mock-postiz-mcp ./cmd/mock-postiz-mcp
+	CGO_ENABLED=0 go build -trimpath -o bin/mock-publisher-mcp ./cmd/mock-publisher-mcp
 
 ## test: unit tests (e2e tests are skipped without a database)
 test:
@@ -36,9 +36,9 @@ lint:
 dev:
 	go run ./cmd/cueflow
 
-## mock: run the mock Postiz MCP server on :4007
+## mock: run the mock publisher MCP server on :4010 (token dev-token)
 mock:
-	go run ./cmd/mock-postiz-mcp
+	go run ./cmd/mock-publisher-mcp
 
 docker:
 	docker compose -f deploy/docker-compose.yml build

@@ -11,7 +11,7 @@
 |---|---|
 | **Human-in-the-loop First** | 所有貼文走嚴格狀態機；只有人能把貼文推到 `APPROVED`；發布器被包一層授權檢查，只有發布 worker 能對「已核准的那一篇」呼叫 |
 | **Zero-Public-Exposure** | 全部採主動輪詢（RSS / IMAP / MCP 呼叫），不需要 Webhook；預設只綁 `127.0.0.1:3000` |
-| **Protocol-Driven** | 核心不依賴任何社群平台 SDK；發布透過 MCP 呼叫 Postiz，且 Postiz 本身只是一個 connector 插件 |
+| **Protocol-Driven** | 核心不依賴任何社群平台 SDK；發布透過 MCP 呼叫擁有平台帳號的發布器伺服器，而那個發布器本身只是一個 connector 插件 |
 | **一切皆插件** | 發布器、資料來源、搜尋、LLM、通知都是 connector，用同一套註冊／設定／加密機制 |
 | **單一程序、易部署** | Go 單一 binary（API + 排程 + 發布 worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL |
 | **可觀測、可稽核** | 貼文每次狀態變動與人工修改都寫入 `audit_logs`；agent 的每一步寫入任務對話串與 `agent_runs` |
@@ -44,10 +44,10 @@ flowchart TB
         Search["search: SearXNG · Tavily"]
         LLM["llm: OpenAI 相容（OpenRouter · Azure）· Claude API · Bedrock · Vertex（Claude、Gemini）"]
         Notif["notifier: SMTP"]
-        Pub["publisher: Postiz (MCP)"]
+        Pub["publisher: MCP publisher"]
     end
 
-    Postiz["Postiz MCP Server → Postiz Core<br/>Threads · Instagram · X · LinkedIn"]
+    Publisher["發布器 MCP 伺服器<br/>Threads · Instagram · YouTube"]
 
     UI <-->|"JSON / SSE"| API
     API --> Store
@@ -63,7 +63,7 @@ flowchart TB
     Hub --> Reg
     Reg --> Src & Search & LLM & Notif & Pub
     Pub -.->|"必須通過"| Guard
-    Pub -->|"JSON-RPC over HTTP"| Postiz
+    Pub -->|"JSON-RPC over HTTP"| Publisher
     Store --> DB
     Pipe & Crew & Disp -->|"事件"| Broker
 ```
@@ -73,7 +73,7 @@ flowchart TB
 | 套件 | 職責 |
 |---|---|
 | `cmd/cueflow` | 進入點：載入設定、連線 DB、跑 migration、組裝所有元件、優雅關機；子命令 `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
-| `cmd/mock-postiz-mcp` | 開發用的 Postiz MCP 替身（`internal/postizmock`） |
+| `cmd/mock-publisher-mcp` | 不會真的發文的發布器 MCP 伺服器，給開發與示範用（`internal/publishermock`） |
 | `internal/config` | 從環境變數載入設定（`CUEFLOW_*`、`DATABASE_URL`） |
 | `internal/db` | 連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate） |
 | `internal/domain` | 貼文狀態機、平台規則（字數、hashtag、是否支援串文、是否需要圖片） |
@@ -172,7 +172,7 @@ classDiagram
     Instance <|-- Searcher
     Instance <|-- LLM
     Instance <|-- Notifier
-    Publisher <|.. PostizMCP
+    Publisher <|.. MCPPublisher
     Source <|.. RSS
     Source <|.. IMAP
     Searcher <|.. SearXNG
@@ -237,7 +237,7 @@ stateDiagram-v2
     PENDING_REVIEW --> APPROVED: 人工核准
     PENDING_REVIEW --> REJECTED: 人工退回（必填原因）
     APPROVED --> QUEUED: 發布 worker 接手
-    QUEUED --> PUBLISHED: Postiz 接受
+    QUEUED --> PUBLISHED: 發布器接受
     QUEUED --> FAILED: 發布失敗 / worker 中途掛掉
     FAILED --> QUEUED: 人工重試
     REJECTED --> [*]
@@ -256,8 +256,8 @@ sequenceDiagram
     participant API
     participant DB as PostgreSQL
     participant W as Dispatch Worker
-    participant P as Postiz Connector
-    participant Z as Postiz MCP
+    participant P as MCP publisher connector
+    participant Z as 發布器 MCP 伺服器
 
     R->>API: POST /posts/{id}/approve
     API->>DB: PENDING_REVIEW → APPROVED（+ audit）
@@ -267,18 +267,18 @@ sequenceDiagram
     W->>W: ctx = WithPublishGrant(postID)
     W->>P: Publish(ctx, req)
     P->>P: guard.CheckPublish(ctx, postID)
-    P->>Z: integrationList → uploadFromUrlTool → integrationSchedulePostTool
+    P->>Z: list_accounts → create_upload（影片）→ create_post
     alt 成功
-        Z-->>P: postId
+        Z-->>P: id、results
         W->>DB: QUEUED → PUBLISHED、external_post_ids
-    else 失敗（含 Postiz 驗證錯誤）
+    else 失敗（含發布器拒收）
         W->>DB: QUEUED → FAILED、error_message
     end
 ```
 
 ### 5.3 防止重複發布
 
-發布前先取得租約（`lease_until`）。如果 worker 在發布途中掛掉、租約過期，下次啟動時該貼文會被標成 `FAILED`，並註明「可能已發出，重試前請先確認平台」，**不會自動重發**。因為我們無法得知 Postiz 是否已經收到，自動重試可能造成重複貼文。
+發布前先取得租約（`lease_until`）。如果 worker 在發布途中掛掉、租約過期，下次啟動時該貼文會被標成 `FAILED`，並註明「可能已發出，重試前請先確認平台」，**不會自動重發**。因為我們無法得知發布器是否已經收到，自動重試可能造成重複貼文。
 
 ### 5.4 簡單排程（Pipeline）
 
@@ -317,18 +317,15 @@ flowchart LR
     subgraph Host["單一主機（NAS / Home Lab / 本機 Docker）"]
         direction LR
         CF["cueflow<br/>127.0.0.1:3000"] --> CFDB[("cueflow-db<br/>postgres:17")]
-        CF -->|"http://postiz:5000/api/mcp"| PZ["postiz<br/>127.0.0.1:4007"]
-        PZ --> PZDB[("postiz-db")]
-        PZ --> RD[("postiz-redis")]
-        PZ --> TP["temporal"] --> TPDB[("temporal-db")]
+        CF --> SX["searxng<br/>127.0.0.1:8888"]
     end
-    PZ -->|"OAuth / 發布 API"| SNS["Threads · Instagram · X · LinkedIn"]
+    CF -->|"MCP（發布器約定）"| PUB["發布器 MCP 伺服器"] -->|"OAuth / 發布 API"| SNS["Threads · Instagram · YouTube"]
     CF -->|"HTTPS"| EXT["LLM API · 搜尋 · RSS · IMAP"]
 ```
 
 - `deploy/docker-compose.yml`：`cd deploy && docker compose up -d` 一次帶起全部服務，所有 port 都只綁 `127.0.0.1`。遠端存取建議用 SSH tunnel 或 Tailscale。
 - CueFlow 映像是 distroless、非 root，內建 `healthcheck` 子命令。
-- 開發或試用可用 `--profile mock` 啟動模擬的 Postiz MCP server。
+- 開發或試用可用 `--profile mock` 啟動一個不會真的發文的模擬發布器 MCP server。
 - 本機部署為**單實例**：程序內迴圈、程序內 cron。任務與發布的認領都用資料庫租約與 `SKIP LOCKED`，跑兩個實例不會重複處理，但 cron 會在每個實例各觸發一次。要跑多個實例請用下面的雲端模式。
 
 ### 8.1 雲端部署（Cloud Run + Cloud Tasks + Cloud Scheduler）

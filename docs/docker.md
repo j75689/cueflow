@@ -1,38 +1,36 @@
 # Running with Docker Compose
 
-`deploy/docker-compose.yml` starts CueFlow, its PostgreSQL, Postiz (with its own database and Redis) and
-SearXNG. Every port is bound to `127.0.0.1`.
+`deploy/docker-compose.yml` starts CueFlow, its PostgreSQL and SearXNG. Every port is bound to `127.0.0.1`.
+Publishing goes through an MCP server of your choice (or the bundled mock, below).
 
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
 cp .env.example .env
-# fill in CUEFLOW_SECRET_KEY (openssl rand -base64 32) and POSTIZ_JWT_SECRET (openssl rand -hex 32)
+# fill in CUEFLOW_SECRET_KEY (openssl rand -base64 32) and SEARXNG_SECRET (openssl rand -hex 32)
 docker compose up -d
 ```
 
 - CueFlow: <http://localhost:3000>
-- Postiz: <http://localhost:4007>
+- SearXNG: <http://localhost:8888>
 
 ## First setup
 
-1. **Postiz**: create an account, connect your Threads / Instagram / X channels, and copy the API key from
-   *Settings → Developers*.
-2. **CueFlow → Connectors**:
-   - *Postiz (MCP)* - endpoint `http://postiz:5000/api/mcp`, paste the API key, press **Test**.
-     Or *MCP publisher* - the endpoint of a server that follows the [publisher contract](publisher-mcp.md), with a
-     bearer token or secret headers (such as a Cloudflare Access service token); you then pick the Threads/Instagram
-     accounts for each post in the review editor.
+1. **CueFlow → Connectors**:
+   - *MCP publisher* - the endpoint of a server that follows the [publisher contract](publisher-mcp.md), with a
+     bearer token or secret headers (such as a Cloudflare Access service token), then press **Test**; you pick the
+     accounts for each post in the review editor. To try the flow without posting anywhere, use the
+     [mock publisher](#the-mock-publisher) below.
    - an LLM - e.g. *Anthropic Claude* (model `claude-opus-5-5`) or *OpenAI-compatible* pointing at Ollama.
    - one or more sources - e.g. an RSS feed.
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
-3. Either:
+2. Either:
    - **Command**: tell the agent team what you want, or
    - **Schedules**: run work on a timer. An *agent task* schedule opens a task for an agent each time
      (it researches, reads originals and decides); a *simple schedule* is a fixed collect → one LLM call →
      drafts flow (cron such as `0 8 * * *`, topic, platforms, instructions - see
      [prompt-templates.md](prompt-templates.md)). Press **Run now** to try one.
-4. **Review**: edit drafts, approve or reject. Approved posts are handed to Postiz within seconds; failures
-   show the reason and a **Retry** button.
+3. **Review**: edit drafts, pick the accounts, approve or reject. Approved posts are handed to the publisher
+   within seconds; failures show the reason and a **Retry** button.
 
 ## Image variants
 
@@ -49,15 +47,17 @@ started as `cueflow runner run`) is for [deploy/runner](../deploy/runner/README.
 The compose file includes SearXNG (set `SEARXNG_SECRET` in `deploy/.env`). Add a *SearXNG* connector with URL
 `http://searxng:8080`; agents without a search connector of their own use the first active one.
 
-## Try it without Postiz
+## The mock publisher
 
 ```bash
 cd deploy
-docker compose --profile mock up -d cueflow cueflow-db mock-postiz
+docker compose --profile mock up -d cueflow cueflow-db mock-publisher
 ```
 
-Create a *Postiz (MCP)* connector with endpoint `http://mock-postiz:4007/api/mcp` and API key `dev-key`.
-Received posts are listed at <http://localhost:4008/posts>.
+`mock-publisher` follows the publisher contract but posts nowhere. Create an *MCP publisher* connector with
+endpoint `http://mock-publisher:4010/mcp` and bearer token `dev-token`; it offers a Threads, an Instagram and a
+YouTube account plus a test-tagged one. Received posts are listed at <http://localhost:4010/posts>. Outside
+Docker, `make mock` runs the same server on `:4010`.
 
 ## Remote access
 
