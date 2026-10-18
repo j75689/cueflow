@@ -33,15 +33,8 @@
 
 ## Quick Start
 
-First decide where CueFlow itself runs. Everything after that is the same.
-
-| If you want… | Run CueFlow on | Guide |
-|---|---|---|
-| **To try it, or run it at home** (a NAS, a home lab, a laptop) | **Docker Compose**: outbound connections only, no public IP, domain or webhook | below |
-| **Always on, paying only for the minutes it works** | **Google Cloud Run** with Cloud Tasks and Cloud Scheduler, scaling to zero | [deploy/cloudrun](deploy/cloudrun/README.md) |
-| **To hack on it** | **From source**: Go, Node and a PostgreSQL in Docker | [CONTRIBUTING.md](CONTRIBUTING.md) |
-
-### Docker Compose
+Runs on any machine with Docker (a NAS, a home lab, a laptop). It only makes outbound connections: no public IP,
+domain or webhook needed.
 
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
@@ -66,6 +59,19 @@ CueFlow is at <http://localhost:3000> (every port is bound to `127.0.0.1`). Then
 
 Image variants (with Node and the ACP adapters for external agents), web search, remote access:
 [docs/docker.md](docs/docker.md). Back up `CUEFLOW_SECRET_KEY`: without it stored credentials are unreadable.
+
+### Google Cloud Run
+
+Always on, scaling to zero between jobs: Cloud Run for the server, Supabase for PostgreSQL, a Cloud Storage bucket
+for media, Cloud Tasks for background work and Cloud Scheduler as the one-minute clock. The guide walks through it:
+
+1. Publish the image (`image.yml` pushes `ghcr.io/<owner>/cueflow:main`).
+2. Create the Supabase database.
+3. Set up Google Cloud once: APIs, service account, bucket, queue, permissions.
+4. Store the secrets, deploy the service and the Scheduler tick.
+5. Optional: Cloudflare Access in front of the dashboard, backups.
+
+Full commands: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
 ---
 

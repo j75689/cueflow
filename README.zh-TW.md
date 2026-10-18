@@ -32,15 +32,7 @@
 
 ## 快速開始
 
-先決定 CueFlow 本身跑在哪裡，之後的用法都一樣。
-
-| 如果你想… | CueFlow 跑在 | 說明 |
-|---|---|---|
-| **先試試看，或在家裡跑**（NAS、Home Lab、筆電） | **Docker Compose**：只做主動連線，不需要 Public IP、網域或 Webhook | 見下方 |
-| **一直在線，但只為工作的時間付費** | **Google Cloud Run**，搭配 Cloud Tasks 與 Cloud Scheduler，沒工作時縮到零 | [deploy/cloudrun](deploy/cloudrun/README.md)（英文） |
-| **改程式碼** | **從原始碼跑**：Go、Node，PostgreSQL 用 Docker | [CONTRIBUTING.md](CONTRIBUTING.md)（英文） |
-
-### Docker Compose
+任何有 Docker 的機器都能跑（NAS、Home Lab、筆電）。它只做主動連線，不需要 Public IP、網域或 Webhook。
 
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
@@ -60,6 +52,18 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 > 想試社群發文流程又不想真的發出去，可以啟動內附的 mock 發布器（`docker compose --profile mock up -d`），再新增一個 *MCP publisher* connector，endpoint 填 `http://mock-publisher:4010/mcp`、token 填 `dev-token`。
 
 映像版本（含 Node 與外部 agent 用的 ACP adapter）、網頁搜尋、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
+
+### Google Cloud Run
+
+一直在線、沒工作時縮到零：伺服器跑在 Cloud Run，PostgreSQL 用 Supabase，媒體放 Cloud Storage bucket，背景工作走 Cloud Tasks，Cloud Scheduler 當每分鐘一次的時鐘。步驟：
+
+1. 發布映像（`image.yml` 會推 `ghcr.io/<owner>/cueflow:main`）。
+2. 建立 Supabase 資料庫。
+3. 一次性設定 Google Cloud：API、service account、bucket、佇列、權限。
+4. 存好機密，部署服務與 Scheduler tick。
+5. 選用：儀表板前面加 Cloudflare Access、備份。
+
+完整指令：[deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
 
 ---
 
