@@ -64,7 +64,6 @@ export default function SchedulesPage() {
   const schedules = useAsync(() => api.listSchedules(), []);
   useServerEvent("schedule.updated", () => void schedules.reload());
   const [editing, setEditing] = useState<Schedule | "new" | null>(null);
-  const [choosing, setChoosing] = useState(false);
 
   const toggle = async (s: Schedule, v: boolean) => {
     try {
@@ -110,7 +109,7 @@ export default function SchedulesPage() {
         title="Schedules"
         subtitle="Work that runs on a timer: each activation opens a task for an agent, who researches and decides."
         actions={
-          <Button variant="primary" onClick={() => setChoosing(true)}>
+          <Button variant="primary" onClick={() => setEditing("new")}>
             <Icon name="plus" className="h-4 w-4" /> New schedule
           </Button>
         }
@@ -140,7 +139,7 @@ export default function SchedulesPage() {
                 title="Agent tasks"
                 subtitle="Each run opens a task for an agent, which researches, decides and drafts. Uses more tokens."
               />
-              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              <ul className="divide-y divide-line">
                 {list.map((s) => {
                   const a = agentRef(agents.data, s.assignee_agent_id);
                   return (
@@ -154,7 +153,7 @@ export default function SchedulesPage() {
                       />
                       <AgentAvatar agent={a} size="sm" />
                       <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                           <button
                             onClick={() => setEditing(s)}
                             className="truncate hover:underline"
@@ -162,18 +161,18 @@ export default function SchedulesPage() {
                             {s.name || s.task_title}
                           </button>
                           {s.created_by === "agent" && (
-                            <Pill className="bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300">
+                            <Pill className="bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300">
                               created by agent
                             </Pill>
                           )}
                         </p>
-                        <p className="truncate text-xs text-zinc-500">
+                        <p className="truncate text-xs text-fg-3">
                           <code className="font-mono">{s.cron_expr}</code> (
                           {s.timezone}) → “{s.task_title}” for{" "}
                           {a?.name ?? "unassigned"}
                         </p>
                       </div>
-                      <div className="text-right text-xs text-zinc-500">
+                      <div className="text-right text-xs text-fg-3">
                         <p title={fmtTime(s.next_run_at)}>
                           {s.is_active && s.next_run_at
                             ? `next ${fmtRelative(s.next_run_at)}`
@@ -214,30 +213,6 @@ export default function SchedulesPage() {
         </div>
       )}
 
-      <Modal
-        open={choosing}
-        onClose={() => setChoosing(false)}
-        title="New schedule"
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            className="rounded-lg border border-zinc-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-zinc-700 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/5"
-            onClick={() => {
-              setChoosing(false);
-              setEditing("new");
-            }}
-          >
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Agent task
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Opens a task for an agent each time. It can search, read
-              originals, avoid repeats, add images and decide whether to post.
-              More tokens.
-            </p>
-          </button>
-        </div>
-      </Modal>
 
       <ScheduleModal
         open={editing !== null}

@@ -17,16 +17,18 @@ export { cx, inputBase };
 export { Select } from "./select";
 export { DateTimePicker } from "./date-time-picker";
 
-type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
+type Variant = "primary" | "secondary" | "danger" | "danger-soft" | "success" | "ghost";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-600/50 dark:bg-indigo-500 dark:hover:bg-indigo-400",
-  secondary:
-    "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800",
-  danger: "bg-red-600 text-white hover:bg-red-500 disabled:bg-red-600/50",
-  success: "bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-600/50",
-  ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+    "bg-accent-solid text-white shadow-card inset-ring inset-ring-white/10 hover:bg-accent-solid-hover disabled:bg-accent-solid/50",
+  secondary: "border border-line-strong bg-surface text-fg shadow-card hover:border-fg-4 hover:bg-subtle",
+  danger: "bg-red-600 text-white shadow-card hover:bg-red-500 disabled:bg-red-600/50",
+  // A destructive action that opens a confirmation, next to a primary one: quieter than danger.
+  "danger-soft":
+    "border border-red-300 bg-surface text-red-700 shadow-card hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10",
+  success: "bg-emerald-600 text-white shadow-card hover:bg-emerald-500 disabled:bg-emerald-600/50",
+  ghost: "text-fg-2 hover:bg-subtle hover:text-fg",
 };
 
 export const Button = forwardRef<
@@ -39,7 +41,7 @@ export const Button = forwardRef<
       type={rest.type ?? "button"}
       disabled={disabled || loading}
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:active:translate-y-0",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500",
         size === "sm" ? "h-7 px-2.5 text-xs" : "h-9 px-3.5 text-sm",
         variants[variant],
@@ -66,7 +68,7 @@ export function Card({ className, children }: { className?: string; children: Re
   return (
     <div
       className={cx(
-        "rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
+        "rounded-xl border border-line bg-surface shadow-card",
         className,
       )}
     >
@@ -77,10 +79,10 @@ export function Card({ className, children }: { className?: string; children: Re
 
 export function CardHeader({ title, actions, subtitle }: { title: ReactNode; actions?: ReactNode; subtitle?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
-        {subtitle && <p className="text-xs text-zinc-500">{subtitle}</p>}
+        <h2 className="text-sm font-semibold text-fg">{title}</h2>
+        {subtitle && <p className="text-xs text-fg-3">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -89,10 +91,10 @@ export function CardHeader({ title, actions, subtitle }: { title: ReactNode; act
 
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p>}
+        <h1 className="text-[22px] leading-7 font-semibold tracking-tight text-balance text-fg">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-3xl text-sm text-fg-3">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -129,7 +131,7 @@ export function Field({
 }) {
   return (
     <label className={cx("block", className)}>
-      <span className="mb-1 flex items-center justify-between gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+      <span className="mb-1 flex items-center justify-between gap-2 text-xs font-medium text-fg-2">
         <span>
           {label}
           {required && <span className="ml-0.5 text-red-500">*</span>}
@@ -137,7 +139,7 @@ export function Field({
         {right}
       </span>
       {children}
-      {help && <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-500">{help}</span>}
+      {help && <span className="mt-1 block text-xs text-fg-3">{help}</span>}
     </label>
   );
 }
@@ -160,12 +162,12 @@ export function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="inline-flex items-center gap-2 text-sm text-zinc-700 disabled:opacity-50 dark:text-zinc-300"
+      className="inline-flex items-center gap-2 text-sm text-fg-2 disabled:opacity-50"
     >
       <span
         className={cx(
           "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
-          checked ? "bg-indigo-600 dark:bg-indigo-500" : "bg-zinc-300 dark:bg-zinc-700",
+          checked ? "bg-accent-solid" : "bg-line-strong",
         )}
       >
         <span
@@ -192,13 +194,13 @@ export function Checkbox({
   disabled?: boolean;
 }) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+    <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-fg-2">
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 rounded border-zinc-300 text-indigo-600 accent-indigo-600 dark:border-zinc-600"
+        className="h-4 w-4 rounded border-line-strong text-accent accent-accent-solid"
       />
       {label}
     </label>
@@ -287,7 +289,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/50 p-0 backdrop-blur-[1px] sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onMouseDown={onClose}
     >
       <div
@@ -300,23 +302,23 @@ export function Modal({
         tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
         className={cx(
-          "max-h-[90vh] w-full overflow-auto rounded-t-xl border border-zinc-200 bg-white shadow-xl outline-none sm:rounded-xl dark:border-zinc-800 dark:bg-zinc-900",
+          "max-h-[90vh] w-full overflow-auto rounded-t-2xl border border-line bg-surface shadow-pop outline-none sm:rounded-xl",
           wide ? "sm:max-w-3xl" : "sm:max-w-md",
         )}
       >
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <h3 id={titleId} className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h3 id={titleId} className="text-sm font-semibold text-fg">
             {title}
           </h3>
           {!hideClose && (
-            <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Close">
+            <button onClick={onClose} className="rounded p-1 text-fg-3 hover:bg-subtle" aria-label="Close">
               <Icon name="x" className="h-4 w-4" />
             </button>
           )}
         </div>
         <div className="px-4 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">{footer}</div>
+          <div className="flex justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>
         )}
       </div>
     </div>
@@ -326,8 +328,8 @@ export function Modal({
 export function EmptyState({ title, hint, action }: { title: ReactNode; hint?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{title}</p>
-      {hint && <p className="max-w-sm text-xs text-zinc-500">{hint}</p>}
+      <p className="text-sm font-medium text-fg-2">{title}</p>
+      {hint && <p className="max-w-sm text-xs text-fg-3">{hint}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   );
@@ -348,7 +350,7 @@ export function ErrorBox({ children, onRetry }: { children: ReactNode; onRetry?:
 
 export function Loading({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-8 text-sm text-zinc-500">
+    <div className="flex items-center gap-2 px-4 py-8 text-sm text-fg-3">
       <Spinner /> {label}
     </div>
   );
@@ -358,8 +360,8 @@ export function Pill({ children, className }: { children: ReactNode; className?:
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap",
-        className ?? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[11px] font-medium leading-none whitespace-nowrap inset-ring inset-ring-current/10",
+        className ?? "bg-subtle text-fg-2",
       )}
     >
       {children}

@@ -215,12 +215,12 @@ export function Select({
           // A width utility from the call site (e.g. w-10) must win over the base w-full.
           className && /(^|\s)w-/.test(className) ? inputBase.replace("w-full ", "") : inputBase,
           "flex h-9 items-center gap-2 pr-2 text-left disabled:cursor-not-allowed",
-          open && "border-indigo-500 ring-2 ring-indigo-500/20",
+          open && "border-indigo-500 ring-2 ring-accent-solid/20",
           className,
         )}
       >
-        <span className={cx("min-w-0 flex-1 truncate", !selected && "text-zinc-400 dark:text-zinc-600")}>{label}</span>
-        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className={cx("h-4 w-4 shrink-0 text-zinc-400 transition-transform", open && "rotate-180")}>
+        <span className={cx("min-w-0 flex-1 truncate", !selected && "text-fg-4")}>{label}</span>
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className={cx("h-4 w-4 shrink-0 text-fg-4 transition-transform", open && "rotate-180")}>
           <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
         </svg>
       </button>
@@ -228,7 +228,7 @@ export function Select({
         {(maxHeight) => (
           <div className="flex flex-col" style={{ maxHeight }}>
             {showSearch && (
-              <div className="border-b border-zinc-100 p-1.5 dark:border-zinc-800">
+              <div className="border-b border-line p-1.5">
                 <input
                   ref={searchRef}
                   value={query}
@@ -238,7 +238,7 @@ export function Select({
                   aria-label="Filter options"
                   aria-controls={listId}
                   aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-                  className="h-8 w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  className="h-8 w-full rounded-md border border-line bg-canvas px-2 text-sm text-fg placeholder:text-fg-4 focus:border-indigo-500 focus:outline-none"
                 />
               </div>
             )}
@@ -252,7 +252,7 @@ export function Select({
               onKeyDown={onListKey}
               className="min-h-0 flex-1 overflow-y-auto p-1 outline-none"
             >
-              {visible.length === 0 && <li className="px-2.5 py-2 text-sm text-zinc-500">No matches</li>}
+              {visible.length === 0 && <li className="px-2.5 py-2 text-sm text-fg-3">No matches</li>}
               {visible.map((o, i) => {
                 const isSel = o.value === current;
                 return (
@@ -267,14 +267,14 @@ export function Select({
                     onClick={() => choose(o)}
                     className={cx(
                       "flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-sm",
-                      i === active && !o.disabled && "bg-indigo-50 text-indigo-900 dark:bg-indigo-500/15 dark:text-indigo-100",
-                      i !== active && "text-zinc-800 dark:text-zinc-200",
+                      i === active && !o.disabled && "bg-accent-soft text-fg",
+                      i !== active && "text-fg",
                       o.disabled && "cursor-not-allowed opacity-40",
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{o.label || " "}</span>
                     {isSel && (
-                      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400">
+                      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-4 w-4 shrink-0 text-accent">
                         <path fillRule="evenodd" d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z" clipRule="evenodd" />
                       </svg>
                     )}

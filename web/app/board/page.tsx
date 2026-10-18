@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type DragEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentAvatar,
   AgentSelect,
@@ -25,24 +25,34 @@ interface Column {
   drop: TaskStatus | null;
   hint?: string;
   addable?: boolean;
+  // Status color of the column's dot, matching the task status badges.
+  dot: string;
 }
 
 const COLUMNS: Column[] = [
-  { key: "backlog", label: "Backlog", statuses: ["BACKLOG"], drop: "BACKLOG", addable: true },
-  { key: "todo", label: "To do", statuses: ["TODO"], drop: "TODO", addable: true, hint: "Assigned agents start automatically" },
-  { key: "progress", label: "In progress", statuses: ["IN_PROGRESS"], drop: null, hint: "Agents move tasks here" },
-  { key: "waiting", label: "Waiting", statuses: ["WAITING_HUMAN", "BLOCKED"], drop: null, hint: "Needs you, or waiting on subtasks" },
-  { key: "review", label: "Review", statuses: ["REVIEW"], drop: "REVIEW" },
-  { key: "done", label: "Done", statuses: ["DONE"], drop: "DONE" },
+  { key: "backlog", label: "Backlog", statuses: ["BACKLOG"], drop: "BACKLOG", addable: true, dot: "bg-fg-4" },
+  { key: "todo", label: "To do", statuses: ["TODO"], drop: "TODO", addable: true, hint: "Assigned agents start automatically", dot: "bg-sky-500" },
+  { key: "progress", label: "In progress", statuses: ["IN_PROGRESS"], drop: null, hint: "Agents move tasks here", dot: "bg-indigo-500" },
+  { key: "waiting", label: "Waiting", statuses: ["WAITING_HUMAN", "BLOCKED"], drop: null, hint: "Needs you, or waiting on subtasks", dot: "bg-amber-500" },
+  { key: "review", label: "Review", statuses: ["REVIEW"], drop: "REVIEW", dot: "bg-teal-500" },
+  { key: "done", label: "Done", statuses: ["DONE"], drop: "DONE", dot: "bg-emerald-500" },
 ];
-const CANCELED_COLUMN: Column = { key: "canceled", label: "Canceled", statuses: ["CANCELED"], drop: "CANCELED" };
+const CANCELED_COLUMN: Column = { key: "canceled", label: "Canceled", statuses: ["CANCELED"], drop: "CANCELED", dot: "bg-fg-4" };
 
 const DONE_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const STEP = 1024;
 
+// Cards a column shows before "Show more"; finished columns grow every day.
+const PAGE = 20;
+
 function sortTasks(a: Task, b: Task) {
   if (a.position !== b.position) return a.position - b.position;
   return a.created_at.localeCompare(b.created_at);
+}
+
+// Finished columns read like a log: most recently finished first.
+function sortFinished(a: Task, b: Task) {
+  return (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at);
 }
 
 export default function BoardPage() {
@@ -76,7 +86,10 @@ export default function BoardPage() {
 
   const byColumn = useMemo(() => {
     const m: Record<string, Task[]> = {};
-    for (const c of columns) m[c.key] = filtered.filter((t) => c.statuses.includes(t.status)).sort(sortTasks);
+    for (const c of columns) {
+      const finished = c.key === "done" || c.key === "canceled";
+      m[c.key] = filtered.filter((t) => c.statuses.includes(t.status)).sort(finished ? sortFinished : sortTasks);
+    }
     return m;
   }, [filtered, columns]);
 
@@ -86,6 +99,23 @@ export default function BoardPage() {
 
   const dragged = dragId ? (tasks.data?.items ?? []).find((t) => t.id === dragId) : undefined;
   const boardRef = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<Record<string, number>>({});
+
+  // From md up the board fills the rest of the window and each column scrolls on its own, so a long
+  // Done column doesn't stretch the page. Phones keep the normal page scroll.
+  const [boardHeight, setBoardHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const el = boardRef.current;
+      if (!el || !window.matchMedia("(min-width: 768px)").matches) return setBoardHeight(null);
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setBoardHeight(Math.max(360, window.innerHeight - top - 24));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // Re-measure when the board first renders and when the filter chips (one per agent) may wrap.
+  }, [tasks.data === undefined, showCanceled, agents.data?.length]);
 
   // Scroll the board sideways while a card is held near its left or right edge.
   function autoScroll(e: DragEvent) {
@@ -214,6 +244,7 @@ export default function BoardPage() {
           ref={boardRef}
           onDragOverCapture={autoScroll}
           className="-mx-4 flex flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+          style={boardHeight ? { height: boardHeight, flex: "none" } : undefined}
         >
           {columns.map((col) => {
             const list = byColumn[col.key] ?? [];
@@ -228,30 +259,31 @@ export default function BoardPage() {
                   if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setOver(null);
                 }}
                 className={cx(
-                  "flex min-w-[160px] max-w-[340px] flex-1 basis-0 flex-col rounded-lg border bg-zinc-50 transition-colors dark:bg-zinc-900/50",
+                  "flex min-w-[160px] max-w-[340px] flex-1 basis-0 flex-col rounded-xl border bg-sunken transition-colors",
                   dragId && droppable
                     ? isOver
-                      ? "border-indigo-400 bg-indigo-50/50 dark:border-indigo-500/60 dark:bg-indigo-500/5"
-                      : "border-dashed border-zinc-300 dark:border-zinc-700"
-                    : "border-zinc-200 dark:border-zinc-800",
+                      ? "border-accent-line bg-accent-soft"
+                      : "border-dashed border-line-strong"
+                    : "border-line",
                   dragId && !droppable && "opacity-60",
                 )}
               >
                 {/* Every column reserves the same rows (title, hint, add) so the lists start at one height. */}
                 <header className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
                   <div className="min-w-0 flex-1">
-                    <h2 className="flex h-6 items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                    <h2 className="flex h-6 items-center gap-2 text-[13px] font-semibold text-fg">
+                      <span className={cx("h-2 w-2 shrink-0 rounded-full", col.dot)} aria-hidden />
                       {col.label}
-                      <span className="rounded bg-zinc-200 px-1.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                      <span className="rounded-md bg-muted px-1.5 text-[11px] font-medium tabular-nums text-fg-2">
                         {list.length}
                       </span>
                     </h2>
-                    <p className="h-4 truncate text-[11px] leading-4 text-zinc-500">{col.hint ?? "\u00a0"}</p>
+                    <p className="h-4 truncate text-[11px] leading-4 text-fg-3">{col.hint ?? "\u00a0"}</p>
                   </div>
                   {col.addable && (
                     <button
                       onClick={() => setNewFor(col.drop)}
-                      className="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      className="rounded p-1 text-fg-3 hover:bg-muted hover:text-fg"
                       title={`Add to ${col.label}`}
                     >
                       <Icon name="plus" className="h-4 w-4" />
@@ -263,8 +295,8 @@ export default function BoardPage() {
                 ) : (
                   <div className="mx-2 mb-2 h-6" aria-hidden />
                 )}
-                <div className="flex min-h-[80px] flex-1 flex-col gap-2 px-2 pb-3">
-                  {list.map((t, i) => (
+                <div className="flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-3 md:min-h-0">
+                  {list.slice(0, shown[col.key] ?? PAGE).map((t, i) => (
                     <div key={t.id}>
                       {isOver && over?.index === i && dragId !== t.id && <DropLine />}
                       <TaskCard
@@ -285,8 +317,17 @@ export default function BoardPage() {
                     </div>
                   ))}
                   {isOver && over?.index === list.length && <DropLine />}
+                  {list.length > (shown[col.key] ?? PAGE) && (
+                    <button
+                      onClick={() => setShown({ ...shown, [col.key]: (shown[col.key] ?? PAGE) + PAGE })}
+                      className="rounded-md px-2 py-1.5 text-xs text-fg-3 hover:bg-subtle hover:text-fg"
+                    >
+                      Show {Math.min(PAGE, list.length - (shown[col.key] ?? PAGE))} more of{" "}
+                      {list.length - (shown[col.key] ?? PAGE)}
+                    </button>
+                  )}
                   {list.length === 0 && !isOver && (
-                    <p className="px-2 py-6 text-center text-xs text-zinc-400">
+                    <p className="px-2 py-6 text-center text-xs text-fg-4">
                       {col.key === "waiting" ? "Nothing waiting on you" : "No tasks"}
                     </p>
                   )}
@@ -319,8 +360,8 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
       className={cx(
         "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors",
         active
-          ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-indigo-500/50 dark:bg-indigo-500/10 dark:text-indigo-200"
-          : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800",
+          ? "border-accent-line bg-accent-soft text-accent"
+          : "border-line bg-surface text-fg-2 hover:bg-subtle",
       )}
     >
       {children}
@@ -355,16 +396,16 @@ function TaskCard({
       onKeyDown={(e) => e.key === "Enter" && onOpen()}
       tabIndex={0}
       className={cx(
-        "group cursor-pointer rounded-md border bg-white p-2.5 shadow-sm transition-all hover:border-zinc-300 hover:shadow focus-visible:outline-2 focus-visible:outline-indigo-500 dark:bg-zinc-900 dark:hover:border-zinc-600",
-        needsYou ? "border-amber-300 ring-1 ring-amber-200 dark:border-amber-600/60 dark:ring-amber-900/50" : "border-zinc-200 dark:border-zinc-800",
+        "group cursor-pointer rounded-lg border bg-surface p-2.5 shadow-card transition-[border-color,box-shadow,opacity] duration-150 hover:border-line-strong hover:shadow-pop focus-visible:outline-2 focus-visible:outline-accent-solid",
+        needsYou ? "border-amber-400/70 ring-2 ring-amber-400/15 dark:border-amber-500/50" : "border-line",
         dragging && "opacity-40",
       )}
     >
-      <div className="mb-1 flex items-center gap-2 text-[11px] text-zinc-500">
+      <div className="mb-1 flex items-center gap-2 text-[11px] text-fg-3">
         <span className="font-mono">#{t.number}</span>
-        <PriorityDot priority={t.priority} />
+        {(t.priority === "high" || t.priority === "urgent") && <PriorityDot priority={t.priority} withLabel />}
         {t.running && (
-          <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+          <span className="inline-flex items-center gap-1 text-accent">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500" />
@@ -376,7 +417,7 @@ function TaskCard({
         {t.status === "BLOCKED" && <span className="text-violet-600 dark:text-violet-400">{TASK_STATUS_LABEL.BLOCKED.toLowerCase()}</span>}
         {t.parent_id && <span title="Subtask">↳</span>}
       </div>
-      <p className="line-clamp-3 text-sm leading-snug text-zinc-900 dark:text-zinc-100">{t.title}</p>
+      <p className="line-clamp-3 text-sm leading-snug text-fg">{t.title}</p>
       {(t.labels?.length ?? 0) > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {t.labels!.slice(0, 4).map((l) => (
@@ -385,11 +426,11 @@ function TaskCard({
         </div>
       )}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <span className="flex max-w-full items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="flex max-w-full items-center gap-1.5 text-xs text-fg-2">
           <AgentAvatar agent={t.assignee} size="xs" />
           <span className="truncate">{t.assignee?.name ?? "Unassigned"}</span>
         </span>
-        <span className="flex shrink-0 items-center gap-2 text-[11px] text-zinc-500">
+        <span className="flex shrink-0 items-center gap-2 text-[11px] text-fg-3">
           {sub && sub.total > 0 && (
             <span title="Subtasks done" className="inline-flex items-center gap-1">
               <Icon name="list" className="h-3 w-3" />
@@ -414,7 +455,7 @@ function InlineAdd({ status, agents, onCreated }: { status: TaskStatus; agents: 
     return (
       <button
         onClick={() => setOpen(true)}
-        className="mx-2 mb-2 h-6 rounded-md px-2 text-left text-xs leading-6 text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        className="mx-2 mb-2 h-6 rounded-md px-2 text-left text-xs leading-6 text-fg-3 hover:bg-subtle hover:text-fg"
       >
         + Add task
       </button>
@@ -435,7 +476,7 @@ function InlineAdd({ status, agents, onCreated }: { status: TaskStatus; agents: 
   };
   return (
     <form
-      className="mx-2 mb-2 space-y-1.5 rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900"
+      className="mx-2 mb-2 space-y-1.5 rounded-md border border-line bg-surface p-2"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();

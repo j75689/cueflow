@@ -116,15 +116,15 @@ export function OrgSwitcher() {
       <button
         ref={ref}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-left text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/60"
+        className="flex w-full items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-left text-sm hover:bg-subtle"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-zinc-900 text-[10px] font-semibold text-white uppercase dark:bg-zinc-100 dark:text-zinc-900">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-inverse text-[10px] font-semibold text-on-inverse uppercase">
           {(org?.name ?? "?").slice(0, 1)}
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-zinc-900 dark:text-zinc-100">{org?.name ?? "…"}</span>
-        <Icon name="down" className="h-3.5 w-3.5 text-zinc-400" />
+        <span className="min-w-0 flex-1 truncate font-medium text-fg">{org?.name ?? "…"}</span>
+        <Icon name="down" className="h-3.5 w-3.5 text-fg-4" />
       </button>
       <Popover open={open} anchorRef={ref} onClose={() => setOpen(false)} minWidth={208} label="Orgs">
         {(maxHeight) => (
@@ -139,21 +139,21 @@ export function OrgSwitcher() {
                   setOrg(o.id);
                 }}
                 className={cx(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                  o.id === org?.id && "font-medium text-indigo-700 dark:text-indigo-300",
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-subtle",
+                  o.id === org?.id && "font-medium text-accent",
                 )}
               >
                 <span className="min-w-0 flex-1 truncate">{o.name}</span>
                 {o.id === org?.id && <Icon name="check" className="h-3.5 w-3.5" />}
               </button>
             ))}
-            <div className="my-1 border-t border-zinc-200 dark:border-zinc-800" />
+            <div className="my-1 border-t border-line" />
             <button
               onClick={() => {
                 setOpen(false);
                 setManage(true);
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg-2 hover:bg-subtle"
             >
               <Icon name="edit" className="h-3.5 w-3.5" /> Manage orgs
             </button>
@@ -220,17 +220,17 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Modal open={open} onClose={onClose} title="Orgs">
       <div className="space-y-4">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-fg-2">
           Each org has its own agents, board, schedules, deliverables and runs. Connectors and usage are shared.
         </p>
-        <ul className="divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+        <ul className="divide-y divide-line rounded-md border border-line">
           {orgs.map((o, i) => (
             <li key={o.id} className="flex items-center gap-2 px-3 py-2 text-sm">
               <span className="min-w-0 flex-1">
-                <span className="font-medium text-zinc-900 dark:text-zinc-100">{o.name}</span>
-                <span className="ml-2 font-mono text-xs text-zinc-500">{o.slug}</span>
-                {i === 0 && <span className="ml-2 text-xs text-zinc-500">default</span>}
-                {o.id === org?.id && <span className="ml-2 text-xs text-indigo-600 dark:text-indigo-400">current</span>}
+                <span className="font-medium text-fg">{o.name}</span>
+                <span className="ml-2 font-mono text-xs text-fg-3">{o.slug}</span>
+                {i === 0 && <span className="ml-2 text-xs text-fg-3">default</span>}
+                {o.id === org?.id && <span className="ml-2 text-xs text-accent">current</span>}
               </span>
               <Button size="sm" variant="ghost" onClick={() => rename(o)} aria-label={`Rename ${o.name}`}>
                 <Icon name="edit" className="h-3.5 w-3.5" />

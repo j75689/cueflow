@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { HealthDot, KIND_LABEL, KIND_ORDER } from "@/components/badges";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
-import { Button, Card, CardHeader, EmptyState, ErrorBox, Icon, Loading, PageHeader, Pill, Toggle } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, Icon, Loading, PageHeader, Pill, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtRelative, fmtTime } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
@@ -98,23 +98,23 @@ export default function ConnectorsPage() {
                 }
               />
               {!grouped[kind]?.length ? (
-                <EmptyState title="None configured" />
+                <p className="px-4 py-3 text-sm text-fg-3">None configured</p>
               ) : (
-                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <ul className="divide-y divide-line">
                   {grouped[kind].map((c) => (
                     <li key={c.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <HealthDot status={c.last_status} />
                       <div className="min-w-0 flex-1">
                         <Link
                           href={`/connectors/edit/?id=${c.id}`}
-                          className="text-sm font-medium text-zinc-900 hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
+                          className="text-sm font-medium text-fg hover:text-accent"
                         >
                           {c.name}
                         </Link>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-fg-3">
                           <Pill>{specName[c.type] ?? c.type}</Pill>
                           {connectorSummary(c) && (
-                            <span className="truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                            <span className="truncate font-mono text-[11px] text-fg-3">
                               {connectorSummary(c)}
                             </span>
                           )}

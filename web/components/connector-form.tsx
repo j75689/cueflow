@@ -214,7 +214,7 @@ export function ConnectorFields({
           <Wrapper key={f.key} className={wide ? "block md:col-span-2" : "block"}>
             <FieldLabel f={f} />
             {input}
-            {f.help && <span className="mt-1 block text-xs text-zinc-500">{f.help}</span>}
+            {f.help && <span className="mt-1 block text-xs text-fg-3">{f.help}</span>}
           </Wrapper>
         );
       })}
@@ -224,11 +224,11 @@ export function ConnectorFields({
 
 function FieldLabel({ f }: { f: FieldSpec }) {
   return (
-    <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+    <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-fg-2">
       {f.label}
       {f.required && <span className="text-red-500">*</span>}
       {f.secret && (
-        <span className="rounded bg-zinc-100 px-1 py-px text-[10px] font-normal text-zinc-500 dark:bg-zinc-800">
+        <span className="rounded bg-subtle px-1 py-px text-[10px] font-normal text-fg-3">
           encrypted
         </span>
       )}

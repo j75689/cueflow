@@ -218,7 +218,7 @@ function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions:
   return (
     <div>
       <div className="mb-2">
-        <Link href="/deliverables/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+        <Link href="/deliverables/" className="text-xs text-fg-3 hover:text-fg">
           ← Deliverables
         </Link>
       </div>
@@ -283,7 +283,7 @@ function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions:
               actions={actions}
               readOnly={false}
             />
-            {chosen?.description && <p className="mt-3 text-xs text-zinc-500">{chosen.description}</p>}
+            {chosen?.description && <p className="mt-3 text-xs text-fg-3">{chosen.description}</p>}
           </div>
         </Card>
       </div>
@@ -393,14 +393,14 @@ function DeliverableView() {
   return (
     <div>
       <div className="mb-2">
-        <Link href="/deliverables/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+        <Link href="/deliverables/" className="text-xs text-fg-3 hover:text-fg">
           ← Deliverables
         </Link>
       </div>
       <PageHeader
         title={
           <span className="flex flex-wrap items-center gap-2">
-            {d.title || <span className="text-zinc-400">Untitled</span>}
+            {d.title || <span className="text-fg-4">Untitled</span>}
             <StatusBadge status={d.status} />
           </span>
         }
@@ -412,7 +412,7 @@ function DeliverableView() {
             <span>{d.created_by === "system_agent" ? "by an agent" : "by a person"}</span>
             {d.task_id && (
               <Link
-                className="text-indigo-600 hover:underline dark:text-indigo-400"
+                className="text-accent hover:underline"
                 href={`/tasks/view/?id=${d.task_id}`}
               >
                 Task
@@ -441,7 +441,7 @@ function DeliverableView() {
               </Button>
             )}
             {allowed.has("REJECTED") && (
-              <Button variant="danger" onClick={() => setRejectOpen(true)} disabled={!!busy}>
+              <Button variant="danger-soft" onClick={() => setRejectOpen(true)} disabled={!!busy}>
                 Reject
               </Button>
             )}
@@ -547,7 +547,7 @@ function DeliverableView() {
           </div>
         )}
         {!editable && d.status !== "FAILED" && (
-          <p className="text-xs text-zinc-500">Content is read-only once an item leaves review.</p>
+          <p className="text-xs text-fg-3">Content is read-only once an item leaves review.</p>
         )}
       </div>
 
@@ -595,8 +595,8 @@ function DeliverableView() {
               />
               {resultEntries.length > 0 && (
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-medium text-zinc-500">What the action reported</div>
-                  <pre className="overflow-x-auto rounded bg-zinc-50 px-2 py-1 font-mono text-xs whitespace-pre-wrap dark:bg-zinc-800/60">
+                  <div className="mb-1 text-xs font-medium text-fg-3">What the action reported</div>
+                  <pre className="overflow-x-auto rounded bg-subtle px-2 py-1 font-mono text-xs whitespace-pre-wrap">
                     {JSON.stringify(d.result, null, 2)}
                   </pre>
                 </div>
@@ -606,7 +606,7 @@ function DeliverableView() {
           {kind?.description && (
             <Card>
               <CardHeader title={kind.name} />
-              <p className="px-4 pb-4 text-sm text-zinc-600 dark:text-zinc-400">{kind.description}</p>
+              <p className="px-4 pb-4 text-sm text-fg-2">{kind.description}</p>
             </Card>
           )}
           <Card>

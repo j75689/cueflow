@@ -54,7 +54,7 @@ function TypePicker({
     <div className="space-y-5">
       {kinds.map((k) => (
         <section key={k}>
-          <h2 className="mb-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+          <h2 className="mb-2 text-xs font-semibold tracking-wide text-fg-3 uppercase">
             {KIND_LABEL[k] ?? k}
           </h2>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -64,17 +64,17 @@ function TypePicker({
                 <button
                   key={s.type}
                   onClick={() => onPick(s)}
-                  className="rounded-lg border border-zinc-200 bg-white p-3.5 text-left transition hover:border-indigo-400 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-500"
+                  className="rounded-lg border border-line bg-surface p-3.5 text-left transition hover:border-accent-line hover:shadow-card"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    <span className="text-sm font-semibold text-fg">
                       {s.name}
                     </span>
-                    <span className="font-mono text-[10px] text-zinc-400">
+                    <span className="font-mono text-[10px] text-fg-4">
                       {s.type}
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
+                  <p className="mt-1 line-clamp-2 text-xs text-fg-3">
                     {s.description}
                   </p>
                 </button>
@@ -104,7 +104,7 @@ function TestPanel({ result }: { result: ConnectorTestResult | null }) {
         <div className="mt-0.5 break-words">{result.message}</div>
       )}
       {result.details && Object.keys(result.details).length > 0 && (
-        <pre className="mt-2 max-h-48 overflow-auto rounded bg-white/60 p-2 font-mono text-[11px] dark:bg-black/30">
+        <pre className="mt-2 max-h-48 overflow-auto rounded bg-canvas p-2 font-mono text-[11px]">
           {JSON.stringify(result.details, null, 2)}
         </pre>
       )}
@@ -145,30 +145,30 @@ function ToolsPanel({ id }: { id: string }) {
         </div>
       )}
       {tools && tools.length === 0 && (
-        <p className="px-4 py-4 text-sm text-zinc-500">
+        <p className="px-4 py-4 text-sm text-fg-3">
           The server exposes no tools.
         </p>
       )}
       {tools && tools.length > 0 && (
-        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <ul className="divide-y divide-line">
           {tools.map((t) => (
             <li key={t.name} className="px-4 py-2.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                <span className="font-mono text-xs font-semibold text-fg">
                   {t.name}
                 </span>
                 {t.agent_allowed ? (
-                  <Pill className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  <Pill className="bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300">
                     agent allowed
                   </Pill>
                 ) : (
-                  <Pill className="bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  <Pill className="bg-muted text-fg-2">
                     worker only{t.reason ? ` · ${t.reason}` : ""}
                   </Pill>
                 )}
               </div>
               {t.description && (
-                <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
+                <p className="mt-0.5 line-clamp-2 text-xs text-fg-3">
                   {t.description}
                 </p>
               )}
@@ -267,28 +267,28 @@ function ToolPermissionsPanel({ id }: { id: string }) {
       )}
       {data.loading && !data.data && <Loading />}
       {data.data && tools.length === 0 && (
-        <p className="px-4 py-4 text-sm text-zinc-500">
+        <p className="px-4 py-4 text-sm text-fg-3">
           The server exposes no tools.
         </p>
       )}
       {tools.length > 0 && (
-        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <ul className="divide-y divide-line">
           {tools.map((t) => {
             const p = perms[t.name] ?? t.permission;
             return (
               <li key={t.name} className="flex items-start gap-3 px-4 py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                    <span className="font-mono text-xs font-semibold text-fg">
                       {t.name}
                     </span>
                     {t.read_only && (
-                      <Pill className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      <Pill className="bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300">
                         read-only
                       </Pill>
                     )}
                     {t.risky && (
-                      <Pill className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                      <Pill className="bg-red-500/10 text-red-700 dark:bg-red-400/10 dark:text-red-300">
                         risky
                       </Pill>
                     )}
@@ -299,7 +299,7 @@ function ToolPermissionsPanel({ id }: { id: string }) {
                     )}
                   </div>
                   {t.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
+                    <p className="mt-0.5 line-clamp-2 text-xs text-fg-3">
                       {t.description}
                     </p>
                   )}
@@ -351,7 +351,7 @@ function ItemsPanel({ id }: { id: string }) {
     <Card>
       <CardHeader
         title="Collected items"
-        subtitle="Newest first. Consumed items were already used by a simple schedule run."
+        subtitle="Newest first. Consumed items were already used by an earlier run."
         actions={
           <Button size="sm" onClick={fetchNow} loading={busy}>
             <Icon name="refresh" className="h-3.5 w-3.5" /> Fetch now
@@ -365,11 +365,11 @@ function ItemsPanel({ id }: { id: string }) {
       )}
       {items.loading && !items.data && <Loading />}
       {items.data?.length === 0 && (
-        <p className="px-4 py-4 text-sm text-zinc-500">
+        <p className="px-4 py-4 text-sm text-fg-3">
           Nothing collected yet.
         </p>
       )}
-      <ul className="max-h-[520px] divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
+      <ul className="max-h-[520px] divide-y divide-line overflow-y-auto">
         {(items.data ?? []).map((it) => (
           <li key={it.id} className="px-4 py-2.5">
             <div className="flex items-start justify-between gap-2">
@@ -378,31 +378,31 @@ function ItemsPanel({ id }: { id: string }) {
                   href={it.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="line-clamp-2 text-sm font-medium text-zinc-800 hover:text-indigo-600 dark:text-zinc-200 dark:hover:text-indigo-400"
+                  className="line-clamp-2 text-sm font-medium text-fg hover:text-accent"
                 >
                   {it.title || it.url}
                 </a>
               ) : (
-                <span className="line-clamp-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                <span className="line-clamp-2 text-sm font-medium text-fg">
                   {it.title || it.external_id}
                 </span>
               )}
               {it.consumed_at ? (
                 <Pill>used</Pill>
               ) : (
-                <Pill className="bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                <Pill className="bg-sky-500/10 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300">
                   new
                 </Pill>
               )}
             </div>
-            <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-zinc-500">
+            <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-fg-3">
               {it.author && <span>{it.author}</span>}
               <span title={fmtTime(it.published_at ?? it.fetched_at)}>
                 {fmtRelative(it.published_at ?? it.fetched_at)}
               </span>
             </div>
             {it.content && (
-              <p className="mt-1 line-clamp-2 text-xs text-zinc-600 dark:text-zinc-400">
+              <p className="mt-1 line-clamp-2 text-xs text-fg-2">
                 {it.content}
               </p>
             )}
@@ -550,7 +550,7 @@ function ConnectorEdit() {
       <div className="mb-2">
         <Link
           href="/connectors/"
-          className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+          className="text-xs text-fg-3 hover:text-fg"
         >
           ← Connectors
         </Link>
@@ -664,7 +664,7 @@ function ConnectorEdit() {
                   }
                 />
                 {missing.length > 0 && (
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-fg-3">
                     Required: {missing.join(", ")}
                   </p>
                 )}
@@ -686,7 +686,7 @@ function ConnectorEdit() {
             {isNew && (
               <Card>
                 <CardHeader title="About secrets" />
-                <p className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                <p className="px-4 py-3 text-sm text-fg-2">
                   Fields marked <em>encrypted</em> are sealed with AES-256-GCM
                   before they reach the database and are never sent back to the
                   browser. You can test the connection after creating it.

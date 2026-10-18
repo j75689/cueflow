@@ -47,9 +47,9 @@ export default function UsagePage() {
     <div className="space-y-6">
       <PageHeader
         title="Usage"
-        subtitle={`Token usage across agent tasks and simple schedules${tz ? ` · days in ${tz}` : ""}`}
+        subtitle={`Token usage across agent tasks${tz ? ` · days in ${tz}` : ""}`}
         actions={
-          <div role="group" aria-label="Period" className="inline-flex rounded-lg border border-zinc-200 bg-white p-0.5 dark:border-zinc-700 dark:bg-zinc-900">
+          <div role="group" aria-label="Period" className="inline-flex rounded-lg border border-line bg-surface p-0.5">
             {PERIODS.map((p) => (
               <button
                 key={p}
@@ -59,8 +59,8 @@ export default function UsagePage() {
                 className={cx(
                   "rounded-md px-3 py-1 text-sm font-medium transition-colors",
                   days === p
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
+                    ? "bg-inverse text-on-inverse"
+                    : "text-fg-2 hover:text-fg",
                 )}
               >
                 {p}d
@@ -78,7 +78,7 @@ export default function UsagePage() {
         <Card>
           <EmptyState
             title="No runs in this period"
-            hint="Token usage appears here once agents work tasks or simple schedules run."
+            hint="Token usage appears here once agents work tasks."
           />
         </Card>
       ) : (
@@ -96,30 +96,30 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile label="Total tokens">
           <Num value={tokens} className="text-2xl font-semibold" />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-fg-3">
             <Num value={t.input_tokens} /> input · <Num value={t.output_tokens} /> output
           </p>
         </Tile>
         <Tile label="Runs">
           <Num value={t.runs} className="text-2xl font-semibold" />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-fg-3">
             {t.failed_runs > 0 ? `${exactFmt.format(t.failed_runs)} failed` : "none failed"}
           </p>
         </Tile>
         <Tile label="Tool calls">
           <Num value={t.tool_calls} className="text-2xl font-semibold" />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-fg-3">
             {t.runs > 0 ? `${(t.tool_calls / t.runs).toFixed(1)} per run` : "—"}
           </p>
         </Tile>
         <Tile label="Avg tokens / run">
           <Num value={t.runs > 0 ? Math.round(tokens / Math.max(1, t.runs - t.unreported_runs)) : 0} className="text-2xl font-semibold" />
-          <p className="mt-1 text-xs text-zinc-500">last {days} days</p>
+          <p className="mt-1 text-xs text-fg-3">last {days} days</p>
         </Tile>
       </div>
 
       {t.unreported_runs > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+        <p className="flex items-start gap-2 rounded-lg border border-line bg-sunken px-3 py-2 text-xs text-fg-2">
           <Icon name="warn" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             {exactFmt.format(t.unreported_runs)} of {exactFmt.format(t.runs)} runs did not report token usage (for
@@ -144,7 +144,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
               label: (
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className={cx("truncate", !m.connector_name && "italic text-zinc-500")}>
+                    <span className={cx("truncate", !m.connector_name && "italic text-fg-3")}>
                       {m.connector_name ||
                         (m.connector_id ? (
                           "(deleted connector)"
@@ -156,7 +156,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
                     </span>
                     <Pill>{m.runtime === "acp" ? "ACP" : "Built-in"}</Pill>
                   </div>
-                  {m.model && <div className="truncate font-mono text-[11px] text-zinc-500">{m.model}</div>}
+                  {m.model && <div className="truncate font-mono text-[11px] text-fg-3">{m.model}</div>}
                 </div>
               ),
               runs: m.runs,
@@ -172,7 +172,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
             rows={u.by_agent.map((a) => ({
               key: a.agent_id,
               label: (
-                <Link href={`/agents/edit/?id=${a.agent_id}`} className="flex min-w-0 items-center gap-2 hover:text-indigo-600 dark:hover:text-indigo-400">
+                <Link href={`/agents/edit/?id=${a.agent_id}`} className="flex min-w-0 items-center gap-2 hover:text-accent">
                   <AgentAvatar agent={a} size="xs" />
                   <span className="truncate">{a.name}</span>
                 </Link>
@@ -207,7 +207,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
             <ShareTable
               rows={u.by_source.map((s) => ({
                 key: s.source,
-                label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules" : s.source}</span>,
+                label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules (retired)" : s.source}</span>,
                 runs: s.runs,
                 input: s.input_tokens,
                 output: s.output_tokens,
@@ -220,27 +220,27 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
         <Card>
           <CardHeader title="Top tasks" subtitle="Most tokens in this period" />
           {u.top_tasks.length === 0 ? (
-            <p className="px-4 pb-4 text-sm text-zinc-500">No task runs in this period.</p>
+            <p className="px-4 pb-4 text-sm text-fg-3">No task runs in this period.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[360px] table-fixed text-sm">
                 <thead>
-                  <tr className="border-b border-zinc-100 text-left text-xs text-zinc-500 dark:border-zinc-800">
+                  <tr className="border-b border-line text-left text-xs text-fg-3">
                     <th className="px-4 py-2 font-medium">Task</th>
                     <th className="w-16 px-4 py-2 text-right font-medium">Runs</th>
                     <th className="w-20 px-4 py-2 text-right font-medium">Tokens</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <tbody className="divide-y divide-line">
                   {u.top_tasks.map((t) => (
                     <tr key={t.task_id}>
                       <td className="truncate px-4 py-2">
-                        <Link href={`/tasks/view/?id=${t.task_id}`} className="flex min-w-0 gap-1.5 hover:text-indigo-600 dark:hover:text-indigo-400">
-                          <span className="shrink-0 text-zinc-500">#{t.number}</span>
+                        <Link href={`/tasks/view/?id=${t.task_id}`} className="flex min-w-0 gap-1.5 hover:text-accent">
+                          <span className="shrink-0 text-fg-3">#{t.number}</span>
                           <span className="truncate">{t.title}</span>
                         </Link>
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{t.runs}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-fg-2">{t.runs}</td>
                       <td className="px-4 py-2 text-right">
                         <Num value={total(t)} />
                       </td>
@@ -259,8 +259,8 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <Card className="p-4">
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
-      <div className="mt-1 text-zinc-900 dark:text-zinc-100">{children}</div>
+      <p className="text-xs font-medium text-fg-3">{label}</p>
+      <div className="mt-1 text-fg">{children}</div>
     </Card>
   );
 }
@@ -274,13 +274,13 @@ interface ShareRow {
 }
 
 function ShareTable({ rows, empty, compact }: { rows: ShareRow[]; empty: string; compact?: boolean }) {
-  if (rows.length === 0) return <p className="px-4 pb-4 text-sm text-zinc-500">{empty}</p>;
+  if (rows.length === 0) return <p className="px-4 pb-4 text-sm text-fg-3">{empty}</p>;
   const sum = rows.reduce((acc, r) => acc + r.input + r.output, 0) || 1;
   return (
     <div className="overflow-x-auto">
       <table className={cx("w-full table-fixed text-sm", compact ? "min-w-[300px]" : "min-w-[520px]")}>
         <thead>
-          <tr className="border-b border-zinc-100 text-left text-xs text-zinc-500 dark:border-zinc-800">
+          <tr className="border-b border-line text-left text-xs text-fg-3">
             <th className="px-4 py-2 font-medium">Name</th>
             <th className="w-16 px-4 py-2 text-right font-medium">Runs</th>
             {!compact && <th className="w-20 px-4 py-2 text-right font-medium">Input</th>}
@@ -288,13 +288,13 @@ function ShareTable({ rows, empty, compact }: { rows: ShareRow[]; empty: string;
             <th className="w-36 px-4 py-2 font-medium">Share</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-line">
           {rows.map((r) => {
             const share = (r.input + r.output) / sum;
             return (
               <tr key={r.key} className="align-middle">
                 <td className="truncate px-4 py-2">{r.label}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{exactFmt.format(r.runs)}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-fg-2">{exactFmt.format(r.runs)}</td>
                 {!compact && (
                   <td className="px-4 py-2 text-right">
                     <Num value={r.input} />
@@ -307,10 +307,10 @@ function ShareTable({ rows, empty, compact }: { rows: ShareRow[]; empty: string;
                 )}
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-subtle">
                       <div className={cx("h-full rounded-full", SHARE)} style={{ width: `${Math.max(share * 100, share > 0 ? 2 : 0)}%` }} />
                     </div>
-                    <span className="w-10 text-right text-xs tabular-nums text-zinc-500">{Math.round(share * 100)}%</span>
+                    <span className="w-10 text-right text-xs tabular-nums text-fg-3">{Math.round(share * 100)}%</span>
                   </div>
                 </td>
               </tr>
@@ -345,7 +345,7 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-fg-2">
         <div className="flex items-center gap-4" aria-hidden="true">
           <span className="flex items-center gap-1.5">
             <span className={cx("h-2.5 w-2.5 rounded-sm", INPUT)} /> Input
@@ -357,7 +357,7 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
         <button
           type="button"
           onClick={() => setShowTable((v) => !v)}
-          className="text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100"
+          className="text-fg-3 underline-offset-2 hover:text-fg hover:underline"
         >
           {showTable ? "Show chart" : "Show table"}
         </button>
@@ -366,15 +366,15 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
       {showTable ? (
         <div className="max-h-80 overflow-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-white dark:bg-zinc-900">
-              <tr className="border-b border-zinc-100 text-left text-xs text-zinc-500 dark:border-zinc-800">
+            <thead className="sticky top-0 bg-surface">
+              <tr className="border-b border-line text-left text-xs text-fg-3">
                 <th className="py-2 font-medium">Date</th>
                 <th className="py-2 text-right font-medium">Runs</th>
                 <th className="py-2 text-right font-medium">Input</th>
                 <th className="py-2 text-right font-medium">Output</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            <tbody className="divide-y divide-line">
               {daily.map((d) => (
                 <tr key={d.date}>
                   <td className="py-1.5">{fmtDay(d.date, { year: "numeric", month: "short", day: "numeric" })}</td>
@@ -389,7 +389,7 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
       ) : (
         <div className="mt-2 flex gap-2">
           {/* y axis */}
-          <div className="relative h-48 w-10 shrink-0 text-right text-[10px] tabular-nums text-zinc-500">
+          <div className="relative h-48 w-10 shrink-0 text-right text-[10px] tabular-nums text-fg-3">
             {ticks.map((v) => (
               <span key={v} className="absolute right-0 translate-y-1/2" style={{ bottom: `${(v / max) * 100}%` }}>
                 {compactFmt.format(v)}
@@ -402,7 +402,7 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
               {ticks.map((v) => (
                 <div
                   key={v}
-                  className={cx("absolute inset-x-0 border-t", v === 0 ? "border-zinc-300 dark:border-zinc-700" : "border-dashed border-zinc-100 dark:border-zinc-800")}
+                  className={cx("absolute inset-x-0 border-t", v === 0 ? "border-line-strong" : "border-dashed border-line")}
                   style={{ bottom: `${(v / max) * 100}%` }}
                 />
               ))}
@@ -429,7 +429,7 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
                     onBlur={() => setHover(null)}
                     className={cx(
                       "group flex h-full min-w-0 flex-1 cursor-default flex-col justify-end rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-                      hover === i && "bg-zinc-100/70 dark:bg-zinc-800/50",
+                      hover === i && "bg-subtle",
                     )}
                   >
                     {/* output on top of input, 2px surface gap between segments, rounded data end */}
@@ -450,36 +450,36 @@ function DailyChart({ daily }: { daily: UsageDay[] }) {
             {/* tooltip */}
             {h && hover !== null && (
               <div
-                className="pointer-events-none absolute top-0 z-10 w-44 rounded-lg border border-zinc-200 bg-white p-2.5 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                className="pointer-events-none absolute top-0 z-10 w-44 rounded-lg border border-line bg-surface p-2.5 text-xs shadow-lg"
                 style={{
                   left: `clamp(0px, calc(${((hover + 0.5) / daily.length) * 100}% - 88px), calc(100% - 176px))`,
                 }}
               >
-                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                <p className="font-medium text-fg">
                   {fmtDay(h.date, { weekday: "short", month: "short", day: "numeric" })}
                 </p>
-                <dl className="mt-1.5 space-y-1 text-zinc-600 dark:text-zinc-400">
+                <dl className="mt-1.5 space-y-1 text-fg-2">
                   <div className="flex items-center justify-between gap-2">
                     <dt className="flex items-center gap-1.5">
                       <span className={cx("h-2 w-2 rounded-sm", INPUT)} /> Input
                     </dt>
-                    <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">{exactFmt.format(h.input_tokens)}</dd>
+                    <dd className="tabular-nums text-fg">{exactFmt.format(h.input_tokens)}</dd>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <dt className="flex items-center gap-1.5">
                       <span className={cx("h-2 w-2 rounded-sm", OUTPUT)} /> Output
                     </dt>
-                    <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">{exactFmt.format(h.output_tokens)}</dd>
+                    <dd className="tabular-nums text-fg">{exactFmt.format(h.output_tokens)}</dd>
                   </div>
-                  <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-1 dark:border-zinc-800">
+                  <div className="flex items-center justify-between gap-2 border-t border-line pt-1">
                     <dt>Runs</dt>
-                    <dd className="tabular-nums text-zinc-900 dark:text-zinc-100">{h.runs}</dd>
+                    <dd className="tabular-nums text-fg">{h.runs}</dd>
                   </div>
                 </dl>
               </div>
             )}
             {/* x labels */}
-            <div className="mt-1.5 flex text-[10px] text-zinc-500">
+            <div className="mt-1.5 flex text-[10px] text-fg-3">
               {daily.map((d, i) => (
                 <span key={d.date} className="min-w-0 flex-1 overflow-visible whitespace-nowrap text-center">
                   {i % labelEvery === 0 ? fmtDay(d.date, { month: "numeric", day: "numeric" }) : ""}

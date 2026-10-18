@@ -82,7 +82,7 @@ export default function RunnersPage() {
               hint="Add one, then run the command it shows on the machine that should do the work."
             />
           ) : (
-            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            <ul className="divide-y divide-line">
               {runners.data.map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <span
@@ -90,8 +90,8 @@ export default function RunnersPage() {
                     title={r.online ? "Online" : "Offline"}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{r.name}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+                    <div className="text-sm font-medium text-fg">{r.name}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
                       {r.labels.map((l) => (
                         <Pill key={l}>{l}</Pill>
                       ))}
@@ -188,11 +188,11 @@ function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
             Run this on the machine that should do the work (it needs the <code>cueflow</code> binary and the agent
             CLI, e.g. Claude Code). The token works once and expires {fmtRelative(reg.expires_at)}.
           </p>
-          <pre className="overflow-x-auto rounded-md bg-zinc-100 p-3 text-xs break-all whitespace-pre-wrap dark:bg-zinc-800">
+          <pre className="overflow-x-auto rounded-md bg-subtle p-3 text-xs break-all whitespace-pre-wrap">
             {reg.command}
           </pre>
           <p>Then start it with:</p>
-          <pre className="rounded-md bg-zinc-100 p-3 text-xs dark:bg-zinc-800">cueflow runner run</pre>
+          <pre className="rounded-md bg-subtle p-3 text-xs">cueflow runner run</pre>
           <Button
             size="sm"
             onClick={() => {
