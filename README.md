@@ -128,7 +128,6 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
   [Publisher MCP contract](docs/publisher-mcp.md)
 - [External agents, runners and MCP](docs/external-agents.md)
 - [Modules: deliverables, content, images and videos](docs/modules.md) · [Team templates](templates/README.md)
-- Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
 ---
 
