@@ -19,7 +19,7 @@ CLI, so use a runner instead.
 
 CueFlow serves an MCP endpoint at `/mcp` so an external agent (Claude Code, Codex, Cursor...) can run
 the board for you: list agents and tasks, create and assign tasks, comment (answering an agent that is
-waiting on you), move, start or stop tasks, and read the review queue. It cannot approve or publish posts;
+waiting on you), move, start or stop tasks, and list deliverables. It cannot approve or act on anything;
 that stays in the dashboard.
 
 Set `CUEFLOW_MCP_TOKEN` in `deploy/.env` (`openssl rand -hex 32`), restart, then for example:

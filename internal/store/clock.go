@@ -15,10 +15,10 @@ import (
 type NextFunc func(expr, tz string, t time.Time) (time.Time, error)
 
 // ClockTables are the tables ClaimDue may read: rows with cron_expr, timezone, is_active and
-// next_run_at columns. Modules append theirs (the content module adds "pipelines").
+// next_run_at columns. Modules append theirs.
 var ClockTables = []string{"schedules"}
 
-// ClaimDue is the external clock's heart: it returns the ids of active schedules or pipelines
+// ClaimDue is the external clock's heart: it returns the ids of active rows of a clock table
 // whose next_run_at has passed and moves each to its following activation, atomically, so that two
 // instances ticking at once fire a given activation once.
 //
@@ -159,12 +159,10 @@ func (s *Store) PurgeRunTokens(ctx context.Context) error {
 
 // FailAbandoned is the multi-instance counterpart of the start-up cleanups: it closes work whose
 // owner is evidently gone, judged by leases and ages instead of "everything running is stale".
-// A pipeline run past its 30-minute cap, an agent run whose task is no longer in progress, and a
-// runner job whose lease lapsed are all unowned.
+// An agent run whose task is no longer in progress and a runner job whose lease lapsed are both
+// unowned. Modules close their own work from their sweeps.
 func (s *Store) FailAbandoned(ctx context.Context) error {
 	stmts := []string{
-		`UPDATE pipeline_runs SET status='FAILED', error='interrupted (the worker stopped)', finished_at=NOW()
-			WHERE status='RUNNING' AND started_at < NOW() - INTERVAL '45 minutes'`,
 		`UPDATE agent_runs r SET status='FAILED', error='interrupted (the worker stopped)', finished_at=NOW()
 			FROM tasks t WHERE r.task_id=t.id AND r.status='RUNNING' AND r.runtime <> 'external'
 			AND t.status <> 'IN_PROGRESS' AND r.started_at < NOW() - INTERVAL '2 minutes'`,

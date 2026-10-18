@@ -21,8 +21,8 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | 發布 worker 的輪詢間隔 |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | 一次發布最長可以花多久，超過就視為當機 |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker 的輪詢間隔 |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | 對一件已核准 deliverable 的動作（發布貼文、執行 action connector）最長可以花多久，超過就視為 worker 當機 |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
 
@@ -40,7 +40,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 |---|---|---|
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
 | `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片存放位置：留空 = 資料庫、`file:///data/media` 或 `gcs://bucket/prefix`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
-| `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成貼文使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
+| `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成 deliverable 使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
 
 媒體如何儲存、提供與刪除，見 [media.md](media.md)。

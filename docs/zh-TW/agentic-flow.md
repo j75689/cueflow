@@ -23,7 +23,7 @@ flowchart LR
     Task -->|"指派"| Agent["Agent（角色）<br/>人設 + 能力 + LLM + 記憶"]
     Agent -->|"執行（Run）"| Tools["工具<br/>依能力開放"]
     Tools -->|"create_subtask"| Sub["子任務"] -->|"指派"| Mate["隊友 Agent"]
-    Tools -->|"create_post_draft"| Draft["草稿 → 審核佇列"]
+    Tools -->|"create_post_draft"| Draft["貼文 deliverable → 待審"]
     Tools -->|"schedule_task"| Sched["排程"] -->|"定時建立"| Task
     Agent -->|"對話串"| Thread["Thread<br/>訊息 / 工具呼叫 / 提問 / 結果"]
     Thread --> Human
@@ -45,10 +45,10 @@ flowchart LR
 
 | 角色 | slug | 能力 | 職責 |
 |---|---|---|---|
-| 🧭 Chief（總管，自動建立） | `chief` | planning, delegation, memory, research, sources, drafting | 對外窗口：理解需求、拆解、委派給你新增的 agent（沒有合適的就自己做）、設定排程、彙整回報；回合上限 16 |
+| 🧭 Chief（總管，自動建立） | `chief` | planning, delegation, memory, research, sources, post_deliverables, deliverables | 對外窗口：理解需求、拆解、委派給你新增的 agent（沒有合適的就自己做）、設定排程、彙整回報；回合上限 16 |
 | 🔎 Researcher（研究員，常見搭配） | `researcher` | research, sources, memory | 蒐集與查證資訊，產出附來源的重點摘要 |
-| ✍️ Writer（文案，常見搭配） | `writer` | drafting, imaging, research, sources, memory | 依平台風格寫草稿 |
-| 🧐 Editor（編輯，常見搭配） | `editor` | drafting, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
+| ✍️ Writer（文案，常見搭配） | `writer` | post_deliverables, imaging, research, sources, memory | 依平台風格寫草稿 |
+| 🧐 Editor（編輯，常見搭配） | `editor` | post_deliverables, memory | 檢查待審草稿的事實、語氣與規範並修稿（不能核准） |
 
 預設角色的名稱與 instructions 都是英文；agent 回覆與撰寫草稿使用的語言由各角色的 `language` 設定決定（預設英文 `en`）；想讓 agent 用繁體中文工作，把該角色的 Language 改成 `zh-TW` 即可。
 
@@ -63,10 +63,13 @@ flowchart LR
 | | `read_url` | 讀公開網頁（擋內網，見 §10） |
 | sources | `search_materials` | 搜尋 RSS / 信件已收集的素材（agent 勾選的來源，沒勾就是全部） |
 | | `fetch_sources` | 立刻從來源 connector 抓最新內容 |
-| drafting | `create_post_draft` | 為單一平台建立草稿（可帶 Threads 的 `topic`、`link` 連結卡、預定發布時間 `publish_at`，以及 `media_urls`，例如工具 render 出來的影片），直接進 `PENDING_REVIEW` |
-| | `list_posts` | 列出貼文與審核狀態 |
+| post_deliverables（UI 上叫 Drafting） | `create_post_draft` | 為單一平台建立一件 `post` deliverable（可帶 Threads 的 `topic`、`link` 連結卡、預定發布時間 `publish_at`，以及 `media_urls`，例如工具 render 出來的影片），直接進 `PENDING_REVIEW` |
+| | `list_posts` | 列出貼文 deliverable 與審核狀態 |
 | | `revise_draft` | 修改仍在 `DRAFT` / `PENDING_REVIEW` 的草稿（稽核紀錄記為 agent） |
 | imaging | `generate_image` | 用第一個啟用中的圖片生成 connector 生圖，並附到還能編輯的草稿上（預設用草稿的 `image_prompt`）。生圖要花錢，每次執行最多 2 張 |
+| deliverables | `create_deliverable` | 送出任一已註冊 kind 的 deliverable（預設 `document`）給人審核，直接進 `PENDING_REVIEW` |
+| | `list_deliverables` | 列出這個 org 的 deliverable 與狀態 |
+| | `revise_deliverable` | 修改仍在 `DRAFT` / `PENDING_REVIEW` 的項目（稽核紀錄記為 agent） |
 | delegation | `create_subtask` | 建立子任務並指派給隊友（立即開始） |
 | | `list_agents` | 列出可委派的隊友 |
 | | `wait_for_subtasks` | 暫停，等所有子任務完成後被喚醒（終止本次執行） |
@@ -113,7 +116,7 @@ stateDiagram-v2
 | `REVIEW` | 待確認 | Agent 完成，等人檢查成果 |
 | `DONE` / `CANCELED` | 完成 / 隱藏 | 結束 |
 
-和貼文狀態機不同，任務狀態對人是寬鬆的：看板上可以自由拖動（除了「進行中」）。嚴格的部分是 agent 結束時：只有在任務**仍是 `IN_PROGRESS`** 時才會套用新狀態（`SetTaskStatusIf`）；如果人在 agent 執行中把卡片拖走，agent 的結果會寫進對話串，但不會把卡片拉回去。
+和 deliverable 狀態機不同，任務狀態對人是寬鬆的：看板上可以自由拖動（除了「進行中」）。嚴格的部分是 agent 結束時：只有在任務**仍是 `IN_PROGRESS`** 時才會套用新狀態（`SetTaskStatusIf`）；如果人在 agent 執行中把卡片拖走，agent 的結果會寫進對話串，但不會把卡片拉回去。
 
 ## 6. 一次執行（Run）的生命週期
 
@@ -198,7 +201,7 @@ sequenceDiagram
     W->>W: create_post_draft → 草稿進審核佇列
     W-->>Chief: complete_task → #3 DONE
     Note over Chief: Run 3
-    Chief-->>H: complete_task → #1 REVIEW「草稿已送審，請到 Review 核准」
+    Chief-->>H: complete_task → #1 REVIEW「草稿已送審，請到 Deliverables 核准」
 ```
 
 規則：
@@ -219,7 +222,7 @@ sequenceDiagram
 | 留言以 `@slug` 開頭 | 先把任務轉給該 agent（正在執行的會被停止），再照上一列處理 |
 | 按「Stop」或把執行中的卡片拖走 | 取消該次執行的 context，LLM 呼叫中止，任務停在 `WAITING_HUMAN` 或你拖到的欄位 |
 | 改派給別的 agent | 正在執行的會被停止 |
-| 審核草稿 | Agent 產生的草稿與一般草稿一樣，在 Review 頁核准後才會交給發布器 |
+| 審核草稿 | Agent 產生的草稿與一般草稿一樣，在 Deliverables 頁核准後才會交給發布器 |
 
 ## 9. 排程
 
@@ -317,7 +320,7 @@ sequenceDiagram
 2. **Chief Run 1**：判斷這是週期性需求，但時間點不明確時會 `ask_human`；這裡已經說了 8 點，所以直接 `schedule_task`（`0 8 * * *`、`Asia/Taipei`，指派 Writer，描述寫清楚要蒐集前一天的 AI 新聞並寫草稿），再用 `remember` 記住「使用者偏好每天 8 點收 AI 新聞草稿」，最後 `complete_task` 回報設定了什麼。#1 → `REVIEW`。
 3. 隔天 08:00：排程建立任務 #2「整理 AI 新聞寫成 Threads 草稿 · 2026-10-05」，指派 Writer，自動開始。
 4. **Writer Run**：`fetch_sources` → `search_materials` → 需要時 `web_search` / `read_url` 查證 → `create_post_draft`（Threads，超過 500 字會自動拆成串文）→ `complete_task` 回報草稿 ID。#2 → `REVIEW`。
-5. 你在 Review 頁看到草稿，修改後核准 → 發布 worker 交給發布器發出。
+5. 你在 Deliverables 頁看到草稿，修改後核准 → deliverables worker 交給發布器發出。
 6. 想調整風格時，直接在 #2 留言「語氣再犀利一點，結尾加問題」，Writer 會重跑並用 `revise_draft` 修改尚未核准的草稿；或者用 `@editor 幫我檢查` 把任務轉給 Editor。
 
 ## 13. 已知限制與後續方向

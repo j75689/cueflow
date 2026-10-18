@@ -9,28 +9,27 @@
 
 | 原則 | 在架構上的落實 |
 |---|---|
-| **Human-in-the-loop First** | 所有貼文走嚴格狀態機；只有人能把貼文推到 `APPROVED`；發布器被包一層授權檢查，只有發布 worker 能對「已核准的那一篇」呼叫 |
+| **Human-in-the-loop First** | 每件 deliverable（貼文、文件……）都走嚴格狀態機；只有人能把它推到 `APPROVED`；發布器與 action connector 被包一層授權檢查，只有 deliverables worker 能對「已核准的那一件」呼叫 |
 | **Zero-Public-Exposure** | 全部採主動輪詢（RSS / IMAP / MCP 呼叫），不需要 Webhook；預設只綁 `127.0.0.1:3000` |
 | **Protocol-Driven** | 核心不依賴任何社群平台 SDK；發布透過 MCP 呼叫擁有平台帳號的發布器伺服器，而那個發布器本身只是一個 connector 插件 |
 | **一切皆插件** | 發布器、資料來源、搜尋、LLM、通知都是 connector，用同一套註冊／設定／加密機制 |
-| **單一程序、易部署** | Go 單一 binary（API + 排程 + 發布 worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL |
-| **可觀測、可稽核** | 貼文每次狀態變動與人工修改都寫入 `audit_logs`；agent 的每一步寫入任務對話串與 `agent_runs` |
+| **單一程序、易部署** | Go 單一 binary（API + 排程 + deliverables worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL |
+| **可觀測、可稽核** | deliverable 每次狀態變動與人工修改都寫入 `deliverable_audit_logs`；agent 的每一步寫入任務對話串與 `agent_runs` |
 
 ## 2. 系統全貌
 
 ```mermaid
 flowchart TB
     subgraph Browser["瀏覽器（localhost:3000）"]
-        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Runs · Usage · Connectors"]
+        UI["Dashboard<br/>Command · Board · Agents · Deliverables<br/>Schedules · Usage · Connectors · Runners"]
     end
 
     subgraph Core["CueFlow（單一 Go 程序）"]
         API["REST API + SSE<br/>internal/api"]
         Broker(("Event Broker<br/>internal/events"))
         Sched["Scheduler（cron）<br/>internal/scheduler"]
-        Pipe["Pipeline Runner<br/>internal/content/pipeline"]
         Crew["Agent Team Runner<br/>internal/crew"]
-        Disp["Dispatch Worker<br/>internal/content/dispatch"]
+        Deliv["Deliverables Worker<br/>internal/deliverable"]
         Hub["Connector Hub<br/>internal/hub"]
         Reg["Connector Registry<br/>internal/connector"]
         Guard{{"Publish Guard<br/>internal/guard"}}
@@ -45,6 +44,7 @@ flowchart TB
         LLM["llm: OpenAI 相容（OpenRouter · Azure）· Claude API · Bedrock · Vertex（Claude、Gemini）"]
         Notif["notifier: SMTP"]
         Pub["publisher: MCP publisher"]
+        Act["action: MCP action"]
     end
 
     Publisher["發布器 MCP 伺服器<br/>Threads · Instagram · YouTube"]
@@ -52,20 +52,17 @@ flowchart TB
     UI <-->|"JSON / SSE"| API
     API --> Store
     API --> Crew
-    API --> Disp
-    API --> Pipe
+    API --> Deliv
     Broker -->|"SSE 推播"| API
-    Sched -->|"cron 觸發"| Pipe
     Sched -->|"建立定時任務"| Crew
-    Pipe --> Hub
     Crew --> Hub
-    Disp --> Hub
+    Deliv --> Hub
     Hub --> Reg
-    Reg --> Src & Search & LLM & Notif & Pub
-    Pub -.->|"必須通過"| Guard
+    Reg --> Src & Search & LLM & Notif & Pub & Act
+    Pub & Act -.->|"必須通過"| Guard
     Pub -->|"JSON-RPC over HTTP"| Publisher
     Store --> DB
-    Pipe & Crew & Disp -->|"事件"| Broker
+    Crew & Deliv -->|"事件"| Broker
 ```
 
 ### 2.1 套件職責
@@ -87,8 +84,8 @@ flowchart TB
 | `internal/llm` | 工具迴圈共用、與供應商無關的對話型別；LLM connector 負責轉成各自的格式 |
 | `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶；模組用來登記能力與工具的註冊表 |
 | `internal/content` | 建在 deliverables 上的社群內容模組：`post` kind（平台規則當驗證、透過 publisher connector 發布當動作）、素材、發布器帳號與寫稿工具；透過 `api.Module` 與 crew 註冊表掛在核心上 |
-| `internal/deliverable` | Deliverables 模組：任何 agent 都能產出的有型別項目（kind 負責驗證 payload）、和貼文相同的審核狀態機與稽核紀錄，以及核准後在 grant 下執行 action connector 的 worker |
-| `internal/scheduler` | cron：產生定時任務，觸發模組登記的 cron 資料列與週期工作（pipeline、待審摘要） |
+| `internal/deliverable` | Deliverables 模組：任何 agent 都能產出的有型別項目（kind 負責驗證 payload）、一套附稽核紀錄的審核狀態機，以及核准後在 grant 下執行該 kind 自己的動作（貼文就是發布）或 action connector 的 worker |
+| `internal/scheduler` | cron：依排程建立任務，觸發模組登記的 cron 資料列與週期工作 |
 | `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |
 | `internal/jobs` | 背景工作請求（「跑這個任務」、「觸發這個排程」，加上模組登記的種類）：本機在程序內處理，雲端模式交給 Cloud Tasks（`internal/jobs/cloudtasks`） |
 | `internal/acpx` / `internal/acpdrive` | 以 stdio 啟動 ACP agent；在 CueFlow 的沙箱政策下讓它執行一次 prompt；伺服器與 Runner 共用 |
@@ -104,13 +101,12 @@ flowchart TB
 
 ### 2.2 背景迴圈
 
-一個 CueFlow 程序內同時跑四種背景工作，彼此只透過資料庫狀態溝通：
+一個 CueFlow 程序內同時跑三種背景工作，彼此只透過資料庫狀態溝通：
 
 | 迴圈 | 頻率 | 做什麼 |
 |---|---|---|
-| Scheduler | cron 表達式 | 觸發 pipeline run；依排程建立任務；（選用）寄待審摘要 |
-| Pipeline Runner | 被觸發時 | 一次完整的「收集 → 產生 → 待審」流程，單次上限 30 分鐘 |
-| Dispatch Worker | 每 3 秒，或核准後立即喚醒 | 把已核准貼文送去發布 |
+| Scheduler | cron 表達式 | 依排程建立任務；觸發模組登記的 cron 資料列與週期工作 |
+| Deliverables Worker | 每 3 秒（`CUEFLOW_DISPATCH_INTERVAL`），或核准／重試後立即喚醒 | 對已核准的 deliverable 執行動作：發布貼文、呼叫 action connector |
 | Crew（Agent Runner） | 每 2 秒，或有新任務時立即喚醒 | 認領 `TODO` 任務並讓 agent 執行，預設同時 3 個 |
 
 「喚醒」是非阻塞的 channel 通知，所以按下核准或指派任務後幾乎立刻開始處理；定時輪詢只是保險。
@@ -197,17 +193,15 @@ classDiagram
 ```mermaid
 erDiagram
     connectors ||--o{ source_items : "抓取"
-    connectors ||--o{ pipelines : "被引用（LLM / 搜尋 / 發布 / 通知）"
     connectors ||--o{ agents : "被引用（LLM / 搜尋 / 來源）"
-    pipelines ||--o{ pipeline_runs : "執行"
-    pipeline_runs ||--o{ posts : "產生"
-    posts ||--o{ audit_logs : "稽核"
+    connectors ||--o{ deliverables : "執行動作（發布器 / action）"
+    deliverables ||--o{ deliverable_audit_logs : "稽核"
     agents ||--o{ agent_memories : "記憶"
     agents ||--o{ tasks : "被指派"
     tasks ||--o{ tasks : "子任務"
     tasks ||--o{ task_messages : "對話串"
     tasks ||--o{ agent_runs : "執行紀錄"
-    tasks ||--o{ posts : "產生草稿"
+    tasks ||--o{ deliverables : "產出"
     schedules ||--o{ tasks : "定時建立"
     agents ||--o{ schedules : "被指派"
 ```
@@ -216,98 +210,98 @@ erDiagram
 |---|---|
 | `connectors` | 一般設定放 `config`（JSONB，可顯示）；機密欄位加密後放 `secrets`（BYTEA）；`state` 給插件存游標 |
 | `source_items` | `UNIQUE(connector_id, external_id)` 實現增量抓取（RSS 用 GUID、信件用 Message-ID）；`consumed_at` 避免同一則素材被重複寫文 |
-| `pipelines` / `pipeline_runs` | 排程內容管線與每次執行的統計、逐步 log |
-| `posts` | 狀態、串文分段、hashtag、媒體、`version`（樂觀鎖）、`lease_until`（發布租約）、`external_post_ids`、`task_id` / `run_id`（來源追溯） |
-| `audit_logs` | 每次狀態變動與修改（含前後差異）；`seq` 保證同一交易內的順序 |
+| `deliverables` | `kind`、JSON `payload`、狀態、`version`（樂觀鎖）、`lease_until` / `attempts`（動作租約）、`external_ids` / `result`（動作回傳的結果）、`action_connector_id`、`task_id`（來源追溯） |
+| `deliverable_audit_logs` | 每次狀態變動與修改（含 payload 差異） |
 | `agents` / `agent_memories` | 角色設定與長期記憶 |
 | `tasks` / `task_messages` / `agent_runs` | 看板任務、對話串、每次 agent 執行的回合數與 token 用量 |
 | `schedules` | 定時建立任務的 cron 設定 |
 
-Migration 檔在 `internal/db/migrations/`，啟動時自動套用。
+Migration 檔在 `internal/db/migrations/`，啟動時自動套用。`posts`、`pipelines`、`pipeline_runs`、`audit_logs` 是早期貼文流程留下的資料表：沒有任何程式讀寫，只保留用過那條路的安裝的歷史。
 
-## 5. 貼文生命週期與發布
+## 5. Deliverable 的生命週期與核准後的動作
+
+Deliverable 是 agent 產出、必須經人核准系統才會行動的任何東西：內容模組的 `post`，或內建的 `document`；每一種是一個 *kind*，各自驗證 payload。內容模組的貼文正是這套機制的原型。
 
 ### 5.1 狀態機
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFT: 手動建立 / agent 產生
-    DRAFT --> PENDING_REVIEW: 送審（產生後自動送審）
+    [*] --> DRAFT: 人手動建立
+    [*] --> PENDING_REVIEW: agent 送出
+    DRAFT --> PENDING_REVIEW: 送審
     PENDING_REVIEW --> APPROVED: 人工核准
     PENDING_REVIEW --> REJECTED: 人工退回（必填原因）
-    APPROVED --> QUEUED: 發布 worker 接手
-    QUEUED --> PUBLISHED: 發布器接受
-    QUEUED --> FAILED: 發布失敗 / worker 中途掛掉
+    APPROVED --> QUEUED: deliverables worker 接手
+    QUEUED --> DONE: 動作成功（或沒有東西要跑）
+    QUEUED --> FAILED: 動作失敗 / worker 中途掛掉
     FAILED --> QUEUED: 人工重試
     REJECTED --> [*]
-    PUBLISHED --> [*]
+    DONE --> [*]
 ```
 
-- 轉換規則只定義在 `internal/content/post.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
+- 轉換規則只定義在 `internal/deliverable/deliverable.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
 - 只有 `DRAFT` / `PENDING_REVIEW` 可以編輯，編輯需帶 `version`，版本不符回 `409`。
-- 每次轉換與稽核紀錄在**同一個交易**內寫入。
+- 每次轉換與稽核紀錄（`deliverable_audit_logs`）在**同一個交易**內寫入。
 
-### 5.2 發布流程
+### 5.2 核准之後會發生什麼
+
+核准結束審核，並啟動恰好一次動作，由 deliverables worker（`internal/deliverable/worker.go`）執行：
+
+| Kind | 核准後的動作 |
+|---|---|
+| `post` | 內容模組的 `Act`：透過項目上指定的發布器 connector（沒指定就用 org 第一個啟用的）發到編輯器裡勾選的帳號 |
+| `document`（以及任何沒有自己 `Act` 的 kind） | org 的 action connector（`mcp_action`，工具 `deliver`），項目上指定的或第一個啟用的；沒有 action connector 時，核准即 `DONE`：審核本身就是目的 |
 
 ```mermaid
 sequenceDiagram
     actor R as 審核者
     participant API
     participant DB as PostgreSQL
-    participant W as Dispatch Worker
-    participant P as MCP publisher connector
-    participant Z as 發布器 MCP 伺服器
+    participant W as Deliverables Worker
+    participant P as 發布器 / action connector
+    participant Z as MCP 伺服器
 
-    R->>API: POST /posts/{id}/approve
+    R->>API: POST /deliverables/{id}/approve
     API->>DB: PENDING_REVIEW → APPROVED（+ audit）
     API->>W: Wake()
     W->>DB: APPROVED → QUEUED（+ audit）
-    W->>DB: 認領：lease_until = now+5m、attempts+1（SKIP LOCKED）
-    W->>W: ctx = WithPublishGrant(postID)
-    W->>P: Publish(ctx, req)
-    P->>P: guard.CheckPublish(ctx, postID)
-    P->>Z: list_accounts → create_upload（影片）→ create_post
+    W->>DB: 認領：lease_until = now+10m、attempts+1（SKIP LOCKED）
+    W->>W: ctx = WithPublishGrant(deliverableID)
+    W->>P: Act / Publish(ctx, req)
+    P->>P: guard.CheckPublish(ctx, deliverableID)
+    P->>Z: list_accounts → create_upload → create_post，或 deliver
     alt 成功
-        Z-->>P: id、results
-        W->>DB: QUEUED → PUBLISHED、external_post_ids
-    else 失敗（含發布器拒收）
+        Z-->>P: 外部 id
+        W->>DB: QUEUED → DONE、external_ids、result
+    else 失敗（含伺服器拒收）
         W->>DB: QUEUED → FAILED、error_message
     end
 ```
 
-### 5.3 防止重複發布
+### 5.3 防止重複動作
 
-發布前先取得租約（`lease_until`）。如果 worker 在發布途中掛掉、租約過期，下次啟動時該貼文會被標成 `FAILED`，並註明「可能已發出，重試前請先確認平台」，**不會自動重發**。因為我們無法得知發布器是否已經收到，自動重試可能造成重複貼文。
+動作前先取得租約（`lease_until`，長度 `CUEFLOW_DISPATCH_LEASE`）。如果 worker 在動作途中掛掉、租約過期，下一次清理會把該項目標成 `FAILED`，並註明「動作可能已發生也可能沒有，重試前請先確認」，**不會自動重做**。因為我們無法得知發布器是否已經收到，自動重試可能造成重複貼文。由人在 Deliverables 頁重試（`FAILED → QUEUED`）。
 
-### 5.4 簡單排程（Pipeline）
+### 5.4 Agent 與 deliverable
 
-後台把 pipeline 顯示為 Schedules 頁上的**簡單排程**，和 agent 任務排程放在一起；API 與資料表仍沿用 `pipelines` 這個名稱。
-Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
-
-1. cron 觸發，以 `SELECT … FOR UPDATE` 加上「同一 pipeline 只能有一個 RUNNING」防止重疊執行。
-2. 對每個來源 connector 增量抓取，寫入 `source_items`（重複的自動略過）。
-3. 取回看回時間內、尚未用過的素材（上限 `max_items`）。
-4. `internal/content/pipeline` 的產生器只開放 `web_search` 與 `submit_drafts` 兩個工具，產出每個平台一篇草稿；超過字數的 Threads / X 內容會自動拆成串文。
-5. 存成 `PENDING_REVIEW` 貼文、標記素材已使用、寄出審核提醒信。
-
-需要「理解需求、拆解、委派、追問」的工作交給 agent 團隊；固定格式、每天產稿的工作用 pipeline 比較省、也比較穩定。
+Agent 永遠不核准、不發布。`post_deliverables` 能力（UI 上叫 Drafting）提供 `create_post_draft` / `list_posts` / `revise_draft`，寫的是 `post` deliverable；`deliverables` 能力提供通用的 create / list / revise，適用任何已註冊的 kind。兩者送出的項目都以 agent 的名義進 `PENDING_REVIEW`，任務卡片上會列出它產出的 deliverable。週期性產稿就是一般的排程：一個 cron 表達式，定時替 writer agent 建立任務（見 [agentic-flow.md](agentic-flow.md)）。
 
 ## 6. 安全模型
 
 | 威脅 | 防護 |
 |---|---|
-| LLM 幻覺或被 prompt injection 誘導直接發文 | Agent 能用的工具裡沒有任何發布工具；agent 的 context 帶有標記，`guardedPublisher` 會拒絕；發布必須帶有 dispatch worker 對**該篇貼文**授予的 grant |
+| LLM 幻覺或被 prompt injection 誘導直接發文 | Agent 能用的工具裡沒有任何發布工具；agent 的 context 帶有標記，`guardedPublisher` / `guardedActor` 會拒絕；發布或執行動作必須帶有 deliverables worker 對**該件 deliverable**授予的 grant |
 | 外部素材（RSS、網頁）夾帶指令 | 同上：最壞情況只會產生一篇待審草稿；所有 agent 行為寫入對話串可追溯 |
 | Agent 被誘導存取內網（SSRF） | `read_url` 在連線（dial）時檢查解析後的 IP，擋掉 loopback、私有網段、link-local（含雲端 metadata `169.254.169.254`）、CGNAT；重新導向也會重新檢查；不走系統 proxy |
 | 資料庫外洩導致金鑰外洩 | Connector 機密欄位以 AES-256-GCM 加密，associated data 綁定 connector ID（把密文搬到別列也解不開）；API 永遠不回傳機密值 |
 | 未授權存取控制台 | 預設只綁 localhost；可設 `CUEFLOW_ADMIN_TOKEN` 要求 Bearer token（以 constant-time 比對） |
-| 外部 agent 透過 MCP 操作看板 | 未設定 `CUEFLOW_MCP_TOKEN` 時 `/mcp` 不啟用；它能管理任務，但沒有任何核准或發布貼文的工具 |
+| 外部 agent 透過 MCP 操作看板 | 未設定 `CUEFLOW_MCP_TOKEN` 時 `/mcp` 不啟用；它能管理任務，但沒有任何核准或執行 deliverable 的工具 |
 | Agent 失控產生大量任務或費用 | 每次執行的回合數、子任務數、草稿數、委派深度都有上限；排程最密每 5 分鐘一次（詳見 agentic-flow.md） |
-| Worker 當機造成重複發布 | 租約機制，見 5.3 |
+| Worker 當機造成重複發布或重複動作 | 租約機制，見 5.3 |
 
 ## 7. 即時更新
 
-`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（貼文、任務、對話串、執行、connector、agent、排程）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
+`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（deliverable、任務、對話串、執行、connector、agent、排程、org、runner）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
 
 ## 8. 部署拓樸
 
@@ -333,17 +327,17 @@ flowchart LR
 
 ```
  Cloud Scheduler ── 每分鐘 ──► POST /internal/tick
-        認領到期的排程／pipeline／摘要（next_run_at）、清理被遺棄的工作、補送等待中的工作
+        認領到期的排程與模組登記的 cron 列（next_run_at）、清理被遺棄的工作、補送等待中的工作
 
- 使用者／agent 動作 ─► cueflow ── 寫 DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|dispatch|pipeline|schedule}/{id}
+ 使用者／agent 動作 ─► cueflow ── 寫 DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|schedule|approval|deliver}/{id}
                                                                        原子認領、做事、回應
  /api/runner/*、/mcp/run/{token}：任何實例都能服務（憑證與結果都在資料庫）
 ```
 
 | 面向 | 做法 |
 |---|---|
-| 工作派送 | `jobs.Queue`（`internal/jobs`）：crew 與發布 worker 的 `Wake()` 會送出一筆派送；`internal/jobs/cloudtasks` 以 REST 丟進 Cloud Tasks。至少送達一次，每個 handler 都先做原子認領，重複送達只會發現沒事做。Handler 認領「下一件工作」（id 只用於命名與去重），做到沒有為止，最多 25 分鐘，還有剩就再送一筆 |
-| 時鐘 | `Scheduler.Tick` 用排程與 pipeline 的 `next_run_at`，摘要用 `clock` 表。到期的列以 `FOR UPDATE SKIP LOCKED` 認領並在同一交易內推進，多個 tick 同時進來也只觸發一次。沒有 `next_run_at` 的列（新增或剛編輯過）只排程、不觸發；遲到超過 15 分鐘的觸發會被略過 |
+| 工作派送 | `jobs.Queue`（`internal/jobs`）：crew 與 deliverables worker 的 `Wake()` 會送出一筆派送；`internal/jobs/cloudtasks` 以 REST 丟進 Cloud Tasks。至少送達一次，每個 handler 都先做原子認領，重複送達只會發現沒事做。Handler 認領「下一件工作」（id 只用於命名與去重），做到沒有為止，最多 25 分鐘，還有剩就再送一筆 |
+| 時鐘 | `Scheduler.Tick` 用排程與模組登記的 cron 表（`store.ClockTables`）的 `next_run_at`。到期的列以 `FOR UPDATE SKIP LOCKED` 認領並在同一交易內推進，多個 tick 同時進來也只觸發一次。沒有 `next_run_at` 的列（新增或剛編輯過）只排程、不觸發；遲到超過 15 分鐘的觸發會被略過 |
 | 清理 | 雲端不做啟動時「所有執行中都算過期」的清理；由 tick 的 `Store.FailAbandoned` 依租約與時間關閉主人已消失的工作 |
 | Per-run MCP | 執行的 token 是 `run_tokens` 的一列，任何實例都能據此重建工具伺服器。終止型工具把結果寫進去，等待中的實例輪詢取得，所以呼叫可以由別的實例處理 |
 | 取消 | 執行中的實例用心跳發現任務不再是 `IN_PROGRESS` 就取消該次執行，所以在任一實例按取消，一個租約間隔內就會生效 |
