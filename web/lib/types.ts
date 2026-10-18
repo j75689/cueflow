@@ -85,7 +85,7 @@ export interface Platform {
   requires_media: boolean;
 }
 
-/** One role of a team template file (docs/examples/teams). */
+/** One role of a team template file (templates/). */
 export interface TeamAgent {
   name: string;
   slug: string;

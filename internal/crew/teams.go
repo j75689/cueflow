@@ -33,7 +33,7 @@ type TeamAgent struct {
 // Team is a team template: a set of roles as data, kept as a JSON file outside the code (the way
 // a Grafana dashboard is), imported into an org from the Agents page or POST /agents/template and
 // exported from an org with GET /agents/template. Nothing in the binary is a template; the repo
-// ships examples under docs/examples/teams.
+// ships examples under templates/.
 type Team struct {
 	Version     int         `json:"version"`
 	Name        string      `json:"name"`

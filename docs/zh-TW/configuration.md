@@ -31,7 +31,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
-| `CUEFLOW_MODULES` | `content,deliverables` | 要掛載的功能模組，逗號分隔（`all`、`none`，或 `content`、`deliverables` 任意組合）。沒掛載的模組沒有路由、agent 工具、worker 與 cron；資料表保留，儀表板會隱藏它的頁面（`/meta` 會列出掛載了哪些） |
+| `CUEFLOW_MODULES` | `content,deliverables` | 要掛載的功能模組，逗號分隔（`all`、`none`，或 `content`、`deliverables` 任意組合；`content` 需要 `deliverables`）。沒掛載的模組沒有路由、agent 工具、worker 與 cron；資料表保留，儀表板會隱藏它的頁面（`/meta` 會列出掛載了哪些） |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
 
 ## 媒體
@@ -43,7 +43,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成 deliverable 使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
 
-媒體如何儲存、提供與刪除，見 [media.md](media.md)。
+媒體如何儲存、提供與刪除，見 [modules.md](modules.md#圖片與影片)。
 
 ## 雲端模式
 

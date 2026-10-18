@@ -55,7 +55,7 @@ CueFlow 在 <http://localhost:3000>。接著：
 
 - **設定**：所有環境變數，以及如何更換加密金鑰：[docs/zh-TW/configuration.md](docs/zh-TW/configuration.md)。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
 - **Runner、外部 agent、MCP**：[docs/zh-TW/external-agents.md](docs/zh-TW/external-agents.md)。
-- **圖片與影片**：儲存後端、刪除、渲染服務傳大檔：[docs/zh-TW/media.md](docs/zh-TW/media.md)。
+- **模組**：`deliverables` 與 `content` 各加了什麼、用 `CUEFLOW_MODULES` 開關，以及圖片與影片存哪：[docs/zh-TW/modules.md](docs/zh-TW/modules.md)。
 - **Google Cloud Run**：Supabase、Cloud Storage、Cloud Tasks 與 Cloud Scheduler，縮到零：[deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
 
 ## 文件
@@ -66,7 +66,7 @@ CueFlow 在 <http://localhost:3000>。接著：
 - [用 Docker Compose 執行](docs/zh-TW/docker.md)
 - [內建 connector](docs/zh-TW/builtin-connectors.md)
 - [外部 agent、Runner 與 MCP](docs/zh-TW/external-agents.md)
-- [圖片與影片](docs/zh-TW/media.md)
+- [模組：deliverables、content、圖片與影片](docs/zh-TW/modules.md)
 - 英文文件：[REST API](docs/api.md) · [Connector 插件開發](docs/connectors.md) · [發布器 MCP 約定](docs/publisher-mcp.md) · [部署到 Google Cloud Run](deploy/cloudrun/README.md) · [容器裡的 Runner](deploy/runner/README.md)
 
 ## 開發與參與貢獻

@@ -350,9 +350,9 @@ func (s *Server) Fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, domain.ErrNotFound):
 		WriteError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, store.ErrMediaInUse):
-		WriteError(w, http.StatusConflict, "in_use", "a post that is not yet published or rejected still uses this media; remove it from the post first")
+		WriteError(w, http.StatusConflict, "in_use", "a deliverable that is not yet done or rejected still uses this media; remove it from the deliverable first")
 	case errors.Is(err, domain.ErrVersionConflict):
-		WriteError(w, http.StatusConflict, "version_conflict", "the post was changed by someone else; reload and try again")
+		WriteError(w, http.StatusConflict, "version_conflict", "it was changed by someone else; reload and try again")
 	case errors.As(err, &te):
 		WriteError(w, http.StatusConflict, "invalid_transition", te.Error())
 	case errors.As(err, &ve):

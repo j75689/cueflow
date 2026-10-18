@@ -42,7 +42,7 @@ export default function AgentsPage() {
     }
   };
 
-  // Export downloads the org's agents as a team template file (see docs/examples/teams).
+  // Export downloads the org's agents as a team template file (see templates/).
   const exportTeam = async () => {
     try {
       const team = await api.exportTeam();
@@ -237,7 +237,7 @@ function ImportTeamModal({
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           A team template is a JSON file (name, roles, capabilities, instructions), like a dashboard you import. Roles
           whose slug this org already has are skipped; everything it creates is editable afterwards. An example lives
-          in the repository under <span className="font-mono text-xs">docs/examples/teams/</span>.
+          in the repository under <span className="font-mono text-xs">templates/</span>.
         </p>
         <Field label="Template file">
           <input
