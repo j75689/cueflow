@@ -3,13 +3,13 @@
 <p align="center">
   Open-source, self-hosted agent ops console.<br>
   Give a team of AI agents tasks on a kanban board. They work with their own tools, ask you when they need a
-  decision, and nothing they produce acts on the world until you approve it.
+  decision, and risky tool calls and everything they produce wait for your approval.
 </p>
 
 <p align="center">
   <a href="https://github.com/j75689/cueflow/actions/workflows/ci.yml"><img src="https://github.com/j75689/cueflow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License" /></a>
-  <a href="go.mod"><img src="https://img.shields.io/badge/go-1.27-00add8" alt="Go 1.27" /></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/j75689/cueflow" alt="Go version" /></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/board.png" alt="CueFlow board with a task thread waiting for approval" width="800" />
+  <img src="docs/screenshots/board.jpg" alt="Illustration: the CueFlow board, with a task thread waiting for a tool approval and a post waiting for review" width="800" />
 </p>
 
 ---
@@ -57,7 +57,7 @@ CueFlow is at <http://localhost:3000> (every port is bound to `127.0.0.1`). Then
 > (`docker compose --profile mock up -d`) and add an *MCP publisher* connector with endpoint
 > `http://mock-publisher:4010/mcp` and token `dev-token`.
 
-Image variants (with Node and the ACP adapters for external agents), web search, remote access:
+Image variants (with Node and the ACP adapters for Claude Code and Codex), web search, remote access:
 [docs/docker.md](docs/docker.md). Back up `CUEFLOW_SECRET_KEY`: without it stored credentials are unreadable.
 
 ### Google Cloud Run
@@ -82,8 +82,8 @@ A request goes through the same steps whether you typed it, a schedule fired it,
 5. **Review.** What the agents produce is a **deliverable**: a document or, with the content module, a social post.
    It waits for you to edit, approve or reject it.
 6. **Act.** Only an approved item is acted on: filed through an action connector, or published through any MCP server
-   that follows the four-tool [publisher contract](docs/publisher-mcp.md). No agent tool can act, and connectors
-   refuse unless the worker attached a grant for that exact, approved item.
+   that follows the four-tool [publisher contract](docs/publisher-mcp.md). No agent tool can publish or run an
+   action, and those connectors refuse unless the worker attached a grant for that exact, approved item.
 
 Capabilities and tools, the task state machine, delegation and guardrails: [docs/agentic-flow.md](docs/agentic-flow.md).
 
@@ -112,7 +112,7 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 | **Schedules** | Recurring tasks for an agent; agents can create them too |
 | **Connector plugins** | LLMs, MCP servers, search, sources, notifiers, image generators, publishers and actions implement small Go interfaces; the UI renders their forms. [List](docs/builtin-connectors.md) · [Writing one](docs/connectors.md) |
 | **Modules** | Deliverables and social content are modules you switch with `CUEFLOW_MODULES`. [docs/modules.md](docs/modules.md) |
-| **Private by default** | At home it binds to `127.0.0.1` and only connects outward; in the cloud the dashboard sits behind Cloudflare Access. Secrets are encrypted at rest (AES-256-GCM) |
+| **Private by default** | At home it binds to `127.0.0.1` and only connects outward; in the cloud the dashboard sits behind Cloudflare Access and machine-to-machine calls carry Google-signed identities. Secrets are encrypted at rest (AES-256-GCM) |
 | **Crash-safe actions** | The worker uses leases: one that dies mid-action leaves the item `FAILED` with a "check before retrying" note instead of acting twice |
 | **Single binary** | Go API, scheduler and worker with the Next.js dashboard embedded |
 

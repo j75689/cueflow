@@ -2,13 +2,13 @@
 
 <p align="center">
   開源、可自託管的 Agent 運營控制台。<br>
-  把任務交給看板上的一組 AI agent：它們用各自的工具做事，需要你決定時會來問，產出的東西在你核准之前不會對外做任何事。
+  把任務交給看板上的一組 AI agent：它們用各自的工具做事，需要你決定時會來問，有風險的工具呼叫和它們的產出都會等你核准。
 </p>
 
 <p align="center">
   <a href="https://github.com/j75689/cueflow/actions/workflows/ci.yml"><img src="https://github.com/j75689/cueflow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License" /></a>
-  <a href="go.mod"><img src="https://img.shields.io/badge/go-1.27-00add8" alt="Go 1.27" /></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/j75689/cueflow" alt="Go version" /></a>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/board.png" alt="CueFlow 看板與等待核准的任務對話串" width="800" />
+  <img src="docs/screenshots/board.jpg" alt="示意圖：CueFlow 看板，一條等工具核准的任務對話串與一則等審核的貼文" width="800" />
 </p>
 
 ---
@@ -51,7 +51,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 > [!TIP]
 > 想試社群發文流程又不想真的發出去，可以啟動內附的 mock 發布器（`docker compose --profile mock up -d`），再新增一個 *MCP publisher* connector，endpoint 填 `http://mock-publisher:4010/mcp`、token 填 `dev-token`。
 
-映像版本（含 Node 與外部 agent 用的 ACP adapter）、網頁搜尋、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
+映像版本（含 Node 與 Claude Code、Codex 的 ACP adapter）、網頁搜尋、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
 
 ### Google Cloud Run
 
@@ -68,7 +68,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 3. **執行。** Agent 用它的工具做事：內建工具、任何 [MCP](https://modelcontextprotocol.io) 伺服器（每個工具可設為允許、需核准或禁止），或把整個任務交給 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 透過 ACP 執行，跑在伺服器上或你自己的機器上。
 4. **問你。** 提問與有風險的工具呼叫會在任務的對話串裡等你。回覆就能讓它繼續，用 `@writer` 開頭可以把任務轉給另一個 agent；每一步思考與工具呼叫都看得到。
 5. **審核。** Agent 的產出是一份 **deliverable**：一份文件，或（有內容模組時）一則社群貼文，等你修改、核准或退回。
-6. **執行動作。** 只有核准的項目才會被執行：透過 action connector 送出，或透過任何符合四個工具的[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器發布。沒有任何 agent 工具能做這件事，connector 也只接受 worker 針對「那一份已核准的項目」給的授權。
+6. **執行動作。** 只有核准的項目才會被執行：透過 action connector 送出，或透過任何符合四個工具的[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器發布。沒有任何 agent 工具能發布或執行動作，這些 connector 也只接受 worker 針對「那一份已核准的項目」給的授權。
 
 能力與工具、任務狀態機、委派與防護：[docs/zh-TW/agentic-flow.md](docs/zh-TW/agentic-flow.md)。
 
@@ -94,7 +94,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 | **排程** | 定時為 agent 建立任務；agent 也能自己建立排程 |
 | **Connector 插件** | LLM、MCP 伺服器、搜尋、資料來源、通知、圖片生成、發布器與 action 都實作簡單的 Go 介面，UI 自動產生設定表單。[清單](docs/zh-TW/builtin-connectors.md) · [自己寫一個](docs/connectors.md)（英文） |
 | **模組** | Deliverable 與社群內容都是模組，用 `CUEFLOW_MODULES` 開關。[docs/zh-TW/modules.md](docs/zh-TW/modules.md) |
-| **預設私有** | 在家裡只綁 `127.0.0.1`、只做主動連線；在雲端，儀表板放在 Cloudflare Access 後面。機密以 AES-256-GCM 加密儲存 |
+| **預設私有** | 在家裡只綁 `127.0.0.1`、只做主動連線；在雲端，儀表板放在 Cloudflare Access 後面，機器之間的呼叫都帶 Google 簽發的身分。機密以 AES-256-GCM 加密儲存 |
 | **動作不怕當機** | worker 使用租約：執行途中掛掉，項目會標成 `FAILED` 並提醒「重試前請先確認」，而不是做第二次 |
 | **單一 binary** | Go 的 API、排程與 worker，加上內嵌的 Next.js 儀表板 |
 
