@@ -1,39 +1,96 @@
 package e2e
 
-import "github.com/j75689/cueflow/internal/store"
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"testing"
 
-// testSpecialists is the research/writing/editing crew the crew tests delegate to. New orgs only
-// start with Chief, so the tests add these themselves.
-func testSpecialists() []*store.Agent {
-	return []*store.Agent{
-		{
-			Name: "Researcher", Slug: "researcher", Avatar: "🔎", Role: "researcher", IsActive: true,
-			Description:  "Gathers and verifies information: web search, reading articles, and querying collected RSS/email material. Delivers key points with sources.",
-			Capabilities: []string{"research", "sources", "memory"},
-			Instructions: `You are a rigorous researcher.
-- Check collected material with search_materials first, then web_search if it is not enough, and read_url to read originals when needed.
-- Only state facts you can source, and link a source for every point. Mark anything uncertain as "unconfirmed".
-- Deliverable: 3-7 key points (one-sentence conclusion + why it matters + source), followed by a short "angles worth posting about" section.`,
-		},
-		{
-			Name: "Writer", Slug: "writer", Avatar: "✍️", Role: "writer", IsActive: true,
-			Description:  "Turns material into platform-specific post drafts (short, opinionated Threads posts; structured Instagram captions with hashtags) and sends them to the review queue.",
-			Capabilities: []string{"post_deliverables", "research", "sources", "memory"},
-			Platforms:    []string{"threads", "instagram"},
-			Instructions: `You are a social media copywriter.
-- Write a separate create_post_draft for each platform. Never paste the same text across platforms.
-- Threads: open with an opinionated hook, keep sentences short, end with a question that invites replies; split into a thread if it runs long.
-- Instagram: hook, tidy paragraphs, a bulleted summary; put hashtags in the hashtags field and include an image_prompt. Instagram needs an image: after creating the draft, call generate_image for it (if no image generator is configured, say so in your result).
-- Use only facts provided by the task or the research, and include source_urls. Report the draft IDs when you finish.`,
-		},
-		{
-			Name: "Editor", Slug: "editor", Avatar: "🧐", Role: "editor", IsActive: true,
-			Description:  "Checks pending drafts for accuracy, tone, length and platform rules, revises them directly and explains the changes. Never approves or publishes.",
-			Capabilities: []string{"post_deliverables", "memory"},
-			Instructions: `You are the quality editor.
-- Use list_posts to find PENDING_REVIEW drafts (or the drafts named in the task) and check each one: are the facts supported, does the tone fit the brand, is it within the length and hashtag limits, are there typos?
-- If a change is needed, use revise_draft and explain why in the note. If a draft is fine, leave it alone.
-- You cannot approve or publish. Finish by reporting the result for each draft and remind the human to decide in Review.`,
-		},
+	"github.com/google/uuid"
+
+	"github.com/j75689/cueflow/internal/crew"
+	"github.com/j75689/cueflow/internal/store"
+)
+
+const teamExample = "../../docs/examples/teams/social-content.json"
+
+// exampleTeam is the shipped example template: the research/writing/editing crew the crew tests
+// delegate to, so the file in docs is the one the tests run.
+func exampleTeam(t *testing.T) (crew.Team, []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(teamExample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team, err := crew.ParseTeam(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return team, raw
+}
+
+// testSpecialists is the example team as agents, org to be set by the caller. New orgs only seed the
+// Chief; the tests add these themselves (or import the file through the API).
+func testSpecialists(t *testing.T) []*store.Agent {
+	team, _ := exampleTeam(t)
+	var out []*store.Agent
+	for _, ta := range team.Agents {
+		out = append(out, ta.Agent(uuid.Nil))
+	}
+	return out
+}
+
+// A team template is a JSON file: imported with POST /agents/template (skipping slugs the org has),
+// exported with GET /agents/template, and the export imports again elsewhere.
+func TestTeamTemplateImportExport(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	team, raw := exampleTeam(t)
+	if len(team.Agents) != 3 {
+		t.Fatalf("example team: %+v", team)
+	}
+
+	// The default org has a hand-made writer: importing the file skips it and adds the other two.
+	def, _ := e.store.DefaultOrg(ctx)
+	if _, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: def.ID, Name: "My writer", Slug: "writer", Capabilities: []string{"research"}}); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Created []store.Agent `json:"created"`
+		Skipped []string      `json:"skipped"`
+	}
+	if code := e.do("POST", "/agents/template", json.RawMessage(raw), &res); code != 200 {
+		t.Fatalf("import: %d", code)
+	}
+	if len(res.Created) != 2 || len(res.Skipped) != 1 || res.Skipped[0] != "writer" {
+		t.Fatalf("import result: %+v", res)
+	}
+	for _, a := range res.Created {
+		if a.OrgID != def.ID || !a.IsActive || a.MaxTurns != 12 || a.Language != "en" {
+			t.Fatalf("created agent: %+v", a)
+		}
+	}
+	if code := e.do("POST", "/agents/template", json.RawMessage(raw), &res); code != 200 || len(res.Created) != 0 || len(res.Skipped) != 3 {
+		t.Fatalf("second import: %d %+v", code, res)
+	}
+	for _, bad := range []string{`{"name":`, `{"name":"x","agents":[]}`, `{"name":"x","agents":[{"name":"A","slug":"a","capabilities":["no-such-capability"]}]}`} {
+		if code := e.do("POST", "/agents/template", json.RawMessage(bad), nil); code != 400 {
+			t.Fatalf("bad template %q: %d", bad, code)
+		}
+	}
+
+	// Export the default org, import it into a fresh org: same roles, nothing install-specific.
+	var exported crew.Team
+	if code := e.do("GET", "/agents/template", nil, &exported); code != 200 || exported.Version != crew.TeamVersion || len(exported.Agents) != 3 {
+		t.Fatalf("export: %d %+v", code, exported)
+	}
+	var other store.Org
+	e.do("POST", "/orgs", map[string]any{"name": "Other"}, &other)
+	if code := e.do("POST", "/agents/template?org=other", exported, &res); code != 200 || len(res.Created) != 3 {
+		t.Fatalf("re-import: %d %+v", code, res)
+	}
+	agents, _ := e.store.ListAgents(ctx, other.ID)
+	if len(agents) != 3 || agents[0].OrgID != other.ID {
+		t.Fatalf("other org agents: %d", len(agents))
 	}
 }

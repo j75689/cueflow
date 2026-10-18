@@ -85,6 +85,28 @@ export interface Platform {
   requires_media: boolean;
 }
 
+/** One role of a team template file (docs/examples/teams). */
+export interface TeamAgent {
+  name: string;
+  slug: string;
+  avatar?: string;
+  role?: AgentRole;
+  description?: string;
+  instructions?: string;
+  capabilities: string[];
+  platforms?: string[];
+  language?: string;
+  max_turns?: number;
+}
+
+/** A team template: a JSON file imported into an org (Agents → Import team) or exported from one. */
+export interface TeamTemplate {
+  version?: number;
+  name: string;
+  description?: string;
+  agents: TeamAgent[];
+}
+
 export interface AgentCapability {
   id: string;
   name: string;

@@ -106,7 +106,7 @@ func crewSetup(t *testing.T) (*env, map[string]*store.Agent) {
 	if n, err := crew.SeedDefaults(ctx, e.store, org.ID); err != nil || n != 1 {
 		t.Fatalf("seed: %d %v", n, err)
 	}
-	for _, a := range testSpecialists() {
+	for _, a := range testSpecialists(t) {
 		a.OrgID = org.ID
 		if _, err := e.store.CreateAgent(ctx, a); err != nil {
 			t.Fatal(err)

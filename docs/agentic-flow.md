@@ -42,14 +42,14 @@ flowchart LR
 
 ## 3. Default team
 
-On first start, when no agents exist, the system creates a single agent, the Chief (`internal/crew/defaults.go`). It can be edited in the UI, and you add the rest of the team yourself (the roles below are typical choices):
+On first start, when no agents exist, the system creates a single agent, the Chief (`internal/crew/defaults.go`). It can be edited in the UI, and you add the rest of the team yourself: by hand, or by importing a **team template**, a JSON file like a Grafana dashboard (Agents → *Import team*; *Export team* writes one from an org). The repository ships [`docs/examples/teams/social-content.json`](examples/teams/social-content.json), the researcher, writer and editor below:
 
 | Role | slug | Capabilities | Responsibility |
 |---|---|---|---|
 | 🧭 Chief (created for you) | `chief` | planning, delegation, memory, research, sources, post_deliverables, deliverables | The front desk: understands requests, breaks them down, delegates to the agents you add (or does the work itself when none fits), sets up schedules, reports back; turn limit 16 |
-| 🔎 Researcher (typical) | `researcher` | research, sources, memory | Gathers and verifies information, produces summaries with sources |
-| ✍️ Writer (typical) | `writer` | post_deliverables, imaging, research, sources, memory | Writes drafts in each platform's style |
-| 🧐 Editor (typical) | `editor` | post_deliverables, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
+| 🔎 Researcher (example template) | `researcher` | research, sources, memory | Gathers and verifies information, produces summaries with sources |
+| ✍️ Writer (example template) | `writer` | post_deliverables, imaging, research, sources, memory | Writes drafts in each platform's style |
+| 🧐 Editor (example template) | `editor` | post_deliverables, memory | Checks pending drafts for facts, tone and platform rules, and revises them (cannot approve) |
 
 The default names and instructions are in English; the language agents write in follows each agent's `language` setting (default `en`).
 

@@ -30,7 +30,8 @@ first one is the default org.
 
 ### `POST /api/v1/orgs`
 `{"name":"CueFlow Dev","slug":"cueflow-dev","seed_agents":true}`. `slug` is optional (derived from the name);
-`seed_agents` creates the starter Chief agent. `201` with the org.
+`seed_agents` creates the starter Chief agent. `201` with the org. To add a whole team, import a template
+(`POST /agents/template?org=...`).
 
 ### `PATCH /api/v1/orgs/{id}`
 `{"name":"...","slug":"..."}`, either field optional.
@@ -54,6 +55,7 @@ server; `platforms` comes from the `content` module and the `deliverable_*` keys
   "version": "0.1.0",
   "modules": ["content"],
   "connector_types": [ConnectorSpec, ...],
+  "agent_capabilities": [AgentCapability, ...],
   "platforms": [
     {"id":"threads","name":"Threads","max_chars":500,"supports_thread":true,"max_hashtags":1,"requires_media":false},
     {"id":"instagram","name":"Instagram","max_chars":2200,"supports_thread":false,"max_hashtags":30,"requires_media":true},
@@ -163,7 +165,6 @@ nothing they can call acts on an item.
 ## Agents (roles)
 
 An agent is a configured role (persona + capabilities + connectors) that works tasks on the board.
-`Post` objects also carry `"task_id": "uuid|null"` (the task whose agent drafted it).
 
 `Agent`:
 ```json
@@ -189,6 +190,8 @@ An agent is a configured role (persona + capabilities + connectors) that works t
 |---|---|---|---|
 | GET | `/agents` | | → `[Agent]` |
 | POST | `/agents` | Agent fields (no id/stats/timestamps); `slug` derived from name if omitted | |
+| POST | `/agents/template` | A team template file: `{"version":1,"name","description","agents":[{"name","slug","avatar","role","description","instructions","capabilities","platforms","language","max_turns"}]}` (example: `docs/examples/teams/social-content.json`) | Imports the roles the org does not have yet (matched by slug), so importing twice or over a hand-made team only adds what is missing → `200 {"created":[Agent, ...],"skipped":["writer"]}`; a malformed file or an unknown capability/role/platform is `400` |
+| GET | `/agents/template` | | The org's agents as a template file (no ids, connectors or stats), `Content-Disposition: attachment` |
 | GET/PATCH/DELETE | `/agents/{id}` | | PATCH = partial; DELETE unassigns its tasks |
 | GET | `/agents/{id}/memories` | | → `[{"id","agent_id","content","created_at"}]` newest first |
 | POST | `/agents/{id}/memories` | `{content}` | add a note the agent will always see |

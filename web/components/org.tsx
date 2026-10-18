@@ -203,7 +203,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const remove = async (o: Org) => {
     const ok = await dialog.confirm({
       title: `Delete ${o.name}?`,
-      message: "Only an empty org can be deleted: remove its agents, tasks, schedules and posts first.",
+      message: "Only an empty org can be deleted: remove its agents, tasks, schedules and deliverables first.",
       confirmLabel: "Delete",
       tone: "danger",
     });
@@ -221,7 +221,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Modal open={open} onClose={onClose} title="Orgs">
       <div className="space-y-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Each org has its own agents, board, schedules, review queue and runs. Connectors and usage are shared.
+          Each org has its own agents, board, schedules, deliverables and runs. Connectors and usage are shared.
         </p>
         <ul className="divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
           {orgs.map((o, i) => (
