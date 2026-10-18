@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { STATUS_LABEL, STATUS_STYLE, StatusBadge } from "@/components/badges";
 import { RejectDialog } from "@/components/post";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
-import { Button, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, cx } from "@/components/ui";
+import { Button, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, Select, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtRelative, shortId } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
@@ -158,18 +158,16 @@ export default function DeliverablesPage() {
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title or content…" />
         </div>
         {kinds.length > 1 && (
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-            className="rounded-md border border-zinc-300 bg-white px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            <option value="">All kinds</option>
-            {kinds.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.name}
-              </option>
-            ))}
-          </select>
+          <div className="w-44">
+            <Select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="">All kinds</option>
+              {kinds.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </Select>
+          </div>
         )}
       </div>
 
