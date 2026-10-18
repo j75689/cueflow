@@ -1,6 +1,6 @@
 # Images and videos
 
-Posts reference media as `/media/{id}` (images up to 10 MB; MP4 up to 100 MB). Media gets there in three ways:
+Deliverables (a post's images and video, a document's figures) reference media as `/media/{id}` (images up to 10 MB; MP4 up to 100 MB). Media gets there in three ways:
 uploaded from the review editor, generated with an image connector (by a reviewer, or by an agent with the
 `imaging` capability), or attached by an agent from what a tool produced (for example a rendered video).
 
@@ -22,8 +22,8 @@ When handing a post to a publisher, CueFlow turns `/media/{id}` into an absolute
 
 ## Deleting
 
-- `DELETE /api/v1/media/{id}` removes the item and its file, and answers `409` while a post that is not yet
-  published or rejected still uses it.
+- `DELETE /api/v1/media/{id}` removes the item and its file, and answers `409` while a deliverable that is not yet
+  done or rejected still uses it.
 - `cueflow media prune --older-than 90d [--dry-run]` does the same for everything old and unused.
 - `CUEFLOW_MEDIA_RETENTION_DAYS` runs that prune on every tick in cloud mode.
 

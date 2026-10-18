@@ -14,7 +14,7 @@ cookie a signed-in browser sends): the token or the login is enough, either one.
 another team, or an expired one is refused. `/api/v1/health`, `/api/runner/*`, `/mcp*`, `/media/*` and `/internal/*`
 are not affected: they are open or authenticate themselves.
 
-Orgs: agents, tasks, schedules, pipelines, posts and runs belong to an org. List and create endpoints for
+Orgs: agents, tasks, schedules, deliverables and runs belong to an org. List and create endpoints for
 them take `?org=<id or slug>`; without it they use the default org (the oldest). An unknown org is a
 `400 invalid_argument`. Endpoints that address one item by id work in any org. Connectors, source items,
 media and usage are global and ignore `org`. Items carry `"org_id":"uuid"`. The UI stores the chosen org in
@@ -36,7 +36,7 @@ first one is the default org.
 `{"name":"...","slug":"..."}`, either field optional.
 
 ### `DELETE /api/v1/orgs/{id}`
-`204`. Only an empty org (no agents, tasks, schedules, pipelines or posts) can be deleted, and never the last
+`204`. Only an empty org (no agents, tasks, schedules or deliverables) can be deleted, and never the last
 one; otherwise `400 invalid_argument`.
 
 Within an org, agent slugs are unique and task numbers count from `#1`. A subtask always lives in its
@@ -84,10 +84,11 @@ Fields with `"secret": true` are write-only: the API never returns their value (
 `{"status":"ok","db":"ok","time":"..."}`
 
 ### `GET /api/v1/stats?org=`
-Posts and pipelines of the org; connectors are global.
+Connectors are global; each mounted module adds its own counts for the org (the deliverables module adds
+`deliverables_by_status`).
 ```json
-{"posts_by_status":{"DRAFT":0,"PENDING_REVIEW":3,...},"connectors":{"total":4,"active":3},
- "pipelines":{"total":2,"active":1},"last_run":PipelineRun|null}
+{"connectors":{"total":4,"active":3},
+ "deliverables_by_status":{"DRAFT":0,"PENDING_REVIEW":3,"APPROVED":0,"REJECTED":1,"QUEUED":0,"DONE":12,"FAILED":0}}
 ```
 
 ---
@@ -206,8 +207,9 @@ own host), `runner_pool` (a registered [Runner](#runners) launches it) or `exter
 "task_statuses":["BACKLOG","TODO","IN_PROGRESS","BLOCKED","WAITING_HUMAN","REVIEW","DONE","CANCELED"],
 "task_priorities":["low","normal","high","urgent"]
 ```
-Capabilities: `research`, `drafting`, `delegation`, `planning`, `memory`. Every agent always has
-`add_comment`, `ask_human`, `complete_task`. No capability can publish: drafts go to the review queue.
+Capabilities come from the core (`research`, `delegation`, `planning`, `memory`) and the mounted modules
+(`sources`, `post_deliverables`, `imaging`, `deliverables`). Every agent always has `add_comment`, `ask_human`,
+`complete_task`. No capability can publish or act: everything an agent produces waits for a human under Deliverables.
 
 ---
 
@@ -357,7 +359,7 @@ Old media can be pruned: `cueflow media prune --older-than 90d [--dry-run]` dele
 ## Usage
 
 ### `GET /api/v1/usage?days=30&tz=Asia/Taipei`
-Token usage across agent runs and pipeline runs. `days` (1–365, default 30) is the look-back window ending
+Token usage across agent runs. `days` (1–365, default 30) is the look-back window ending
 now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 ```json
 {
@@ -365,8 +367,7 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
   "totals":{"runs":42,"failed_runs":3,"input_tokens":812345,"output_tokens":90211,"tool_calls":310,
             "unreported_runs":5},
   "daily":[{"date":"2026-10-04","runs":7,"input_tokens":120000,"output_tokens":15000}],
-  "by_source":[{"source":"agent","runs":30,"input_tokens":700000,"output_tokens":80000},
-               {"source":"pipeline","runs":12,"input_tokens":112345,"output_tokens":10211}],
+  "by_source":[{"source":"agent","runs":42,"input_tokens":812345,"output_tokens":90211}],
   "by_org":[{"org_id":"uuid","name":"Default","slug":"default","runs":42,"input_tokens":812345,"output_tokens":90211}],
   "by_agent":[{"agent_id":"uuid","name":"Writer","avatar":"✍️","slug":"writer","runs":12,
                "input_tokens":300000,"output_tokens":40000}],
@@ -437,8 +438,8 @@ at all in the local deployment, and are not covered by `CUEFLOW_ADMIN_TOKEN`.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/internal/tick` | Cloud Scheduler, every minute: fires due schedules, pipelines and the review digest once, closes abandoned work, and enqueues waiting work. `204` |
-| POST | `/internal/work/{kind}/{id}` | Cloud Tasks delivery; `kind` is `crew`, `dispatch`, `pipeline` or `schedule`. `204` when done (also when there was nothing to do); `500` makes Cloud Tasks retry; `404` unknown kind; `400` bad id |
+| POST | `/internal/tick` | Cloud Scheduler, every minute: fires due schedules (and the cron rows modules register) once, closes abandoned work, runs the modules' sweeps, and enqueues waiting work. `204` |
+| POST | `/internal/work/{kind}/{id}` | Cloud Tasks delivery; `kind` is `crew`, `schedule`, `approval` or a kind a module registers (`deliver` for the deliverables module). `204` when done (also when there was nothing to do); `500` makes Cloud Tasks retry; `404` unknown kind; `400` bad id |
 
 `GET /media/{id}` answers `302` to a short-lived signed URL when the media is stored in GCS.
 
@@ -448,9 +449,8 @@ at all in the local deployment, and are not covered by `CUEFLOW_ADMIN_TOKEN`.
 
 ### `GET /api/v1/events` (Server-Sent Events)
 Event names and `data` payloads:
-- `post.updated` → `{"id":"uuid","status":"QUEUED"}`
-- `post.deleted` → `{"id":"uuid"}`
-- `run.updated` → `{"id":"uuid","pipeline_id":"uuid","status":"SUCCEEDED"}`
+- `deliverable.updated` → `{"id":"uuid","status":"QUEUED"}`
+- `deliverable.deleted` → `{"id":"uuid"}`
 - `connector.updated` → `{"id":"uuid"}`
 - `task.updated` → `{"id":"uuid","status":"IN_PROGRESS"}`
 - `task.deleted` → `{"id":"uuid"}`

@@ -11,4 +11,4 @@ npm run build      # static export -> web/out
 ```
 
 Routes use query parameters instead of dynamic segments (static export):
-`/posts/view/?id=`, `/pipelines/edit/?id=`, `/runs/view/?id=`, `/connectors/edit/?id=`.
+`/deliverables/view/?id=`, `/tasks/view/?id=`, `/connectors/edit/?id=`.

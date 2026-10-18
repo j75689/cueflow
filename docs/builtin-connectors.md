@@ -11,7 +11,7 @@ their forms are generated from the plugin's config schema. To write a new one, s
 | Source | `rss` (RSS/Atom, GUID-deduplicated) · `imap` (mailbox folder, read-only) |
 | Search | `searxng` (self-hosted) · `tavily` |
 | LLM | `openai` (OpenAI, OpenRouter, Azure OpenAI, DeepSeek, Ollama, vLLM, LocalAI, any OpenAI-compatible) · `anthropic` (Claude API) · `anthropic_bedrock` (Claude on Amazon Bedrock) · `anthropic_vertex` (Claude on Google Vertex AI) · `gemini_vertex` (Gemini on Google Vertex AI) |
-| Notifier | `smtp` (review reminders and digests) |
+| Notifier | `smtp` (email, for modules that send reminders) |
 | Action | `mcp_action` - hands approved deliverables to one tool of an MCP server you run (`deliver` by default, arguments `{id, kind, title, payload, previous}`); only the worker calls it |
 | Agent tools | `mcp_server` - any MCP server (HTTP or stdio); each tool set to allow, ask (you approve each call) or deny |
 | Image generation | `openai_image` (OpenAI / Azure / compatible) · `gemini_image` (AI Studio key) · `vertex_image` (Vertex AI, ADC) · `comfyui` (self-hosted) |

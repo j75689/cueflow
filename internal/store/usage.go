@@ -82,16 +82,12 @@ type Usage struct {
 	TopTasks []UsageTask   `json:"top_tasks"`
 }
 
-// usageRuns unifies agent runs and pipeline runs started since $1.
+// usageRuns is the agent runs started since $1, in the shape the report aggregates (source is
+// "agent"; the column stays so the report can take other kinds of runs later).
 const usageRuns = `WITH runs AS (
 	SELECT r.started_at, 'agent' AS source, r.org_id, r.agent_id, r.task_id, r.connector_id, r.model, r.runtime,
 	       r.input_tokens AS inp, r.output_tokens AS outp, r.tool_calls::bigint AS calls, r.status
 	FROM agent_runs r WHERE r.started_at >= $1
-	UNION ALL
-	SELECT p.started_at, 'pipeline', p.org_id, NULL, NULL, p.llm_connector_id, p.model, 'builtin',
-	       COALESCE((p.stats->>'input_tokens')::bigint, 0), COALESCE((p.stats->>'output_tokens')::bigint, 0),
-	       COALESCE((p.stats->>'tool_calls')::bigint, 0), p.status
-	FROM pipeline_runs p WHERE p.started_at >= $1
 ) `
 
 // UsageReport aggregates token usage since `since`, bucketing days in tz.
@@ -214,10 +210,4 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		u.TopTasks = append(u.TopTasks, v)
 	}
 	return u, rows.Err()
-}
-
-// SetPipelineRunModel records the LLM a pipeline run used.
-func (s *Store) SetPipelineRunModel(ctx context.Context, runID, connectorID uuid.UUID, model string) error {
-	_, err := s.pool.Exec(ctx, "UPDATE pipeline_runs SET llm_connector_id=$2, model=$3 WHERE id=$1", runID, connectorID, model)
-	return err
 }

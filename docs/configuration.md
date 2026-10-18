@@ -22,8 +22,8 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker poll interval |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time acting on one approved deliverable (publishing a post, running an action connector) may take before the worker is considered crashed |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
 
@@ -41,7 +41,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 |---|---|---|
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
 | `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
-| `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished post uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
+| `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished deliverable uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
 
 See [media.md](media.md) for how media is stored, served and deleted.

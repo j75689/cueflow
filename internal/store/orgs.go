@@ -13,7 +13,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 )
 
-// Org is a team with its own agents, board, schedules, pipelines, review queue and runs.
+// Org is a team with its own agents, board, schedules, deliverables and runs.
 // Connectors and media are global.
 type Org struct {
 	ID        uuid.UUID `json:"id"`
@@ -139,7 +139,7 @@ func (s *Store) DeleteOrg(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		var pg *pgconn.PgError
 		if asPg(err, &pg) && pg.Code == "23503" {
-			return Invalid("the org still has agents, tasks, schedules, pipelines or posts; delete them first")
+			return Invalid("the org still has agents, tasks, schedules, deliverables or archived content; delete them first")
 		}
 		return err
 	}

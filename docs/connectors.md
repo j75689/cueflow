@@ -13,13 +13,14 @@ implements `Test(ctx) (*TestResult, error)`, which backs the **Test** button.
 
 | Kind | Interface | Called by |
 |---|---|---|
-| `publisher` | `Publish(ctx, PublishRequest) (*PublishResult, error)` | dispatch worker, for approved posts only |
-| `source` | `Fetch(ctx, FetchOptions) ([]Item, error)` | pipeline runs and the **Fetch now** button |
+| `publisher` | `Publish(ctx, PublishRequest) (*PublishResult, error)` | the deliverables worker, for approved `post` deliverables only |
+| `source` | `Fetch(ctx, FetchOptions) ([]Item, error)` | the agents' `fetch_sources` tool and the **Fetch now** button |
 | `search` | `Search(ctx, query, limit) ([]SearchResult, error)` | the agent's `web_search` tool |
 | `llm` | `Chat(ctx, llm.Request) (*llm.Response, error)`, `Model()` | the agent loop |
-| `notifier` | `Notify(ctx, Notification) error` | pipeline runs and the review digest |
+| `notifier` | `Notify(ctx, Notification) error` | modules that send reminders (nothing in the core today) |
 | `runtime` | `Launch() RuntimeLaunch` | the crew runner, for agents that run in an external ACP agent |
 | `image` | `GenerateImage(ctx, ImageRequest) ([]Image, error)` | the **Generate image** button and the agent's `generate_image` tool |
+| `action` | `Act(ctx, ActRequest) (*ActResult, error)` | the deliverables worker, for approved deliverables of kinds without an action of their own (`document`) |
 | `tools` | `ExternalTools(ctx)`, `CallTool(ctx, name, args)` | agents the server is attached to, per tool permission (allow / ask / deny); see agentic-flow §11b |
 
 Optional extras:
@@ -146,7 +147,7 @@ until some are picked. Otherwise an empty `Accounts` means "use your defaults". 
 [publisher-mcp.md](publisher-mcp.md)) requires accounts.
 
 When a publish fails after something was created remotely, return a `*connector.PartialError` with the
-external IDs that exist. The dispatch worker keeps them on the failed post and passes them back as
+external IDs that exist. The deliverables worker keeps them on the failed item and passes them back as
 `PublishRequest.Previous` on retry, so the connector can finish that attempt (the MCP publisher calls
 `publish_post`, which only retries the accounts that failed) instead of publishing a second copy.
 

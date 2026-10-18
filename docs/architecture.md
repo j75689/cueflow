@@ -10,28 +10,27 @@
 
 | Principle | How the architecture implements it |
 |---|---|
-| **Human-in-the-loop first** | Every post follows a strict state machine; only a human can move a post to `APPROVED`; publishers are wrapped in an authorization check so only the dispatch worker can call them, and only for that one approved post |
+| **Human-in-the-loop first** | Every deliverable (a post, a document...) follows a strict state machine; only a human can move one to `APPROVED`; publishers and action connectors are wrapped in an authorization check so only the deliverables worker can call them, and only for that one approved item |
 | **Zero public exposure** | Everything is outbound polling (RSS / IMAP / MCP calls), no webhooks needed; binds to `127.0.0.1:3000` by default |
 | **Protocol-driven** | The core depends on no social platform SDK; publishing goes through MCP to a publisher server that owns the platforms, and that publisher is just a connector plugin |
 | **Everything is a plugin** | Publishers, sources, search, LLMs and notifiers are all connectors sharing one registration / configuration / encryption mechanism |
-| **One process, easy to deploy** | A single Go binary (API + scheduler + publish worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL |
-| **Observable and auditable** | Every post status change and human edit is written to `audit_logs`; every agent step is written to the task thread and `agent_runs` |
+| **One process, easy to deploy** | A single Go binary (API + scheduler + deliverables worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL |
+| **Observable and auditable** | Every deliverable status change and human edit is written to `deliverable_audit_logs`; every agent step is written to the task thread and `agent_runs` |
 
 ## 2. System overview
 
 ```mermaid
 flowchart TB
     subgraph Browser["Browser (localhost:3000)"]
-        UI["Dashboard<br/>Command · Board · Agents · Review<br/>Schedules · Runs · Usage · Connectors"]
+        UI["Dashboard<br/>Command · Board · Agents · Deliverables<br/>Schedules · Usage · Connectors · Runners"]
     end
 
     subgraph Core["CueFlow (single Go process)"]
         API["REST API + SSE<br/>internal/api"]
         Broker(("Event Broker<br/>internal/events"))
         Sched["Scheduler (cron)<br/>internal/scheduler"]
-        Pipe["Pipeline Runner<br/>internal/content/pipeline"]
         Crew["Agent Team Runner<br/>internal/crew"]
-        Disp["Dispatch Worker<br/>internal/content/dispatch"]
+        Deliv["Deliverables Worker<br/>internal/deliverable"]
         Hub["Connector Hub<br/>internal/hub"]
         Reg["Connector Registry<br/>internal/connector"]
         Guard{{"Publish Guard<br/>internal/guard"}}
@@ -46,6 +45,7 @@ flowchart TB
         LLM["llm: OpenAI-compatible (OpenRouter · Azure) · Claude API · Bedrock · Vertex (Claude, Gemini)"]
         Notif["notifier: SMTP"]
         Pub["publisher: MCP publisher"]
+        Act["action: MCP action"]
     end
 
     Publisher["Publisher MCP server<br/>Threads · Instagram · YouTube"]
@@ -53,20 +53,17 @@ flowchart TB
     UI <-->|"JSON / SSE"| API
     API --> Store
     API --> Crew
-    API --> Disp
-    API --> Pipe
+    API --> Deliv
     Broker -->|"SSE push"| API
-    Sched -->|"cron trigger"| Pipe
     Sched -->|"create scheduled tasks"| Crew
-    Pipe --> Hub
     Crew --> Hub
-    Disp --> Hub
+    Deliv --> Hub
     Hub --> Reg
-    Reg --> Src & Search & LLM & Notif & Pub
-    Pub -.->|"must pass"| Guard
+    Reg --> Src & Search & LLM & Notif & Pub & Act
+    Pub & Act -.->|"must pass"| Guard
     Pub -->|"JSON-RPC over HTTP"| Publisher
     Store --> DB
-    Pipe & Crew & Disp -->|"events"| Broker
+    Crew & Deliv -->|"events"| Broker
 ```
 
 ### 2.1 Package responsibilities
@@ -88,8 +85,8 @@ flowchart TB
 | `internal/llm` | Provider-neutral chat types used by the tool loops; LLM connectors translate to their wire formats |
 | `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory; the capability/tool registry modules add to |
 | `internal/content` | The social content module on deliverables: the `post` kind (platform rules as validation, publishing through a publisher connector as its action), source items, publisher accounts and the drafting tools; mounted on the core through `api.Module` and the crew registry |
-| `internal/deliverable` | The deliverables module: typed items (kinds with payload validation) any agent can produce, the same review state machine and audit log as posts, and a worker that runs an action connector under a grant after approval |
-| `internal/scheduler` | cron: spawns scheduled tasks, fires the cron rows and periodic jobs modules register (pipelines, the review digest) |
+| `internal/deliverable` | The deliverables module: typed items (kinds with payload validation) any agent can produce, one review state machine with an audit log, and a worker that, after approval, runs the kind's own action (a post is published) or an action connector, under a grant |
+| `internal/scheduler` | cron: spawns scheduled tasks and fires the cron rows and periodic jobs modules register |
 | `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
 | `internal/jobs` | Background work requests ("run this task", "fire this schedule", plus the kinds modules register): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |
 | `internal/acpx` / `internal/acpdrive` | Launches ACP agents over stdio; drives one prompt through one under CueFlow's sandbox policy; shared by the server and runners |
@@ -105,13 +102,12 @@ flowchart TB
 
 ### 2.2 Background loops
 
-A CueFlow process runs four kinds of background work, which communicate only through database state:
+A CueFlow process runs three kinds of background work, which communicate only through database state:
 
 | Loop | Frequency | What it does |
 |---|---|---|
-| Scheduler | cron expressions | Triggers pipeline runs; creates tasks from schedules; (optional) sends the review digest |
-| Pipeline Runner | when triggered | One full "collect → generate → pending review" pass, capped at 30 minutes |
-| Dispatch Worker | every 3 seconds, or woken immediately after an approval | Sends approved posts for publishing |
+| Scheduler | cron expressions | Creates tasks from schedules; fires the cron rows and periodic jobs modules register |
+| Deliverables Worker | every 3 seconds (`CUEFLOW_DISPATCH_INTERVAL`), or woken immediately after an approval or a retry | Acts on approved deliverables: publishes a post, runs the action connector |
 | Crew (agent runner) | every 2 seconds, or woken immediately when there is a new task | Claims `TODO` tasks and lets agents work them, 3 at a time by default |
 
 "Waking" is a non-blocking channel notification, so work starts almost immediately after an approval or an assignment; the periodic polling is only a safety net.
@@ -201,17 +197,15 @@ Adding an integration needs no core changes: add a package and one blank import 
 ```mermaid
 erDiagram
     connectors ||--o{ source_items : "fetches"
-    connectors ||--o{ pipelines : "referenced by (LLM / search / publisher / notifier)"
     connectors ||--o{ agents : "referenced by (LLM / search / sources)"
-    pipelines ||--o{ pipeline_runs : "runs"
-    pipeline_runs ||--o{ posts : "produces"
-    posts ||--o{ audit_logs : "audited by"
+    connectors ||--o{ deliverables : "acts on (publisher / action)"
+    deliverables ||--o{ deliverable_audit_logs : "audited by"
     agents ||--o{ agent_memories : "remembers"
     agents ||--o{ tasks : "assigned"
     tasks ||--o{ tasks : "subtasks"
     tasks ||--o{ task_messages : "thread"
     tasks ||--o{ agent_runs : "runs"
-    tasks ||--o{ posts : "drafts"
+    tasks ||--o{ deliverables : "produces"
     schedules ||--o{ tasks : "spawns"
     agents ||--o{ schedules : "assigned"
 ```
@@ -220,99 +214,102 @@ erDiagram
 |---|---|
 | `connectors` | Plain settings in `config` (JSONB, displayable); secret fields encrypted into `secrets` (BYTEA); `state` lets plugins store a cursor |
 | `source_items` | `UNIQUE(connector_id, external_id)` gives delta fetching (GUID for RSS, Message-ID for mail); `consumed_at` keeps the same item from being written up twice |
-| `pipelines` / `pipeline_runs` | Scheduled content pipelines and per-run stats and step logs |
-| `posts` | Status, thread parts, hashtags, media, `version` (optimistic locking), `lease_until` (publish lease), `external_post_ids`, `task_id` / `run_id` (provenance) |
-| `audit_logs` | Every status change and edit (with before/after diffs); `seq` preserves order within one transaction |
+| `deliverables` | `kind`, JSON `payload`, status, `version` (optimistic locking), `lease_until` / `attempts` (action lease), `external_ids` / `result` (what the action returned), `action_connector_id`, `task_id` (provenance) |
+| `deliverable_audit_logs` | Every status change and edit (with payload diffs) |
 | `agents` / `agent_memories` | Role configuration and long-term memory |
 | `tasks` / `task_messages` / `agent_runs` | Board tasks, threads, and per-run turn and token counts |
 | `schedules` | cron settings that create tasks |
 
-Migrations live in `internal/db/migrations/` and are applied automatically at startup.
+Migrations live in `internal/db/migrations/` and are applied automatically at startup. `posts`, `pipelines`,
+`pipeline_runs` and `audit_logs` are left over from the earlier posts path: nothing reads or writes them, they
+only keep the history of installations that used it.
 
-## 5. Post lifecycle and publishing
+## 5. Deliverable lifecycle and acting on approval
+
+A deliverable is anything an agent produces that a human must approve before the system acts: a `post`
+(content module) or a `document` (built in), each a *kind* with its own payload validation. The content
+module's post is the case the mechanism was derived from.
 
 ### 5.1 State machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFT: created manually / generated by an agent
-    DRAFT --> PENDING_REVIEW: submitted (automatic after generation)
+    [*] --> DRAFT: created by a human
+    [*] --> PENDING_REVIEW: filed by an agent
+    DRAFT --> PENDING_REVIEW: submitted
     PENDING_REVIEW --> APPROVED: human approves
     PENDING_REVIEW --> REJECTED: human rejects (reason required)
-    APPROVED --> QUEUED: picked up by the publish worker
-    QUEUED --> PUBLISHED: accepted by the publisher
-    QUEUED --> FAILED: publish error / worker died mid-publish
+    APPROVED --> QUEUED: picked up by the deliverables worker
+    QUEUED --> DONE: the action succeeded (or there was nothing to run)
+    QUEUED --> FAILED: action error / worker died mid-action
     FAILED --> QUEUED: manual retry
     REJECTED --> [*]
-    PUBLISHED --> [*]
+    DONE --> [*]
 ```
 
-- Transitions are defined in exactly one place, `internal/content/post.go`; anything not in the table returns `invalid_transition`.
-- Only `DRAFT` / `PENDING_REVIEW` posts can be edited; edits must carry `version`, and a stale version returns `409`.
-- Each transition and its audit entry are written in **the same transaction**.
+- Transitions are defined in exactly one place, `internal/deliverable/deliverable.go`; anything not in the table returns `invalid_transition`.
+- Only `DRAFT` / `PENDING_REVIEW` items can be edited; edits must carry `version`, and a stale version returns `409`.
+- Each transition and its audit entry (`deliverable_audit_logs`) are written in **the same transaction**.
 
-### 5.2 Publish flow
+### 5.2 What approval leads to
+
+Approval ends the review and starts exactly one action, run by the deliverables worker (`internal/deliverable/worker.go`):
+
+| Kind | Action after approval |
+|---|---|
+| `post` | The content module's `Act`: publish through the publisher connector named on the item (or the org's first active one), to the accounts picked in the editor |
+| `document` (and any kind without its own `Act`) | The org's action connector (`mcp_action`, tool `deliver`), named on the item or the first active one; with no action connector the item is `DONE` as soon as it is approved: the review itself was the point |
 
 ```mermaid
 sequenceDiagram
     actor R as Reviewer
     participant API
     participant DB as PostgreSQL
-    participant W as Dispatch Worker
-    participant P as MCP publisher connector
-    participant Z as Publisher MCP server
+    participant W as Deliverables Worker
+    participant P as publisher / action connector
+    participant Z as MCP server
 
-    R->>API: POST /posts/{id}/approve
+    R->>API: POST /deliverables/{id}/approve
     API->>DB: PENDING_REVIEW → APPROVED (+ audit)
     API->>W: Wake()
     W->>DB: APPROVED → QUEUED (+ audit)
-    W->>DB: claim: lease_until = now+5m, attempts+1 (SKIP LOCKED)
-    W->>W: ctx = WithPublishGrant(postID)
-    W->>P: Publish(ctx, req)
-    P->>P: guard.CheckPublish(ctx, postID)
-    P->>Z: list_accounts → create_upload (videos) → create_post
+    W->>DB: claim: lease_until = now+10m, attempts+1 (SKIP LOCKED)
+    W->>W: ctx = WithPublishGrant(deliverableID)
+    W->>P: Act / Publish(ctx, req)
+    P->>P: guard.CheckPublish(ctx, deliverableID)
+    P->>Z: list_accounts → create_upload → create_post · or deliver
     alt success
-        Z-->>P: id, results
-        W->>DB: QUEUED → PUBLISHED, external_post_ids
-    else failure (including the publisher refusing the post)
+        Z-->>P: external ids
+        W->>DB: QUEUED → DONE, external_ids, result
+    else failure (including the server refusing the item)
         W->>DB: QUEUED → FAILED, error_message
     end
 ```
 
-### 5.3 Preventing duplicate posts
+### 5.3 Preventing duplicate actions
 
-The worker takes a lease (`lease_until`) before publishing. If it dies mid-publish and the lease expires, the post is marked `FAILED` on the next start with a note that it "may have been published; check the platform before retrying". It is **never retried automatically**: we cannot know whether the publisher already received it, so an automatic retry could double-post.
+The worker takes a lease (`lease_until`, length `CUEFLOW_DISPATCH_LEASE`) before acting. If it dies mid-action and the lease expires, the item is marked `FAILED` on the next sweep with a note that the action "may or may not have happened; check before retrying". It is **never retried automatically**: we cannot know whether the publisher already received it, so an automatic retry could double-post. A human retries from the Deliverables page (`FAILED → QUEUED`).
 
-### 5.4 Simple schedules (pipelines)
+### 5.4 Agents and deliverables
 
-The dashboard shows pipelines as **simple schedules** on the Schedules page, next to agent-task schedules;
-the API and tables keep the name `pipelines`. A pipeline is a simpler, more predictable automation than
-the agent team:
-
-1. cron triggers it; `SELECT … FOR UPDATE` plus "only one RUNNING run per pipeline" prevents overlapping runs.
-2. Each source connector is fetched incrementally into `source_items` (duplicates are skipped).
-3. Unused items within the lookback window are loaded (up to `max_items`).
-4. The generator in `internal/content/pipeline` exposes only `web_search` and `submit_drafts` and produces one draft per platform; Threads / X content over the character limit is split into a thread automatically.
-5. Drafts are stored as `PENDING_REVIEW` posts, the items are marked consumed, and a review reminder email is sent.
-
-Work that needs understanding, breakdown, delegation or follow-up questions goes to the agent team; fixed-format daily drafting is cheaper and steadier as a pipeline.
+Agents never approve and never publish. The `post_deliverables` capability ("Drafting" in the UI) gives `create_post_draft` / `list_posts` / `revise_draft`, which write `post` deliverables; the `deliverables` capability gives the generic create / list / revise for any registered kind. Both file items as `PENDING_REVIEW` under the agent's name, and a task's deliverables are listed on its card. Recurring drafting is an ordinary schedule: a cron expression that creates a task for the writer agent (see [agentic-flow.md](agentic-flow.md)).
 
 ## 6. Security model
 
 | Threat | Mitigation |
 |---|---|
-| An LLM hallucinates or is prompt-injected into publishing directly | No agent tool can publish; agent runs carry a context marker that `guardedPublisher` rejects; publishing requires a grant issued by the dispatch worker for **that specific post** |
+| An LLM hallucinates or is prompt-injected into publishing directly | No agent tool can publish; agent runs carry a context marker that `guardedPublisher` / `guardedActor` reject; publishing or acting requires a grant issued by the deliverables worker for **that specific deliverable** |
 | External material (RSS, web pages) carries injected instructions | Same as above: the worst case is a draft waiting for review; every agent action is written to the thread and traceable |
 | An agent is steered into the internal network (SSRF) | `read_url` checks the resolved IP at dial time and blocks loopback, private ranges, link-local (including cloud metadata `169.254.169.254`) and CGNAT; redirects are re-checked; the system proxy is bypassed |
 | A database leak exposes credentials | Connector secret fields are AES-256-GCM encrypted with the connector ID as associated data (a ciphertext moved to another row will not decrypt); the API never returns secret values |
 | Unauthorized access to the console | Binds to localhost by default; `CUEFLOW_ADMIN_TOKEN` can require a Bearer token (compared in constant time) |
-| External agents driving the board over MCP | `/mcp` is off unless `CUEFLOW_MCP_TOKEN` is set; it can manage tasks but has no tool that approves or publishes posts |
+| External agents driving the board over MCP | `/mcp` is off unless `CUEFLOW_MCP_TOKEN` is set; it can manage tasks but has no tool that approves or acts on deliverables |
 | An agent runs away creating tasks or spending money | Per-run caps on turns, subtasks, drafts and delegation depth; schedules fire at most every 5 minutes (see agentic-flow.md) |
-| A worker crash causes a duplicate post | Leases, see 5.3 |
+| A worker crash causes a duplicate post or action | Leases, see 5.3 |
 
 ## 7. Live updates
 
-`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (posts, tasks, threads, runs, connectors, agents, schedules) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
+`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (deliverables, tasks, threads, runs, connectors, agents, schedules, orgs, runners) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
 
 ## 8. Deployment topology
 
@@ -338,17 +335,17 @@ The same binary and image run in the cloud with `CUEFLOW_QUEUE=cloudtasks` and `
 
 ```
  Cloud Scheduler ── every minute ──► POST /internal/tick
-        claims due schedules/pipelines/digest (next_run_at), sweeps abandoned work, enqueues what is waiting
+        claims due schedules and the modules' cron rows (next_run_at), sweeps abandoned work, enqueues what is waiting
 
- user / agent action ─► cueflow ── writes DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|dispatch|pipeline|schedule}/{id}
+ user / agent action ─► cueflow ── writes DB ── Wake() ──► Cloud Tasks ──► POST /internal/work/{crew|schedule|approval|deliver}/{id}
                                                                           claim atomically, do the work, return
  /api/runner/*, /mcp/run/{token}: served by any instance (credentials and outcomes live in the database)
 ```
 
 | Concern | How it works |
 |---|---|
-| Work delivery | `jobs.Queue` (`internal/jobs`): `Wake()` on the crew and publish worker enqueues a delivery; `internal/jobs/cloudtasks` posts it to Cloud Tasks over REST. Delivery is at least once; every handler starts with an atomic claim, so duplicates find nothing to do. Handlers claim *whichever work is next* (the id is for naming and de-duplication), loop until none is left, and stop after 25 minutes, re-enqueueing if work remains |
-| The clock | `Scheduler.Tick` uses `next_run_at` on schedules and pipelines and a `clock` row for the digest. Due rows are claimed with `FOR UPDATE SKIP LOCKED` and moved forward in one transaction, so concurrent ticks fire an activation once. A row without `next_run_at` (new or edited) is only scheduled; an activation more than 15 minutes late is skipped |
+| Work delivery | `jobs.Queue` (`internal/jobs`): `Wake()` on the crew and the deliverables worker enqueues a delivery; `internal/jobs/cloudtasks` posts it to Cloud Tasks over REST. Delivery is at least once; every handler starts with an atomic claim, so duplicates find nothing to do. Handlers claim *whichever work is next* (the id is for naming and de-duplication), loop until none is left, and stop after 25 minutes, re-enqueueing if work remains |
+| The clock | `Scheduler.Tick` uses `next_run_at` on schedules and on the cron tables modules register (`store.ClockTables`). Due rows are claimed with `FOR UPDATE SKIP LOCKED` and moved forward in one transaction, so concurrent ticks fire an activation once. A row without `next_run_at` (new or edited) is only scheduled; an activation more than 15 minutes late is skipped |
 | Cleanup | The start-up "everything running is stale" cleanup is skipped in the cloud; `Store.FailAbandoned` on the tick closes work whose lease or age shows its owner is gone |
 | Per-run MCP | The run's token is a row in `run_tokens`; any instance rebuilds the tool server from it. A terminal tool call writes its outcome there and the waiting instance polls it, so the call may be served elsewhere |
 | Cancel | The running instance's heartbeat cancels the run when its task is no longer `IN_PROGRESS`, so a cancel on any instance takes effect within one lease interval |
