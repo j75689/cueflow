@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 3 * * 1"   # weekly, so a new advisory is noticed without waiting for a change
+
+permissions:
+  contents: read
 
 jobs:
   go:
@@ -23,10 +28,25 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # go.mod / go.sum must be exactly what tidy produces; a hand-edited bump that leaves go.sum
+      # stale would otherwise pass until someone ran tidy locally.
+      - run: go mod tidy && git diff --exit-code -- go.mod go.sum
       - run: go vet ./...
       - run: go test -race -count=1 ./...
         env:
           CUEFLOW_TEST_DATABASE_URL: postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable
+
+  # Known vulnerabilities reachable from this code (symbol level, so an advisory in a function the
+  # binary never calls does not fail the build). The scanner is always the latest: it is the database
+  # that matters, not the pinned tool.
+  vulns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   web:
     runs-on: ubuntu-latest
