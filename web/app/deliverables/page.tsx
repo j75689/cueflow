@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { STATUS_LABEL, STATUS_STYLE, StatusBadge } from "@/components/badges";
 import { RejectDialog } from "@/components/post";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
-import { Button, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, Select, cx } from "@/components/ui";
-import { api } from "@/lib/api";
+import { Button, Checkbox, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, Select, cx } from "@/components/ui";
+import { api, errorMessage } from "@/lib/api";
 import { fmtRelative, shortId } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Deliverable, DeliverableStatus } from "@/lib/types";
@@ -36,6 +36,10 @@ export default function DeliverablesPage() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<Deliverable | null>(null);
+  // Bulk selection: ids of pending deliverables.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<"approve" | "reject" | null>(null);
 
   const debounceQuery = useDebouncedCallback(() => setQuery(q.trim()), 300);
   useEffect(debounceQuery, [q, debounceQuery]);
@@ -68,6 +72,36 @@ export default function DeliverablesPage() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const pending = items.data?.items.filter((d) => d.status === "PENDING_REVIEW") ?? [];
+  const chosen = pending.filter((d) => selected.has(d.id));
+  const toggleSelect = (id: string, on: boolean) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  // bulk runs fn over the chosen deliverables one by one and reports what failed and why.
+  const bulk = async (verb: "approve" | "reject", fn: (d: Deliverable) => Promise<unknown>) => {
+    setBulkBusy(verb);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const d of chosen) {
+      try {
+        await fn(d);
+        ok++;
+      } catch (e) {
+        failed.push(`${d.title || shortId(d.id)}: ${errorMessage(e)}`);
+      }
+    }
+    setBulkBusy(null);
+    setSelected(new Set());
+    refresh();
+    if (ok) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${ok} deliverable${ok === 1 ? "" : "s"}`);
+    if (failed.length) toast.error(`Could not ${verb}: ${failed.join("; ")}`);
   };
 
   const counts = stats.data?.deliverables_by_status ?? {};
@@ -174,6 +208,32 @@ export default function DeliverablesPage() {
       {items.error && <ErrorBox onRetry={items.reload}>{items.error}</ErrorBox>}
       {items.loading && !items.data && <Loading />}
 
+      {pending.length > 0 && (
+        <div className="sticky top-0 z-20 mb-2.5 flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-surface/95 px-3 py-1.5 backdrop-blur">
+          <Checkbox
+            checked={chosen.length > 0 && chosen.length === pending.length}
+            onChange={(on) => setSelected(on ? new Set(pending.map((d) => d.id)) : new Set())}
+            label={chosen.length ? `${chosen.length} selected` : "Select all"}
+          />
+          {chosen.length > 0 && (
+            <div className="ml-auto flex gap-1.5">
+              <Button size="sm" variant="ghost" onClick={() => setBulkRejecting(true)} disabled={!!bulkBusy}>
+                Reject {chosen.length}
+              </Button>
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() => void bulk("approve", (d) => api.approveDeliverable(d.id))}
+                loading={bulkBusy === "approve"}
+                disabled={!!bulkBusy}
+              >
+                <Icon name="check" className="h-3.5 w-3.5" /> Approve {chosen.length}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {items.data && (
         <div className="space-y-2.5">
           {items.data.items.length === 0 ? (
@@ -192,27 +252,41 @@ export default function DeliverablesPage() {
             items.data.items.map((d) => (
               <article
                 key={d.id}
-                className="rounded-xl border border-line bg-surface p-4 shadow-card transition-colors hover:border-line-strong"
+                className={cx(
+                  "rounded-xl border bg-surface p-4 shadow-card transition-colors",
+                  selected.has(d.id) ? "border-accent-solid ring-1 ring-accent-solid/30" : "border-line hover:border-line-strong",
+                )}
               >
                 <div className="flex flex-wrap items-start gap-2">
-                  <div className="min-w-0 flex-1 basis-full sm:basis-0">
-                    <Link
-                      href={`/deliverables/view/?id=${d.id}`}
-                      className="line-clamp-1 text-sm font-semibold text-fg hover:text-accent"
-                    >
-                      {d.title || <span className="text-fg-4">Untitled</span>}
-                    </Link>
-                    <p className="mt-1 line-clamp-2 text-sm text-fg-2">{excerpt(d)}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">
-                      <Pill>{kindName[d.kind] ?? d.kind}</Pill>
-                      <span className="font-mono">#{shortId(d.id)}</span>
-                      <span>{d.created_by === "system_agent" ? "by an agent" : "by a person"}</span>
-                      <span title={d.updated_at}>{fmtRelative(d.updated_at)}</span>
-                      {d.task_id && (
-                        <Link className="hover:underline" href={`/tasks/view/?id=${d.task_id}`}>
-                          task
-                        </Link>
-                      )}
+                  <div className="flex min-w-0 flex-1 basis-full gap-3 sm:basis-0">
+                    {d.status === "PENDING_REVIEW" && (
+                      <div className="pt-0.5">
+                        <Checkbox
+                          checked={selected.has(d.id)}
+                          onChange={(on) => toggleSelect(d.id, on)}
+                          label={<span className="sr-only">Select {d.title || "deliverable"}</span>}
+                        />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`/deliverables/view/?id=${d.id}`}
+                        className="line-clamp-1 text-sm font-semibold text-fg hover:text-accent"
+                      >
+                        {d.title || <span className="text-fg-4">Untitled</span>}
+                      </Link>
+                      <p className="mt-1 line-clamp-2 text-sm text-fg-2">{excerpt(d)}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">
+                        <Pill>{kindName[d.kind] ?? d.kind}</Pill>
+                        <span className="font-mono">#{shortId(d.id)}</span>
+                        <span>{d.created_by === "system_agent" ? "by an agent" : "by a person"}</span>
+                        <span title={d.updated_at}>{fmtRelative(d.updated_at)}</span>
+                        {d.task_id && (
+                          <Link className="hover:underline" href={`/tasks/view/?id=${d.task_id}`}>
+                            task
+                          </Link>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -244,6 +318,12 @@ export default function DeliverablesPage() {
           if (!rejecting) return;
           await run(rejecting.id, () => api.rejectDeliverable(rejecting.id, reason), "Rejected");
         }}
+      />
+      <RejectDialog
+        open={bulkRejecting}
+        title={`Reject ${chosen.length} deliverable${chosen.length === 1 ? "" : "s"}`}
+        onClose={() => setBulkRejecting(false)}
+        onConfirm={(reason) => bulk("reject", (d) => api.rejectDeliverable(d.id, reason))}
       />
     </div>
   );
