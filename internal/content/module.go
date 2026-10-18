@@ -20,10 +20,6 @@ var registerOnce sync.Once
 func register() {
 	registerOnce.Do(func() {
 		store.ValidatePlatforms = ValidatePlatforms
-		// Agents saved while posts had their own table: "drafting" is this module's drafting
-		// capability under its old name, and "imaging" (images for posts) is gone.
-		store.CapabilityAliases["drafting"] = PostDeliverablesCapability
-		store.CapabilityAliases["imaging"] = ""
 		registerTools()
 		registerPostTools()
 	})

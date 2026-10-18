@@ -47,14 +47,9 @@ type Agent struct {
 	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
-// CapabilityAliases maps capability ids that no longer exist to their replacement ("" means the
-// capability is simply gone). Agents saved with an old id keep working (Has answers for the
-// replacement) and are rewritten to the new id the next time they are saved. Modules set it.
-var CapabilityAliases = map[string]string{}
-
 func (a *Agent) Has(capability string) bool {
 	for _, c := range a.Capabilities {
-		if c == capability || CapabilityAliases[c] == capability {
+		if c == capability {
 			return true
 		}
 	}
@@ -153,9 +148,6 @@ func (a *Agent) normalize() error {
 	caps := []string{}
 	for _, c := range a.Capabilities {
 		c = strings.TrimSpace(c)
-		if r, ok := CapabilityAliases[c]; ok {
-			c = r
-		}
 		if c == "" || seen[c] {
 			continue
 		}

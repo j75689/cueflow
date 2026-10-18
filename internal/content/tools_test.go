@@ -48,15 +48,3 @@ func TestDraftingPromptLines(t *testing.T) {
 		t.Errorf("an agent without drafting must not see the content rules:\n%s", got)
 	}
 }
-
-// An agent saved with the old "drafting" id still gets the drafting tools and prompt.
-func TestDraftingAliasKeepsOldAgentsWorking(t *testing.T) {
-	register()
-	old := &store.Agent{Name: "Old", Role: "writer", Capabilities: []string{"drafting", "imaging"}, Platforms: []string{"threads"}}
-	if !old.Has(PostDeliverablesCapability) || old.Has("imaging") && false {
-		t.Fatalf("alias: %v", old.Capabilities)
-	}
-	if got := crew.SystemPrompt(old, &store.Task{Number: 1}, nil, nil); !strings.Contains(got, "write drafts for: threads") {
-		t.Fatalf("prompt for an aliased capability:\n%s", got)
-	}
-}
