@@ -111,14 +111,14 @@ func TestMediaRegisterAndDelete(t *testing.T) {
 	var post struct {
 		ID string `json:"id"`
 	}
-	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "media_urls": []string{m.URL}, "submit": true}, &post)
+	e.do("POST", "/deliverables", map[string]any{"kind": "post", "title": "hi", "payload": map[string]any{"content": "hi", "platforms": []string{"threads"}, "media_urls": []string{m.URL}}, "submit": true}, &post)
 	if code := e.do("DELETE", "/media/"+m.ID, nil, nil); code != 409 {
 		t.Fatalf("delete in use: %d", code)
 	}
 	if n, err := e.store.PruneMedia(context.Background(), 0, true); err != nil || n != 0 {
 		t.Fatalf("prune dry run with a used item: %d %v", n, err)
 	}
-	if code := e.do("POST", "/posts/"+post.ID+"/reject", map[string]any{"reason": "no"}, nil); code != 200 && code != 204 {
+	if code := e.do("POST", "/deliverables/"+post.ID+"/reject", map[string]any{"reason": "no"}, nil); code != 200 && code != 204 {
 		t.Fatalf("reject: %d", code)
 	}
 	if n, err := e.store.PruneMedia(context.Background(), 24*time.Hour, false); err != nil || n != 0 {

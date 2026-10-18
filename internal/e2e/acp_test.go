@@ -14,7 +14,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -170,7 +170,7 @@ func TestExternalACPAgentRun(t *testing.T) {
 	}
 
 	var agent store.Agent
-	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"drafting"},
+	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"post_deliverables"},
 		"runtime_connector_id": rt.ID}, &agent); code != 201 {
 		t.Fatalf("create agent: %d", code)
 	}
@@ -186,8 +186,8 @@ func TestExternalACPAgentRun(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "bash_refused=true") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.cs.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
+	posts, _ := e.ds.ForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != deliverable.StatusPendingReview {
 		t.Fatalf("draft not created through MCP: %+v", posts)
 	}
 

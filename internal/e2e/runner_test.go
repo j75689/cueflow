@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -31,7 +31,7 @@ func TestRunnerExecutesTask(t *testing.T) {
 	}
 	var agent store.Agent
 	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer",
-		"capabilities": []string{"drafting"}, "runtime_connector_id": pool.ID}, &agent); code != 201 {
+		"capabilities": []string{"post_deliverables"}, "runtime_connector_id": pool.ID}, &agent); code != 201 {
 		t.Fatalf("create agent: %d", code)
 	}
 
@@ -77,8 +77,8 @@ func TestRunnerExecutesTask(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "bash_refused=true") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.cs.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
+	posts, _ := e.ds.ForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != deliverable.StatusPendingReview {
 		t.Fatalf("draft not created by the runner's agent: %+v", posts)
 	}
 	var msgs []store.TaskMessage
@@ -120,7 +120,7 @@ func TestRunnerJobMatching(t *testing.T) {
 	ctx := context.Background()
 	org, _ := e.store.DefaultOrg(ctx)
 	var agent store.Agent
-	e.do("POST", "/agents", map[string]any{"name": "A", "slug": "a", "capabilities": []string{"drafting"}}, &agent)
+	e.do("POST", "/agents", map[string]any{"name": "A", "slug": "a", "capabilities": []string{"post_deliverables"}}, &agent)
 	var task store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "T", "assignee_agent_id": agent.ID}, &task)
 	if _, err := e.store.CreateRunnerJob(ctx, store.NewRunnerJob{OrgID: org.ID, TaskID: task.ID, Labels: []string{"gpu", "linux"}, Payload: map[string]any{}}); err != nil {

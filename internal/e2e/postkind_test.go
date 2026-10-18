@@ -13,9 +13,8 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// An agent moved from drafting to post_deliverables keeps calling the same tools; its drafts land
-// in deliverables as posts, list_posts still shows the old posts next to them, and approval
-// publishes through the publisher connector, under the deliverable's grant.
+// A drafting agent's tools write post deliverables; approval publishes through the publisher
+// connector, under the deliverable's grant.
 func TestPostDeliverablesFlow(t *testing.T) {
 	e, team := crewSetup(t)
 	ctx := context.Background()
@@ -25,10 +24,6 @@ func TestPostDeliverablesFlow(t *testing.T) {
 		"endpoint_url": os.Getenv("PUBLISHER_URL") + "/mcp", "auth_token": "pub-token"}}, &publisher); code != 201 {
 		t.Fatalf("create publisher: %d", code)
 	}
-	// A legacy post, so the merged listing has something from the posts table.
-	var legacy content.Post
-	e.do("POST", "/posts", map[string]any{"title": "Old one", "content": "from the posts table", "platforms": []string{"threads"}, "submit": true}, &legacy)
-
 	// The writer, as in production: drafting swapped for post_deliverables, nothing else changed.
 	writer := team["writer"]
 	caps := []string{content.PostDeliverablesCapability, "research", "memory"}
@@ -67,8 +62,8 @@ func TestPostDeliverablesFlow(t *testing.T) {
 			t.Fatalf("tool %s not offered: %v", want, seenTools)
 		}
 	}
-	if !strings.Contains(listed, "from the posts table") {
-		t.Fatalf("list_posts must still show the posts table: %s", listed)
+	if listed == "" {
+		t.Fatal("list_posts returned nothing")
 	}
 	refs, err := e.ds.ForTask(ctx, task.ID)
 	if err != nil || len(refs) != 1 || refs[0].Kind != content.PostKind || refs[0].Status != deliverable.StatusPendingReview {

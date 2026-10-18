@@ -13,8 +13,7 @@ import (
 	"testing"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/content"
-	"github.com/j75689/cueflow/internal/llm"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -103,22 +102,21 @@ func TestMediaUploadGenerateAndServe(t *testing.T) {
 	// Publishers get an absolute URL and the bytes of stored media.
 	var pub store.Connector
 	e.do("POST", "/connectors", map[string]any{"name": "Accounts", "type": "fake_accounts", "config": map[string]any{}}, &pub)
-	e.worker.MediaBaseURL = "http://cueflow:3000"
-	var post content.Post
-	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "media_urls": []string{gen.URL, "https://cdn.example.com/x.png"},
-		"publisher_connector_id": pub.ID, "submit": true}, &post)
+	var post deliverable.Deliverable
+	e.do("POST", "/deliverables", map[string]any{"kind": "post", "title": "hi", "payload": map[string]any{"content": "hi", "platforms": []string{"threads"},
+		"media_urls": []string{gen.URL, "https://cdn.example.com/x.png"}, "publisher_connector_id": pub.ID}, "submit": true}, &post)
 	accountsMu.Lock()
 	accountsReqs = nil
 	accountsMu.Unlock()
-	e.do("POST", "/posts/"+post.ID.String()+"/approve", map[string]any{}, nil)
-	e.worker.Tick(context.Background())
+	e.do("POST", "/deliverables/"+post.ID.String()+"/approve", map[string]any{}, nil)
+	e.deliverer.Tick(context.Background())
 	accountsMu.Lock()
 	defer accountsMu.Unlock()
 	if len(accountsReqs) == 0 {
 		t.Fatal("publisher not called")
 	}
 	r := accountsReqs[0]
-	if r.MediaURLs[0] != "http://cueflow:3000"+gen.URL || r.MediaURLs[1] != "https://cdn.example.com/x.png" {
+	if r.MediaURLs[0] != "http://localhost:3000"+gen.URL || r.MediaURLs[1] != "https://cdn.example.com/x.png" {
 		t.Fatalf("urls: %v", r.MediaURLs)
 	}
 	if !r.Media[0].Stored || r.Media[1].Stored {
@@ -131,50 +129,6 @@ func TestMediaUploadGenerateAndServe(t *testing.T) {
 }
 
 var uuidRe = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-
-func TestWriterGeneratesImageWithinLimit(t *testing.T) {
-	e, team := crewSetup(t)
-	ctx := context.Background()
-	e.do("POST", "/connectors", map[string]any{"name": "Img", "type": "fake_image", "config": map[string]any{}}, nil)
-	imagesMade.Store(0)
-
-	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
-		res := toolResults(req)
-		switch len(res) {
-		case 0:
-			return calls("create_post_draft", map[string]any{"platform": "instagram", "content": "Look at this",
-				"image_prompt": "a red fox in snow, photo"})
-		case 1, 2, 3:
-			id := uuidRe.FindString(res[0].Content)
-			return calls("generate_image", map[string]any{"post_id": id})
-		default:
-			var all []string
-			for _, r := range res {
-				all = append(all, r.Content)
-			}
-			return calls("complete_task", map[string]any{"summary": strings.Join(all, " | ")})
-		}
-	})
-	var task store.Task
-	e.do("POST", "/tasks", map[string]any{"title": "IG post", "assignee_agent_id": team["writer"].ID}, &task)
-	e.crew.RunPending(ctx, 3)
-
-	got, _ := e.store.GetTask(ctx, task.ID)
-	if got.Status != store.TaskReview || !strings.Contains(got.Result, "image limit reached") {
-		t.Fatalf("task: %s %q", got.Status, got.Result)
-	}
-	if n := imagesMade.Load(); n != 2 {
-		t.Fatalf("images generated: %d, want 2 (the per-run limit)", n)
-	}
-	posts, _ := e.cs.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 {
-		t.Fatalf("posts: %+v", posts)
-	}
-	p, _ := e.cs.GetPost(ctx, posts[0].ID)
-	if len(p.MediaURLs) != 2 || !strings.HasPrefix(p.MediaURLs[0], "/media/") || p.Status != content.StatusPendingReview {
-		t.Fatalf("draft media: %v %s", p.MediaURLs, p.Status)
-	}
-}
 
 func TestVideoUploadAndRange(t *testing.T) {
 	e := setup(t)

@@ -18,7 +18,7 @@ func testSpecialists() []*store.Agent {
 		{
 			Name: "Writer", Slug: "writer", Avatar: "✍️", Role: "writer", IsActive: true,
 			Description:  "Turns material into platform-specific post drafts (short, opinionated Threads posts; structured Instagram captions with hashtags) and sends them to the review queue.",
-			Capabilities: []string{"drafting", "imaging", "research", "sources", "memory"},
+			Capabilities: []string{"post_deliverables", "research", "sources", "memory"},
 			Platforms:    []string{"threads", "instagram"},
 			Instructions: `You are a social media copywriter.
 - Write a separate create_post_draft for each platform. Never paste the same text across platforms.
@@ -29,7 +29,7 @@ func testSpecialists() []*store.Agent {
 		{
 			Name: "Editor", Slug: "editor", Avatar: "🧐", Role: "editor", IsActive: true,
 			Description:  "Checks pending drafts for accuracy, tone, length and platform rules, revises them directly and explains the changes. Never approves or publishes.",
-			Capabilities: []string{"drafting", "memory"},
+			Capabilities: []string{"post_deliverables", "memory"},
 			Instructions: `You are the quality editor.
 - Use list_posts to find PENDING_REVIEW drafts (or the drafts named in the task) and check each one: are the facts supported, does the tone fit the brand, is it within the length and hashtag limits, are there typos?
 - If a change is needed, use revise_draft and explain why in the note. If a draft is fine, leave it alone.

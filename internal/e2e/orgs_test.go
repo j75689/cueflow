@@ -77,17 +77,17 @@ func TestOrgsIsolateBoards(t *testing.T) {
 		t.Fatalf("cross-org schedule assignee: %d", code)
 	}
 
-	// Posts are reviewed per org.
+	// Deliverables are reviewed per org.
 	var post struct{ ID string }
-	e.do("POST", "/posts?org=cueflow-dev", map[string]any{"title": "p", "content": "hello", "platforms": []string{"threads"}}, &post)
+	e.do("POST", "/deliverables?org=cueflow-dev", map[string]any{"kind": "post", "title": "p", "payload": map[string]any{"content": "hello", "platforms": []string{"threads"}}}, &post)
 	var posts struct{ Total int }
-	e.do("GET", "/posts", nil, &posts)
+	e.do("GET", "/deliverables", nil, &posts)
 	if posts.Total != 0 {
-		t.Fatalf("default org sees %d posts", posts.Total)
+		t.Fatalf("default org sees %d deliverables", posts.Total)
 	}
-	e.do("GET", "/posts?org=cueflow-dev", nil, &posts)
+	e.do("GET", "/deliverables?org=cueflow-dev", nil, &posts)
 	if posts.Total != 1 {
-		t.Fatalf("dev org sees %d posts", posts.Total)
+		t.Fatalf("dev org sees %d deliverables", posts.Total)
 	}
 
 	// A non-empty org can't be deleted; unknown orgs are rejected.
