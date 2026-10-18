@@ -10,7 +10,7 @@
                      需要你決定 / 有風險的工具呼叫 ─▶ 你在對話串裡核准 ─▶ 它繼續
 ```
 
-內建一套**內容工作流程**當範例：agent 收集素材（RSS、信箱、網路搜尋），依各平台風格寫草稿，每一篇都先交給人審核，核准後才透過 MCP 交給 [Postiz](https://github.com/gitroomhq/postiz-app) 發布。Agent 永遠不會發文：沒有任何 agent 工具能發文，發布器也只接受發布 worker 針對「那一篇已核准的貼文」給的授權。
+內建一套**內容工作流程**當範例：agent 收集素材（RSS、信箱、網路搜尋），依各平台風格寫草稿，每一篇都先交給人審核，核准後才交給發布器：任何符合四個工具的[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器。Agent 永遠不會發文：沒有任何 agent 工具能發文，發布器也只接受發布 worker 針對「那一篇已核准的貼文」給的授權。
 
 ## 運作方式
 
@@ -35,22 +35,21 @@
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
 cp .env.example .env
-# 填入 CUEFLOW_SECRET_KEY（openssl rand -base64 32）與 POSTIZ_JWT_SECRET（openssl rand -hex 32）
+# 填入 CUEFLOW_SECRET_KEY（openssl rand -base64 32）與 SEARXNG_SECRET（openssl rand -hex 32）
 docker compose up -d
 ```
 
-CueFlow 在 <http://localhost:3000>，Postiz 在 <http://localhost:4007>。接著：
+CueFlow 在 <http://localhost:3000>。接著：
 
-1. **Postiz**：建立帳號，連結你的帳號，到 *Settings → Developers* 複製 API key。
-2. **CueFlow → Connectors**：*Postiz (MCP)*，endpoint 填 `http://postiz:5000/api/mcp` 與那把 key；一個 LLM（例如 *Anthropic Claude*，或指向 Ollama 的 *OpenAI-compatible*）；一個資料來源，例如 RSS feed。
-3. **Command**：直接告訴 agent 團隊要做什麼，或建立 **Schedule** 定時執行。
-4. **Review**：修改、核准或退回。核准的貼文幾秒內就會交給 Postiz。
+1. **Connectors**：一個 LLM（例如 *Anthropic Claude*，或指向 Ollama 的 *OpenAI-compatible*）；一個資料來源，例如 RSS feed；一個發布器：*MCP publisher* 指向符合[發布器約定](docs/publisher-mcp.md)（英文）的伺服器，或用內附的 mock（`docker compose --profile mock up -d`，endpoint `http://mock-publisher:4010/mcp`、token `dev-token`）先跑通流程、不會真的發出去。
+2. **Command**：直接告訴 agent 團隊要做什麼，或建立 **Schedule** 定時執行。
+3. **Review**：修改、勾選帳號、核准或退回。核准的貼文幾秒內就會交給發布器。
 
-映像版本、網頁搜尋、不接 Postiz 先試用、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。
+映像版本、網頁搜尋、mock 發布器、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。
 
 ## Connector
 
-發布器（Postiz，或任何符合[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器）、資料來源（RSS、IMAP）、搜尋（SearXNG、Tavily）、LLM（OpenAI 相容服務、API / Bedrock / Vertex AI 上的 Claude、Vertex AI 上的 Gemini）、SMTP 通知、圖片生成（OpenAI、Gemini、Vertex、ComfyUI），以及任何 MCP 伺服器當 agent 工具。完整清單與認證方式：[docs/zh-TW/builtin-connectors.md](docs/zh-TW/builtin-connectors.md)。自己寫一個：[docs/connectors.md](docs/connectors.md)（英文）。
+發布器（任何符合[發布器約定](docs/publisher-mcp.md)（英文）的 MCP 伺服器）、資料來源（RSS、IMAP）、搜尋（SearXNG、Tavily）、LLM（OpenAI 相容服務、API / Bedrock / Vertex AI 上的 Claude、Vertex AI 上的 Gemini）、SMTP 通知、圖片生成（OpenAI、Gemini、Vertex、ComfyUI），以及任何 MCP 伺服器當 agent 工具。完整清單與認證方式：[docs/zh-TW/builtin-connectors.md](docs/zh-TW/builtin-connectors.md)。自己寫一個：[docs/connectors.md](docs/connectors.md)（英文）。
 
 ## 更進一步
 

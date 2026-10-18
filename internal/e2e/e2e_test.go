@@ -1,6 +1,6 @@
 // Package e2e exercises the full CueFlow chain against a real PostgreSQL:
 // RSS ingest -> agent drafts -> PENDING_REVIEW -> human approval via the API -> dispatch worker ->
-// Postiz (in-process MCP mock) -> PUBLISHED, plus failure/retry and crash recovery.
+// an MCP publisher (in-process mock) -> PUBLISHED, plus failure/retry and crash recovery.
 //
 // Set CUEFLOW_TEST_DATABASE_URL to a disposable database to run it (its public schema is reset).
 package e2e
@@ -25,6 +25,7 @@ import (
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
+	"github.com/j75689/cueflow/internal/connectors/mcppublisher"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/dispatch"
@@ -33,7 +34,7 @@ import (
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/pipeline"
-	"github.com/j75689/cueflow/internal/postizmock"
+	"github.com/j75689/cueflow/internal/publishermock"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
@@ -86,7 +87,7 @@ type env struct {
 	sched  *scheduler.Scheduler
 	api    *httptest.Server
 	server *api.Server
-	mock   *postizmock.Server
+	mock   *publishermock.Server
 }
 
 func setup(t *testing.T) *env {
@@ -118,7 +119,7 @@ func setup(t *testing.T) *env {
 	team := crew.New(st, h, broker, logger, false)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 
-	mock := postizmock.New("postiz-key")
+	mock := publishermock.New("pub-token")
 	mockSrv := httptest.NewServer(mock.Handler())
 	t.Cleanup(mockSrv.Close)
 
@@ -128,7 +129,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(apiSrv.Close)
 
 	e := &env{t: t, pool: pool, store: st, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
-	t.Setenv("POSTIZ_URL", mockSrv.URL)
+	t.Setenv("PUBLISHER_URL", mockSrv.URL)
 	return e
 }
 
@@ -170,32 +171,32 @@ func TestFullChain(t *testing.T) {
 	defer feedSrv.Close()
 
 	// --- connectors via the API ---
-	var rss, model, postiz store.Connector
+	var rss, model, publisher store.Connector
 	if code := e.do("POST", "/connectors", map[string]any{"name": "Feed", "type": "rss", "config": map[string]any{"url": feedSrv.URL}}, &rss); code != 201 {
 		t.Fatalf("create rss: %d", code)
 	}
 	e.do("POST", "/connectors", map[string]any{"name": "LLM", "type": "fake_llm", "config": map[string]any{}}, &model)
-	if code := e.do("POST", "/connectors", map[string]any{"name": "Postiz", "type": "postiz_mcp", "config": map[string]any{
-		"endpoint_url": os.Getenv("POSTIZ_URL") + "/api/mcp", "api_key": "postiz-key"}}, &postiz); code != 201 {
-		t.Fatalf("create postiz: %d", code)
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Publisher", "type": "mcp_publisher", "config": map[string]any{
+		"endpoint_url": os.Getenv("PUBLISHER_URL") + "/mcp", "auth_token": "pub-token"}}, &publisher); code != 201 {
+		t.Fatalf("create publisher: %d", code)
 	}
-	if len(postiz.SecretsSet) != 1 || postiz.Config["api_key"] != nil {
-		t.Fatalf("secret leaked into config or not stored: %+v", postiz)
+	if len(publisher.SecretsSet) != 1 || publisher.Config["auth_token"] != nil {
+		t.Fatalf("secret leaked into config or not stored: %+v", publisher)
 	}
 	var raw []byte
-	_ = e.pool.QueryRow(ctx, "SELECT secrets FROM connectors WHERE id=$1", postiz.ID).Scan(&raw)
-	if len(raw) == 0 || bytes.Contains(raw, []byte("postiz-key")) {
-		t.Fatal("API key must be stored encrypted")
+	_ = e.pool.QueryRow(ctx, "SELECT secrets FROM connectors WHERE id=$1", publisher.ID).Scan(&raw)
+	if len(raw) == 0 || bytes.Contains(raw, []byte("pub-token")) {
+		t.Fatal("bearer token must be stored encrypted")
 	}
 	var test connector.TestResult
-	e.do("POST", "/connectors/"+postiz.ID.String()+"/test", nil, &test)
+	e.do("POST", "/connectors/"+publisher.ID.String()+"/test", nil, &test)
 	if !test.OK {
-		t.Fatalf("postiz test: %+v", test)
+		t.Fatalf("publisher test: %+v", test)
 	}
 	// Updating with an empty secret keeps the stored one.
-	e.do("PATCH", "/connectors/"+postiz.ID.String(), map[string]any{"config": map[string]any{"api_key": "", "post_mode": "publish"}}, &postiz)
-	if len(postiz.SecretsSet) != 1 {
-		t.Fatalf("secret dropped on update: %+v", postiz)
+	e.do("PATCH", "/connectors/"+publisher.ID.String(), map[string]any{"config": map[string]any{"auth_token": "", "list_tool": "list_accounts"}}, &publisher)
+	if len(publisher.SecretsSet) != 1 {
+		t.Fatalf("secret dropped on update: %+v", publisher)
 	}
 
 	// --- pipeline ---
@@ -203,7 +204,7 @@ func TestFullChain(t *testing.T) {
 	code := e.do("POST", "/pipelines", map[string]any{
 		"name": "Daily", "cron_expr": "0 8 * * *", "timezone": "Asia/Taipei", "topic": "AI agents",
 		"platforms": []string{"threads", "instagram"}, "llm_connector_id": model.ID,
-		"source_connector_ids": []uuid.UUID{rss.ID}, "publisher_connector_id": postiz.ID, "search_connector_id": "",
+		"source_connector_ids": []uuid.UUID{rss.ID}, "publisher_connector_id": publisher.ID, "search_connector_id": "",
 	}, &p)
 	if code != 201 {
 		t.Fatalf("create pipeline: %d", code)
@@ -265,8 +266,10 @@ func TestFullChain(t *testing.T) {
 	if code := e.do("PATCH", "/posts/"+threads.ID.String(), map[string]any{"version": threads.Version - 1, "content": "x"}, nil); code != 409 {
 		t.Fatalf("stale version: %d", code)
 	}
+	// The reviewer edits the text and picks the account the publisher will post to.
 	var edited domain.Post
-	if code := e.do("PATCH", "/posts/"+threads.ID.String(), map[string]any{"version": threads.Version, "content": "Edited by a human."}, &edited); code != 200 {
+	if code := e.do("PATCH", "/posts/"+threads.ID.String(), map[string]any{"version": threads.Version, "content": "Edited by a human.",
+		"accounts": []string{"th1"}}, &edited); code != 200 {
 		t.Fatalf("edit: %d", code)
 	}
 
@@ -277,11 +280,12 @@ func TestFullChain(t *testing.T) {
 	e.worker.Tick(ctx)
 	var got domain.Post
 	e.do("GET", "/posts/"+threads.ID.String(), nil, &got)
-	if got.Status != domain.StatusPublished || got.ExternalPostIDs["threads"] == "" || got.PublishedAt == nil {
+	if got.Status != domain.StatusPublished || got.ExternalPostIDs[mcppublisher.PostIDKey] == "" || got.PublishedAt == nil {
 		t.Fatalf("threads post not published: %+v", got)
 	}
-	if posts := e.mock.Posts(); len(posts) != 1 || !strings.Contains(posts[0].Post.PostsAndComments[0].Content, "Edited by a human.") {
-		t.Fatalf("Postiz did not receive the edited post: %+v", posts)
+	if posts := e.mock.Posts(); len(posts) != 1 || !strings.Contains(posts[0].Text(), "Edited by a human.") ||
+		strings.Join(posts[0].Request.Accounts, ",") != "th1" {
+		t.Fatalf("the publisher did not receive the edited post for the picked account: %+v", posts)
 	}
 	var audit []domain.AuditLog
 	e.do("GET", "/posts/"+threads.ID.String()+"/audit", nil, &audit)
@@ -297,6 +301,11 @@ func TestFullChain(t *testing.T) {
 	}
 
 	// --- failure + manual retry ---
+	// Instagram needs an image and an account before the connector lets the post through.
+	if code := e.do("PATCH", "/posts/"+insta.ID.String(), map[string]any{"version": insta.Version,
+		"accounts": []string{"ig1"}, "media_urls": []string{"https://cdn.example.com/a.png"}}, nil); code != 200 {
+		t.Fatalf("edit instagram: %d", code)
+	}
 	e.mock.Fail.Store(true)
 	e.do("POST", "/posts/"+insta.ID.String()+"/approve", map[string]any{}, nil)
 	e.worker.Tick(ctx)
@@ -384,7 +393,7 @@ func TestMetaAndUI(t *testing.T) {
 	for _, s := range meta.ConnectorTypes {
 		types[s.Type] = true
 	}
-	for _, want := range []string{"postiz_mcp", "rss", "imap", "searxng", "tavily", "openai", "anthropic", "smtp"} {
+	for _, want := range []string{"mcp_publisher", "rss", "imap", "searxng", "tavily", "openai", "anthropic", "smtp"} {
 		if !types[want] {
 			t.Errorf("connector type %s not registered", want)
 		}
@@ -405,8 +414,8 @@ func TestSecretKeyRotation(t *testing.T) {
 	oldKey := make([]byte, 32)
 	newKey := bytes.Repeat([]byte{7}, 32)
 
-	c, err := e.store.CreateConnector(ctx, "Postiz", "postiz_mcp", true, map[string]any{
-		"endpoint_url": "http://x/api/mcp", "api_key": "postiz-secret"})
+	c, err := e.store.CreateConnector(ctx, "Publisher", "mcp_publisher", true, map[string]any{
+		"endpoint_url": "http://x/mcp", "auth_token": "pub-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +429,7 @@ func TestSecretKeyRotation(t *testing.T) {
 
 	// Step 1: new primary + old previous key -> everything still readable.
 	rotating := withKeys(newKey, oldKey)
-	if _, cfg, err := rotating.ConnectorSettings(ctx, c.ID); err != nil || cfg.String("api_key") != "postiz-secret" {
+	if _, cfg, err := rotating.ConnectorSettings(ctx, c.ID); err != nil || cfg.String("auth_token") != "pub-secret" {
 		t.Fatalf("previous key should still decrypt: %v %v", cfg, err)
 	}
 
@@ -435,10 +444,10 @@ func TestSecretKeyRotation(t *testing.T) {
 
 	// A wrong key set aborts without touching anything.
 	if _, err := withKeys(bytes.Repeat([]byte{9}, 32)).ReencryptConnectorSecrets(ctx, false); err == nil ||
-		!strings.Contains(err.Error(), "Postiz") {
+		!strings.Contains(err.Error(), "Publisher") {
 		t.Fatalf("undecryptable connector should abort: %v", err)
 	}
-	if _, cfg, _ := withKeys(oldKey).ConnectorSettings(ctx, c.ID); cfg.String("api_key") != "postiz-secret" {
+	if _, cfg, _ := withKeys(oldKey).ConnectorSettings(ctx, c.ID); cfg.String("auth_token") != "pub-secret" {
 		t.Fatal("aborted rotation must leave data unchanged")
 	}
 
@@ -447,7 +456,7 @@ func TestSecretKeyRotation(t *testing.T) {
 		t.Fatalf("rotate: %+v %v", rep, err)
 	}
 	// Step 3: only the new key is needed now; the old one no longer works.
-	if _, cfg, err := withKeys(newKey).ConnectorSettings(ctx, c.ID); err != nil || cfg.String("api_key") != "postiz-secret" {
+	if _, cfg, err := withKeys(newKey).ConnectorSettings(ctx, c.ID); err != nil || cfg.String("auth_token") != "pub-secret" {
 		t.Fatalf("new key should decrypt after rotation: %v %v", cfg, err)
 	}
 	if _, _, err := withKeys(oldKey).ConnectorSettings(ctx, c.ID); err == nil {

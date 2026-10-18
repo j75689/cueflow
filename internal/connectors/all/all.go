@@ -15,7 +15,6 @@ import (
 	_ "github.com/j75689/cueflow/internal/connectors/mcptools"
 	_ "github.com/j75689/cueflow/internal/connectors/openai"
 	_ "github.com/j75689/cueflow/internal/connectors/openaiimage"
-	_ "github.com/j75689/cueflow/internal/connectors/postiz"
 	_ "github.com/j75689/cueflow/internal/connectors/rss"
 	_ "github.com/j75689/cueflow/internal/connectors/runnerpool"
 	_ "github.com/j75689/cueflow/internal/connectors/searxng"

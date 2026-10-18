@@ -2,7 +2,6 @@
 package textutil
 
 import (
-	"html"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -159,17 +158,4 @@ func pack(units []unit, limit int) []string {
 		out = append(out, cur)
 	}
 	return out
-}
-
-// ToHTMLParagraphs renders plain text as <p> blocks (one per line), escaping HTML. Empty lines
-// become empty paragraphs so spacing survives editors that collapse whitespace.
-func ToHTMLParagraphs(text string) string {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	var b strings.Builder
-	for _, l := range lines {
-		b.WriteString("<p>")
-		b.WriteString(html.EscapeString(l))
-		b.WriteString("</p>")
-	}
-	return b.String()
 }

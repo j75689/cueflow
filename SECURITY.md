@@ -29,6 +29,6 @@ Only the latest release and `main` receive fixes. There are no backports.
 
 - Instances exposed to the internet without `CUEFLOW_ADMIN_TOKEN` or Cloudflare Access; the local
   Docker setup binds to `127.0.0.1` for a reason
-- Issues in third-party services CueFlow talks to (Postiz, LLM providers, MCP servers you add)
+- Issues in third-party services CueFlow talks to (LLM providers, publishers and MCP servers you add)
 - Prompt injection that only affects the content of a draft, since every draft is reviewed by a human
   before publishing

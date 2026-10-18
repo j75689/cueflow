@@ -6,7 +6,7 @@ CREATE TABLE connectors (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64)  NOT NULL,
     kind            VARCHAR(16)  NOT NULL,  -- publisher | source | search | llm | notifier
-    type            VARCHAR(32)  NOT NULL,  -- postiz_mcp | rss | imap | searxng | tavily | openai | anthropic | smtp ...
+    type            VARCHAR(32)  NOT NULL,  -- mcp_publisher | rss | imap | searxng | tavily | openai | anthropic | smtp ...
     config          JSONB        NOT NULL DEFAULT '{}',
     secrets         BYTEA,
     state           JSONB        NOT NULL DEFAULT '{}', -- plugin cursor state (e.g. IMAP last UID)

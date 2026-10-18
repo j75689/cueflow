@@ -25,7 +25,7 @@ RUN go mod download
 COPY . .
 COPY --from=web /web/out/ ./internal/webui/dist/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cueflow ./cmd/cueflow \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mock-postiz-mcp ./cmd/mock-postiz-mcp
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mock-publisher-mcp ./cmd/mock-publisher-mcp
 
 # 3. agents: Node.js plus the ACP adapters for Claude Code and Codex, for the
 #    "External agent (ACP)" runtime. Other presets (Gemini CLI, OpenCode...) run via npx or PATH.

@@ -40,7 +40,7 @@ export interface ConnectorSpec {
   name: string;
   description: string;
   fields: FieldSpec[];
-  /** Publisher that can post to individual accounts chosen per post (MCP publisher, Postiz). */
+  /** Publisher that can post to individual accounts chosen per post (MCP publisher). */
   accounts?: boolean;
   /** Posts through this publisher must name their accounts (MCP publisher). */
   accounts_required?: boolean;

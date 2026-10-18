@@ -18,7 +18,7 @@ import (
 
 // Fetcher reads web pages for agents. By default it refuses private, loopback and link-local
 // addresses (checked on the resolved IP at dial time, so DNS tricks and redirects are covered):
-// an agent must not be steerable into the operator's LAN, the Postiz admin API, or cloud metadata.
+// an agent must not be steerable into the operator's LAN, a publisher's admin API, or cloud metadata.
 type Fetcher struct {
 	client   *http.Client
 	maxBytes int64

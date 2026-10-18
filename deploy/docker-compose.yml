@@ -1,14 +1,15 @@
-# CueFlow + Postiz on one host. Every port is bound to 127.0.0.1 (no public exposure);
-# reach it from other machines through an SSH tunnel or a VPN such as Tailscale.
+# CueFlow on one host. Every port is bound to 127.0.0.1 (no public exposure); reach it from other
+# machines through an SSH tunnel or a VPN such as Tailscale.
 #
 #   cd deploy
-#   cp .env.example .env    # then fill in CUEFLOW_SECRET_KEY, POSTIZ_JWT_SECRET, ...
-#   docker compose up -d                 # CueFlow + Postiz
-#   docker compose --profile mock up -d  # also start a mock Postiz MCP server for trying CueFlow out
+#   cp .env.example .env    # then fill in CUEFLOW_SECRET_KEY, SEARXNG_SECRET, ...
+#   docker compose up -d                 # CueFlow + PostgreSQL + SearXNG
+#   docker compose --profile mock up -d  # also start a mock publisher, to try the flow without posting anywhere
 #
 # CueFlow:  http://localhost:3000
-# Postiz:   http://localhost:4007   (create an account, connect channels, Settings -> Developers -> API key)
 # SearXNG:  http://localhost:8888   (web search for agents; connector URL http://searxng:8080)
+# Publishing goes through an MCP server that follows docs/publisher-mcp.md: add it as an
+# "MCP publisher" connector in CueFlow (or the mock below).
 
 name: cueflow
 
@@ -37,7 +38,7 @@ services:
       CUEFLOW_ADMIN_TOKEN: ${CUEFLOW_ADMIN_TOKEN:-}
       CUEFLOW_MCP_TOKEN: ${CUEFLOW_MCP_TOKEN:-}
       CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
-      # Where publishers fetch images stored in CueFlow; Postiz reaches CueFlow by its compose name.
+      # Where publishers fetch media stored in CueFlow; a publisher in this compose file reaches CueFlow by its service name.
       CUEFLOW_MEDIA_BASE_URL: ${CUEFLOW_MEDIA_BASE_URL:-http://cueflow:3000}
       # Empty keeps media in the database; file:///data/media keeps it on disk (mount a volume there).
       CUEFLOW_MEDIA_STORAGE: ${CUEFLOW_MEDIA_STORAGE:-}
@@ -79,18 +80,20 @@ services:
       test: ["CMD-SHELL", "pg_isready -U cueflow -d cueflow"]
       <<: *pg-health
 
-  # Optional stand-in for Postiz: MCP endpoint http://mock-postiz:4007/api/mcp, API key "dev-key".
-  mock-postiz:
+  # Optional publisher that posts nowhere, for trying CueFlow out. In CueFlow add an "MCP publisher"
+  # connector with endpoint http://mock-publisher:4010/mcp and bearer token "dev-token"; received
+  # posts are listed at http://localhost:4010/posts.
+  mock-publisher:
     image: cueflow:${CUEFLOW_IMAGE_TARGET:-slim}
     profiles: ["mock"]
-    entrypoint: ["/usr/local/bin/mock-postiz-mcp"]
+    entrypoint: ["/usr/local/bin/mock-publisher-mcp"]
     # The image's HEALTHCHECK probes CueFlow's API, which the mock does not serve.
     healthcheck:
       disable: true
     environment:
-      MOCK_POSTIZ_API_KEY: dev-key
+      MOCK_PUBLISHER_TOKEN: dev-token
     ports:
-      - "127.0.0.1:4008:4007"
+      - "127.0.0.1:4010:4010"
 
   # Self-hosted web search for agents. In CueFlow add a "SearXNG" connector with URL http://searxng:8080.
   searxng:
@@ -104,127 +107,5 @@ services:
     ports:
       - "127.0.0.1:8888:8080"
 
-  # ---------------------------------------------------------------- Postiz (social publishing engine)
-  postiz:
-    image: ghcr.io/gitroomhq/postiz-app:latest
-    restart: unless-stopped
-    depends_on:
-      postiz-db:
-        condition: service_healthy
-      postiz-redis:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    environment:
-      MAIN_URL: ${POSTIZ_URL:-http://localhost:4007}
-      FRONTEND_URL: ${POSTIZ_URL:-http://localhost:4007}
-      NEXT_PUBLIC_BACKEND_URL: ${POSTIZ_URL:-http://localhost:4007}/api
-      BACKEND_INTERNAL_URL: http://localhost:3000
-      JWT_SECRET: ${POSTIZ_JWT_SECRET:?set POSTIZ_JWT_SECRET in .env}
-      DATABASE_URL: postgresql://postiz:${POSTIZ_DB_PASSWORD:-postiz}@postiz-db:5432/postiz
-      REDIS_URL: redis://postiz-redis:6379
-      TEMPORAL_ADDRESS: temporal:7233
-      IS_GENERAL: "true"
-      DISABLE_REGISTRATION: ${POSTIZ_DISABLE_REGISTRATION:-false}
-      STORAGE_PROVIDER: local
-      UPLOAD_DIRECTORY: /uploads
-      NEXT_PUBLIC_UPLOAD_DIRECTORY: /uploads
-      # Platform apps (create them in the Meta / X / LinkedIn developer consoles)
-      THREADS_APP_ID: ${THREADS_APP_ID:-}
-      THREADS_APP_SECRET: ${THREADS_APP_SECRET:-}
-      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
-      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
-      X_API_KEY: ${X_API_KEY:-}
-      X_API_SECRET: ${X_API_SECRET:-}
-      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
-      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
-    volumes:
-      - postiz-config:/config
-      - postiz-uploads:/uploads
-    ports:
-      - "127.0.0.1:4007:5000"
-
-  postiz-db:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postiz
-      POSTGRES_PASSWORD: ${POSTIZ_DB_PASSWORD:-postiz}
-      POSTGRES_DB: postiz
-    volumes:
-      - postiz-db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postiz -d postiz"]
-      <<: *pg-health
-
-  postiz-redis:
-    image: redis:7.2-alpine
-    restart: unless-stopped
-    volumes:
-      - postiz-redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  # Postiz schedules publishing through Temporal. Postiz registers more Text search attributes than
-  # SQL visibility allows (3), so Temporal needs Elasticsearch for visibility, as in Postiz's own compose.
-  temporal:
-    image: temporalio/auto-setup:1.28.1
-    restart: unless-stopped
-    depends_on:
-      temporal-db:
-        condition: service_healthy
-      temporal-es:
-        condition: service_healthy
-    environment:
-      DB: postgres12
-      DB_PORT: 5432
-      POSTGRES_USER: temporal
-      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporal}
-      POSTGRES_SEEDS: temporal-db
-      ENABLE_ES: "true"
-      ES_SEEDS: temporal-es
-      ES_VERSION: v7
-      TEMPORAL_NAMESPACE: default
-
-  temporal-es:
-    image: elasticsearch:7.17.27
-    restart: unless-stopped
-    environment:
-      discovery.type: single-node
-      ES_JAVA_OPTS: -Xms256m -Xmx256m
-      xpack.security.enabled: "false"
-      cluster.routing.allocation.disk.threshold_enabled: "true"
-      cluster.routing.allocation.disk.watermark.low: 512mb
-      cluster.routing.allocation.disk.watermark.high: 256mb
-      cluster.routing.allocation.disk.watermark.flood_stage: 128mb
-    volumes:
-      - temporal-es:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  temporal-db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporal}
-    volumes:
-      - temporal-db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
-      <<: *pg-health
-
 volumes:
   cueflow-db:
-  postiz-db:
-  postiz-redis:
-  postiz-config:
-  postiz-uploads:
-  temporal-db:
-  temporal-es:

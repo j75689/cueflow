@@ -3,8 +3,8 @@
 The **MCP publisher** connector (`mcp_publisher`) posts approved posts to Threads, Instagram and YouTube accounts through
 any MCP server that provides the tools below. CueFlow keeps the review, the approval and the retries; the server
 owns the platforms (logins, tokens, the publish calls). If you run your own scheduler, giving it these four tools
-is all it takes to be a publisher for CueFlow. [Postiz](https://github.com/gitroomhq/postiz-app) has its own
-connector (`postiz_mcp`) because its tools take another shape.
+is all it takes to be a publisher for CueFlow. `cmd/mock-publisher-mcp` (`internal/publishermock`) is a small
+reference implementation that records posts instead of publishing them.
 
 ```
 CueFlow ──MCP (Streamable HTTP)──▶ your server ──▶ Threads · Instagram

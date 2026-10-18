@@ -3,7 +3,7 @@
 Every integration in CueFlow is a **connector**: a Go package that registers a *type* with a config
 schema and a factory. The dashboard renders the config form from the schema, the store encrypts the
 fields marked secret, and the rest of the system talks to the connector through one of five small
-interfaces. Postiz is just the first publisher; adding another (a direct Threads API client, a webhook,
+interfaces. The MCP publisher is just the first publisher; adding another (a direct Threads API client, a webhook,
 Buffer, Mastodon...) does not touch the core.
 
 ## Kinds and interfaces
@@ -117,9 +117,9 @@ Rebuild, and *Webhook* appears under **Connectors → Add**.
 
 [`internal/mcpx`](../internal/mcpx/mcpx.go) wraps the official MCP Go SDK: `Connect` (Streamable HTTP,
 SSE or stdio, with auth headers), `ListTools`, `CallJSON` (tool errors become Go errors) and
-`ClassifyTool`, which flags publishing/mutating tools so they are never offered to the agent. The Postiz
-connector ([`internal/connectors/postiz`](../internal/connectors/postiz/postiz.go)) is the reference
-implementation, and [`internal/postizmock`](../internal/postizmock/postizmock.go) shows how to test one
+`ClassifyTool`, which flags publishing/mutating tools so they are never offered to the agent. The MCP publisher
+([`internal/connectors/mcppublisher`](../internal/connectors/mcppublisher/mcppublisher.go)) is the reference
+implementation, and [`internal/publishermock`](../internal/publishermock/publishermock.go) shows how to test one
 against an in-process MCP server.
 
 ## Images and media
@@ -128,7 +128,7 @@ Images a reviewer uploads or an image connector generates are stored by CueFlow 
 referenced from posts as `/media/{id}`. Publishers receive `PublishRequest.MediaURLs` as absolute URLs
 (`CUEFLOW_MEDIA_BASE_URL` + path) and `PublishRequest.Media`, where stored images carry a `Load` func
 for their bytes. Use the bytes when your service cannot reach CueFlow (the MCP publisher uploads them as base64);
-use the URL when it can (Postiz fetches it).
+use the URL when it can.
 
 An image connector returns raw bytes; CueFlow checks the type (PNG, JPEG, WebP or GIF, at most 10 MB)
 and stores the first image. Map `ImageRequest.Aspect` (one of `connector.Aspects`) to your provider's
@@ -143,8 +143,7 @@ stores the reviewer's choice on the post; `Publish` receives it as `PublishReque
 Set `Spec.AccountsRequired` too when a post cannot go out without accounts: the editor then blocks approval
 until some are picked. Otherwise an empty `Accounts` means "use your defaults". The MCP publisher
 ([`internal/connectors/mcppublisher`](../internal/connectors/mcppublisher/mcppublisher.go); its tool contract is in
-[publisher-mcp.md](publisher-mcp.md)) requires accounts; the Postiz connector treats picked channels as optional
-and falls back to its channel mapping.
+[publisher-mcp.md](publisher-mcp.md)) requires accounts.
 
 When a publish fails after something was created remotely, return a `*connector.PartialError` with the
 external IDs that exist. The dispatch worker keeps them on the failed post and passes them back as
