@@ -22,10 +22,8 @@ const ORG_NAV: NavItem[] = [
   { href: "/command/", label: "Command", icon: "sparkle", match: (p: string) => p.startsWith("/command") },
   { href: "/board/", label: "Board", icon: "kanban", match: (p: string) => p.startsWith("/board") || p.startsWith("/tasks") },
   { href: "/agents/", label: "Agents", icon: "users", match: (p: string) => p.startsWith("/agents") },
-  { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts"), module: "content" },
   { href: "/deliverables/", label: "Deliverables", icon: "list", match: (p: string) => p.startsWith("/deliverables"), module: "deliverables" },
   { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
-  { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs"), module: "content" },
 ];
 
 // Pages shared by every org.

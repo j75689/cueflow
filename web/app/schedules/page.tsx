@@ -38,7 +38,6 @@ import { api } from "@/lib/api";
 import { fmtRelative, fmtTime } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type {
-  Pipeline,
   Schedule,
   ScheduleInput,
   TaskPriority,
@@ -63,14 +62,7 @@ export default function SchedulesPage() {
   const router = useRouter();
   const agents = useAgents();
   const schedules = useAsync(() => api.listSchedules(), []);
-  const hasContent = useModule("content");
-  const pipelines = useAsync(() => (hasContent ? api.listPipelines() : Promise.resolve([])), [hasContent]);
   useServerEvent("schedule.updated", () => void schedules.reload());
-  const refreshSimple = useDebouncedCallback(
-    () => void pipelines.reload(),
-    400,
-  );
-  useServerEvent("run.updated", refreshSimple);
   const [editing, setEditing] = useState<Schedule | "new" | null>(null);
   const [choosing, setChoosing] = useState(false);
 
@@ -111,17 +103,12 @@ export default function SchedulesPage() {
   };
 
   const list = schedules.data ?? [];
-  const simple = pipelines.data ?? [];
 
   return (
     <div>
       <PageHeader
         title="Schedules"
-        subtitle={
-          hasContent
-            ? "Work that runs on a timer: agent tasks (an agent researches and decides) or simple schedules (a fixed collect → draft flow)."
-            : "Work that runs on a timer: each activation opens a task for an agent."
-        }
+        subtitle="Work that runs on a timer: each activation opens a task for an agent, who researches and decides."
         actions={
           <Button variant="primary" onClick={() => setChoosing(true)}>
             <Icon name="plus" className="h-4 w-4" /> New schedule
@@ -131,13 +118,9 @@ export default function SchedulesPage() {
       {schedules.error && (
         <ErrorBox onRetry={schedules.reload}>{schedules.error}</ErrorBox>
       )}
-      {pipelines.error && (
-        <ErrorBox onRetry={pipelines.reload}>{pipelines.error}</ErrorBox>
-      )}
-      {(schedules.loading && !schedules.data) ||
-      (pipelines.loading && !pipelines.data) ? (
+      {schedules.loading && !schedules.data ? (
         <Loading />
-      ) : list.length === 0 && simple.length === 0 ? (
+      ) : list.length === 0 ? (
         <Card>
           <EmptyState
             title="No schedules yet"
@@ -228,12 +211,6 @@ export default function SchedulesPage() {
               </ul>
             </Card>
           )}
-          {simple.length > 0 && (
-            <SimpleSchedules
-              items={simple}
-              onChanged={(next) => pipelines.setData(next)}
-            />
-          )}
         </div>
       )}
 
@@ -259,23 +236,6 @@ export default function SchedulesPage() {
               More tokens.
             </p>
           </button>
-          {hasContent && (
-            <button
-              className="rounded-lg border border-zinc-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-zinc-700 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/5"
-              onClick={() => {
-                setChoosing(false);
-                router.push("/schedules/simple/");
-              }}
-            >
-              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Simple schedule
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">
-                A fixed flow: collect from your sources and search, then one LLM
-                call drafts posts for review. Cheaper and predictable.
-              </p>
-            </button>
-          )}
         </div>
       </Modal>
 
@@ -290,137 +250,6 @@ export default function SchedulesPage() {
         }}
       />
     </div>
-  );
-}
-
-/** Simple schedules (stored as pipelines): collect → one LLM call → drafts, on a cron. */
-function SimpleSchedules({
-  items,
-  onChanged,
-}: {
-  items: Pipeline[];
-  onChanged: (next: Pipeline[]) => void;
-}) {
-  const toast = useToast();
-  const dialog = useDialog();
-  const { meta } = useMeta();
-  const [busy, setBusy] = useState<string | null>(null);
-  const pm = Object.fromEntries(
-    (meta?.platforms ?? []).map((p) => [p.id, p.name]),
-  );
-
-  const toggle = async (p: Pipeline, on: boolean) => {
-    try {
-      const updated = await api.updatePipeline(p.id, { is_active: on });
-      onChanged(items.map((x) => (x.id === p.id ? updated : x)));
-    } catch (e) {
-      toast.error(e);
-    }
-  };
-  const run = async (p: Pipeline) => {
-    setBusy(p.id);
-    try {
-      await api.runPipeline(p.id);
-      toast.success("Run started; drafts will appear in Review");
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusy(null);
-    }
-  };
-  const remove = async (p: Pipeline) => {
-    if (
-      !(await dialog.confirm({
-        title: `Delete schedule “${p.name}”?`,
-        message: "It stops running. Posts it already generated are kept.",
-        confirmLabel: "Delete schedule",
-        tone: "danger",
-      }))
-    )
-      return;
-    try {
-      await api.deletePipeline(p.id);
-      onChanged(items.filter((x) => x.id !== p.id));
-    } catch (e) {
-      toast.error(e);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader
-        title="Simple schedules"
-        subtitle="Each run collects from the sources and search, then one LLM call drafts posts for review. Fewer tokens."
-      />
-      <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-        {items.map((p) => (
-          <li
-            key={p.id}
-            className="flex flex-wrap items-center gap-3 px-4 py-3"
-          >
-            <Toggle checked={p.is_active} onChange={(v) => void toggle(p, v)} />
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                <Link
-                  href={`/schedules/simple/?id=${p.id}`}
-                  className="truncate hover:underline"
-                >
-                  {p.name}
-                </Link>
-                {p.platforms.map((x) => (
-                  <PlatformBadge key={x} id={x} name={pm[x]} />
-                ))}
-              </p>
-              <p className="truncate text-xs text-zinc-500">
-                <code className="font-mono">{p.cron_expr}</code> ({p.timezone})
-                {p.topic ? ` → ${p.topic}` : ""} ·{" "}
-                {p.source_connector_ids.length} source
-                {p.source_connector_ids.length === 1 ? "" : "s"}
-                {p.search_connector_id ? " + search" : ""}
-              </p>
-            </div>
-            <div className="text-right text-xs text-zinc-500">
-              <p title={fmtTime(p.next_run_at)}>
-                {p.is_active && p.next_run_at
-                  ? `next ${fmtRelative(p.next_run_at)}`
-                  : "paused"}
-              </p>
-              <p>
-                <Link
-                  href={`/runs/?pipeline_id=${p.id}`}
-                  className="hover:underline"
-                >
-                  last {fmtRelative(p.last_run_at)}
-                </Link>
-              </p>
-            </div>
-            <div className="flex gap-1.5">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => void run(p)}
-                loading={busy === p.id}
-              >
-                <Icon name="play" className="h-3.5 w-3.5" /> Run now
-              </Button>
-              <Link href={`/schedules/simple/?id=${p.id}`}>
-                <Button size="sm" variant="ghost">
-                  Edit
-                </Button>
-              </Link>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void remove(p)}
-                aria-label="Delete"
-              >
-                <Icon name="trash" className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Card>
   );
 }
 

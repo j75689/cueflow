@@ -8,7 +8,6 @@ import type {
   Runner,
   RunnerJob,
   RunnerRegistration,
-  AuditLog,
   Connector,
   Deliverable,
   DeliverableAudit,
@@ -17,11 +16,6 @@ import type {
   ConnectorTool,
   Meta,
   Org,
-  Pipeline,
-  PipelineInput,
-  PipelineRun,
-  Post,
-  PostList,
   SourceItem,
   Schedule,
   ScheduleInput,
@@ -134,42 +128,6 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   return data as T;
 }
 
-export type PostPatch = Partial<
-  Pick<
-    Post,
-    | "title"
-    | "content"
-    | "platforms"
-    | "thread_parts"
-    | "hashtags"
-    | "media_urls"
-    | "accounts"
-    | "topic"
-    | "link_url"
-    | "image_prompt"
-    | "scheduled_at"
-    | "publisher_connector_id"
-  >
-> & { version: number };
-
-export type PostCreate = Pick<Post, "title" | "content" | "platforms"> &
-  Partial<
-    Pick<
-      Post,
-      | "thread_parts"
-      | "hashtags"
-      | "media_urls"
-      | "accounts"
-      | "topic"
-      | "link_url"
-      | "image_prompt"
-      | "scheduled_at"
-      | "publisher_connector_id"
-    >
-  > & {
-    submit?: boolean;
-  };
-
 export const api = {
   meta: () => request<Meta>("GET", "/meta"),
   stats: () => request<Stats>("GET", "/stats"),
@@ -179,26 +137,6 @@ export const api = {
   createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) => request<Org>("POST", "/orgs", body),
   updateOrg: (id: string, body: { name?: string; slug?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
   deleteOrg: (id: string) => request<void>("DELETE", `/orgs/${id}`),
-
-  listPosts: (q: {
-    status?: string[];
-    q?: string;
-    pipeline_id?: string;
-    run_id?: string;
-    limit?: number;
-    offset?: number;
-  }) =>
-    request<PostList>("GET", "/posts", undefined, q),
-  getPost: (id: string) => request<Post>("GET", `/posts/${id}`),
-  createPost: (body: PostCreate) => request<Post>("POST", "/posts", body),
-  updatePost: (id: string, body: PostPatch) => request<Post>("PATCH", `/posts/${id}`, body),
-  deletePost: (id: string) => request<void>("DELETE", `/posts/${id}`),
-  submitPost: (id: string) => request<Post>("POST", `/posts/${id}/submit`),
-  approvePost: (id: string, body: { scheduled_at?: string | null; publisher_connector_id?: string | null } = {}) =>
-    request<Post>("POST", `/posts/${id}/approve`, body),
-  rejectPost: (id: string, reason: string) => request<Post>("POST", `/posts/${id}/reject`, { reason }),
-  retryPost: (id: string) => request<Post>("POST", `/posts/${id}/retry`),
-  postAudit: (id: string) => request<AuditLog[]>("GET", `/posts/${id}/audit`),
 
   listDeliverables: (q: { status?: string[]; kind?: string; task_id?: string; q?: string; limit?: number; offset?: number }) =>
     request<DeliverableList>("GET", "/deliverables", undefined, q),
@@ -253,17 +191,6 @@ export const api = {
   fetchConnector: (id: string) => request<{ new_items: number }>("POST", `/connectors/${id}/fetch`),
   connectorItems: (id: string, limit = 50) =>
     request<SourceItem[]>("GET", `/connectors/${id}/items`, undefined, { limit }),
-
-  listPipelines: () => request<Pipeline[]>("GET", "/pipelines"),
-  getPipeline: (id: string) => request<Pipeline>("GET", `/pipelines/${id}`),
-  createPipeline: (body: PipelineInput) => request<Pipeline>("POST", "/pipelines", body),
-  updatePipeline: (id: string, body: Partial<PipelineInput>) => request<Pipeline>("PATCH", `/pipelines/${id}`, body),
-  deletePipeline: (id: string) => request<void>("DELETE", `/pipelines/${id}`),
-  runPipeline: (id: string) => request<{ run_id: string }>("POST", `/pipelines/${id}/run`),
-
-  listRuns: (q: { pipeline_id?: string; limit?: number } = {}) =>
-    request<PipelineRun[]>("GET", "/runs", undefined, q),
-  getRun: (id: string) => request<PipelineRun>("GET", `/runs/${id}`),
 
   listAgents: () => request<Agent[]>("GET", "/agents"),
   getAgent: (id: string) => request<Agent>("GET", `/agents/${id}`),

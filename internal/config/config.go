@@ -31,8 +31,6 @@ type Config struct {
 	MediaBaseURL string
 	// MediaStorage is where new media bytes go: empty (the database) or file:///data/media.
 	MediaStorage string
-	// DigestCron, when set, sends a "pending review" summary via every active notifier.
-	DigestCron       string
 	DispatchEvery    time.Duration
 	DispatchLease    time.Duration
 	PublishTimeout   time.Duration
@@ -92,7 +90,6 @@ func Load() (*Config, error) {
 		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
 		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
-		DigestCron:            os.Getenv("CUEFLOW_DIGEST_CRON"),
 		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),
 		DispatchEvery:         envDuration("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second),
 		DispatchLease:         envDuration("CUEFLOW_DISPATCH_LEASE", 10*time.Minute),

@@ -103,112 +103,6 @@ export function Warnings({ warnings, compact }: { warnings: string[] | null | un
   );
 }
 
-export function SourceLinks({ post, limit = 3 }: { post: Post; limit?: number }) {
-  const items = [...(post.source_context?.items ?? []), ...(post.source_context?.search ?? [])].filter((s) => s.url);
-  if (!items.length) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-      {items.slice(0, limit).map((s, i) => (
-        <a
-          key={i}
-          href={s.url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex max-w-[16rem] items-center gap-1 truncate hover:text-indigo-600 dark:hover:text-indigo-400"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Icon name="link" className="h-3 w-3 shrink-0" />
-          <span className="truncate">{s.source || hostOf(s.url)}</span>
-        </a>
-      ))}
-      {items.length > limit && <span>+{items.length - limit} more</span>}
-    </div>
-  );
-}
-
-/* -------------------------------- Post card -------------------------------- */
-
-export function PostCard({
-  post,
-  actions,
-  compact,
-  selected,
-  onSelect,
-}: {
-  post: Post;
-  actions?: React.ReactNode;
-  compact?: boolean;
-  /** When onSelect is set, the card shows a checkbox for bulk actions. */
-  selected?: boolean;
-  onSelect?: (on: boolean) => void;
-}) {
-  const { meta } = useMeta();
-  const pm = platformMap(meta?.platforms);
-  const parts = postParts(post);
-  return (
-    <div
-      className={cx(
-        "group relative rounded-lg border bg-white transition-shadow hover:shadow-sm dark:bg-zinc-900",
-        selected
-          ? "border-indigo-400 ring-1 ring-indigo-300 dark:border-indigo-500/70 dark:ring-indigo-500/40"
-          : "border-zinc-200 dark:border-zinc-800",
-      )}
-    >
-      {onSelect && (
-        <div className="absolute top-3 left-3.5 z-10">
-          <Checkbox checked={!!selected} onChange={onSelect} label={<span className="sr-only">Select</span>} />
-        </div>
-      )}
-      <Link href={`/posts/view/?id=${post.id}`} className={cx("block pt-3 pb-2 pr-3.5", onSelect ? "pl-10" : "pl-3.5")}>
-        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-          {post.platforms.map((p) => (
-            <PlatformBadge key={p} id={p} name={pm[p]?.name} />
-          ))}
-          <StatusBadge status={post.status} />
-          {parts.length > 1 && <Pill>{parts.length}-part thread</Pill>}
-          <span className="ml-auto text-[11px] text-zinc-400" title={fmtTime(post.created_at)}>
-            {fmtRelative(post.created_at)}
-          </span>
-        </div>
-        {post.title && (
-          <h3 className="mb-0.5 line-clamp-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{post.title}</h3>
-        )}
-        <p
-          className={cx(
-            "text-sm whitespace-pre-line text-zinc-600 dark:text-zinc-400",
-            compact ? "line-clamp-3" : "line-clamp-4",
-          )}
-        >
-          {parts[0]}
-        </p>
-        {post.status === "FAILED" && post.error_message && (
-          <p className="mt-1.5 line-clamp-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-300">
-            {post.error_message}
-          </p>
-        )}
-        {post.status === "REJECTED" && post.review_note && (
-          <p className="mt-1.5 line-clamp-2 text-xs text-rose-700 italic dark:text-rose-300">“{post.review_note}”</p>
-        )}
-      </Link>
-      <div className="flex flex-wrap items-center gap-2 px-3.5 pb-3">
-        <Warnings warnings={post.warnings} compact />
-        {!compact && <SourceLinks post={post} />}
-        {actions && <div className="ml-auto flex items-center gap-1.5">{actions}</div>}
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------- Platform preview ---------------------------- */
-
-function Avatar() {
-  return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-xs font-bold text-white">
-      CF
-    </span>
-  );
-}
-
 export function ThreadsPreview({ parts, platform }: { parts: string[]; platform?: Platform }) {
   const max = platform?.max_chars ?? 500;
   return (
@@ -376,5 +270,13 @@ export function AuditTimeline({ logs }: { logs: AuditEntry[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+function Avatar() {
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-xs font-bold text-white">
+      CF
+    </span>
   );
 }

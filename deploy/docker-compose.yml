@@ -42,7 +42,6 @@ services:
       CUEFLOW_MEDIA_BASE_URL: ${CUEFLOW_MEDIA_BASE_URL:-http://cueflow:3000}
       # Empty keeps media in the database; file:///data/media keeps it on disk (mount a volume there).
       CUEFLOW_MEDIA_STORAGE: ${CUEFLOW_MEDIA_STORAGE:-}
-      CUEFLOW_DIGEST_CRON: ${CUEFLOW_DIGEST_CRON:-}
       TZ: ${TZ:-UTC}
       # Server-wide LLM credentials, used by connectors whose own credential fields are blank.
       # Claude API: API key, OAuth/Bearer token, or a profile from a mounted `ant` config (below).

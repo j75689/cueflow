@@ -22,7 +22,6 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CUEFLOW_DIGEST_CRON` | | e.g. `0 9 * * *` - daily "awaiting review" digest |
 | `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Publish worker poll interval |
 | `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time a publish may take before it is considered crashed |
 | `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease |

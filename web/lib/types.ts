@@ -99,8 +99,8 @@ export interface Meta {
   deliverable_kinds?: DeliverableKind[];
   deliverable_statuses?: DeliverableStatus[];
   deliverable_transitions?: Record<string, DeliverableStatus[]>;
-  statuses: PostStatus[];
-  transitions: Record<string, PostStatus[]>;
+  statuses?: PostStatus[];
+  transitions?: Record<string, PostStatus[]>;
   platforms: Platform[];
   connector_types: ConnectorSpec[];
   agent_capabilities?: AgentCapability[];
@@ -320,11 +320,11 @@ export interface PipelineRun {
 }
 
 export interface Stats {
-  posts_by_status: Partial<Record<PostStatus, number>>;
+  posts_by_status?: Partial<Record<PostStatus, number>>;
   deliverables_by_status?: Partial<Record<DeliverableStatus, number>>;
   connectors: { total: number; active: number };
-  pipelines: { total: number; active: number };
-  last_run: PipelineRun | null;
+  pipelines?: { total: number; active: number };
+  last_run?: PipelineRun | null;
 }
 
 /* ------------------------------ Agents & tasks ----------------------------- */
