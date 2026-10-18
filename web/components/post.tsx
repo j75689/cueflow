@@ -49,7 +49,10 @@ export function RejectDialog({
         </>
       }
     >
-      <Field label="Reason" help="Optional. Archived with the post and shown in the audit trail.">
+      <Field
+        label="Reason"
+        help="Optional. Archived with the post and shown in the audit trail."
+      >
         <Textarea
           autoFocus
           value={reason}
@@ -71,7 +74,9 @@ export function isVideoURL(u: string): boolean {
   return /\.(mp4|mov|webm)(\?|#|$)/i.test(u);
 }
 
-export function platformMap(platforms: Platform[] | undefined): Record<string, Platform> {
+export function platformMap(
+  platforms: Platform[] | undefined,
+): Record<string, Platform> {
   return Object.fromEntries((platforms ?? []).map((p) => [p.id, p]));
 }
 
@@ -79,7 +84,13 @@ export function postParts(p: Pick<Post, "content" | "thread_parts">): string[] {
   return p.thread_parts && p.thread_parts.length ? p.thread_parts : [p.content];
 }
 
-export function Warnings({ warnings, compact }: { warnings: string[] | null | undefined; compact?: boolean }) {
+export function Warnings({
+  warnings,
+  compact,
+}: {
+  warnings: string[] | null | undefined;
+  compact?: boolean;
+}) {
   if (!warnings?.length) return null;
   if (compact)
     return (
@@ -103,8 +114,17 @@ export function Warnings({ warnings, compact }: { warnings: string[] | null | un
   );
 }
 
-export function SourceLinks({ post, limit = 3 }: { post: Post; limit?: number }) {
-  const items = [...(post.source_context?.items ?? []), ...(post.source_context?.search ?? [])].filter((s) => s.url);
+export function SourceLinks({
+  post,
+  limit = 3,
+}: {
+  post: Post;
+  limit?: number;
+}) {
+  const items = [
+    ...(post.source_context?.items ?? []),
+    ...(post.source_context?.search ?? []),
+  ].filter((s) => s.url);
   if (!items.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
@@ -156,22 +176,34 @@ export function PostCard({
     >
       {onSelect && (
         <div className="absolute top-3 left-3.5 z-10">
-          <Checkbox checked={!!selected} onChange={onSelect} label={<span className="sr-only">Select</span>} />
+          <Checkbox
+            checked={!!selected}
+            onChange={onSelect}
+            label={<span className="sr-only">Select</span>}
+          />
         </div>
       )}
-      <Link href={`/posts/view/?id=${post.id}`} className={cx("block pt-3 pb-2 pr-3.5", onSelect ? "pl-10" : "pl-3.5")}>
+      <Link
+        href={`/posts/view/?id=${post.id}`}
+        className={cx("block pt-3 pb-2 pr-3.5", onSelect ? "pl-10" : "pl-3.5")}
+      >
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           {post.platforms.map((p) => (
             <PlatformBadge key={p} id={p} name={pm[p]?.name} />
           ))}
           <StatusBadge status={post.status} />
           {parts.length > 1 && <Pill>{parts.length}-part thread</Pill>}
-          <span className="ml-auto text-[11px] text-zinc-400" title={fmtTime(post.created_at)}>
+          <span
+            className="ml-auto text-[11px] text-zinc-400"
+            title={fmtTime(post.created_at)}
+          >
             {fmtRelative(post.created_at)}
           </span>
         </div>
         {post.title && (
-          <h3 className="mb-0.5 line-clamp-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{post.title}</h3>
+          <h3 className="mb-0.5 line-clamp-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            {post.title}
+          </h3>
         )}
         <p
           className={cx(
@@ -187,13 +219,17 @@ export function PostCard({
           </p>
         )}
         {post.status === "REJECTED" && post.review_note && (
-          <p className="mt-1.5 line-clamp-2 text-xs text-rose-700 italic dark:text-rose-300">“{post.review_note}”</p>
+          <p className="mt-1.5 line-clamp-2 text-xs text-rose-700 italic dark:text-rose-300">
+            “{post.review_note}”
+          </p>
         )}
       </Link>
       <div className="flex flex-wrap items-center gap-2 px-3.5 pb-3">
         <Warnings warnings={post.warnings} compact />
         {!compact && <SourceLinks post={post} />}
-        {actions && <div className="ml-auto flex items-center gap-1.5">{actions}</div>}
+        {actions && (
+          <div className="ml-auto flex items-center gap-1.5">{actions}</div>
+        )}
       </div>
     </div>
   );
@@ -209,7 +245,13 @@ function Avatar() {
   );
 }
 
-export function ThreadsPreview({ parts, platform }: { parts: string[]; platform?: Platform }) {
+export function ThreadsPreview({
+  parts,
+  platform,
+}: {
+  parts: string[];
+  platform?: Platform;
+}) {
   const max = platform?.max_chars ?? 500;
   return (
     <div className="space-y-0">
@@ -219,15 +261,24 @@ export function ThreadsPreview({ parts, platform }: { parts: string[]; platform?
           <div key={i} className="flex gap-3">
             <div className="flex flex-col items-center">
               <Avatar />
-              {i < parts.length - 1 && <span className="my-1 w-0.5 flex-1 bg-zinc-200 dark:bg-zinc-700" />}
+              {i < parts.length - 1 && (
+                <span className="my-1 w-0.5 flex-1 bg-zinc-200 dark:bg-zinc-700" />
+              )}
             </div>
             <div className="min-w-0 flex-1 pb-4">
               <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-zinc-900 dark:text-zinc-100">cueflow</span>
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  cueflow
+                </span>
                 <span className="text-zinc-400">
                   {i + 1}/{parts.length}
                 </span>
-                <span className={cx("ml-auto tabular-nums", n > max ? "text-red-600" : "text-zinc-400")}>
+                <span
+                  className={cx(
+                    "ml-auto tabular-nums",
+                    n > max ? "text-red-600" : "text-zinc-400",
+                  )}
+                >
                   {n}/{max}
                 </span>
               </div>
@@ -253,7 +304,9 @@ export function InstagramPreview({
   media: string[];
   platform?: Platform;
 }) {
-  const full = hashtags.length ? `${caption}\n\n${hashtags.map((h) => `#${h}`).join(" ")}` : caption;
+  const full = hashtags.length
+    ? `${caption}\n\n${hashtags.map((h) => `#${h}`).join(" ")}`
+    : caption;
   const n = charCount(full);
   const max = platform?.max_chars ?? 2200;
   return (
@@ -269,13 +322,19 @@ export function InstagramPreview({
         )}
       >
         {media[0] && isVideoURL(media[0]) ? (
-          <video src={media[0]} controls playsInline className="h-full w-full bg-black object-contain" />
+          <video
+            src={media[0]}
+            controls
+            playsInline
+            className="h-full w-full bg-black object-contain"
+          />
         ) : media[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={media[0]} alt="" className="h-full w-full object-cover" />
         ) : (
           <span className="px-6 text-center text-xs text-zinc-400">
-            No media yet{platform?.requires_media ? " — Instagram requires an image" : ""}
+            No media yet
+            {platform?.requires_media ? " — Instagram requires an image" : ""}
           </span>
         )}
       </div>
@@ -289,7 +348,12 @@ export function InstagramPreview({
             {hashtags.map((h) => `#${h}`).join(" ")}
           </p>
         )}
-        <p className={cx("mt-2 text-right text-[11px] tabular-nums", n > max ? "text-red-600" : "text-zinc-400")}>
+        <p
+          className={cx(
+            "mt-2 text-right text-[11px] tabular-nums",
+            n > max ? "text-red-600" : "text-zinc-400",
+          )}
+        >
           {n}/{max}
         </p>
       </div>
@@ -297,7 +361,13 @@ export function InstagramPreview({
   );
 }
 
-export function GenericPreview({ parts, platform }: { parts: string[]; platform?: Platform }) {
+export function GenericPreview({
+  parts,
+  platform,
+}: {
+  parts: string[];
+  platform?: Platform;
+}) {
   return <ThreadsPreview parts={parts} platform={platform} />;
 }
 
@@ -323,30 +393,61 @@ function show(v: unknown): string {
   return JSON.stringify(v, null, 2);
 }
 
-export function AuditTimeline({ logs }: { logs: AuditLog[] }) {
-  if (!logs.length) return <p className="px-4 py-6 text-sm text-zinc-500">No history yet.</p>;
+export type AuditEntry = Pick<
+  AuditLog,
+  | "id"
+  | "action"
+  | "actor"
+  | "from_status"
+  | "to_status"
+  | "note"
+  | "payload_diff"
+  | "created_at"
+>;
+
+export function AuditTimeline({ logs }: { logs: AuditEntry[] }) {
+  if (!logs.length)
+    return <p className="px-4 py-6 text-sm text-zinc-500">No history yet.</p>;
   return (
     <ol className="relative space-y-4 px-4 py-4">
       {logs.map((l, i) => (
         <li key={l.id} className="relative flex gap-3">
           <div className="flex flex-col items-center">
-            <span className={cx("mt-1 h-2.5 w-2.5 rounded-full", ACTION_COLOR[l.action] ?? "bg-zinc-400")} />
-            {i < logs.length - 1 && <span className="mt-1 w-px flex-1 bg-zinc-200 dark:bg-zinc-800" />}
+            <span
+              className={cx(
+                "mt-1 h-2.5 w-2.5 rounded-full",
+                ACTION_COLOR[l.action] ?? "bg-zinc-400",
+              )}
+            />
+            {i < logs.length - 1 && (
+              <span className="mt-1 w-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">{l.action}</span>
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                {l.action}
+              </span>
               <span className="text-zinc-500">by {l.actor}</span>
-              {l.from_status && l.to_status && l.from_status !== l.to_status && (
-                <span className="font-mono text-[11px] text-zinc-400">
-                  {l.from_status} → {l.to_status}
-                </span>
-              )}
-              <span className="ml-auto text-zinc-400" title={fmtTime(l.created_at)}>
+              {l.from_status &&
+                l.to_status &&
+                l.from_status !== l.to_status && (
+                  <span className="font-mono text-[11px] text-zinc-400">
+                    {l.from_status} → {l.to_status}
+                  </span>
+                )}
+              <span
+                className="ml-auto text-zinc-400"
+                title={fmtTime(l.created_at)}
+              >
                 {fmtRelative(l.created_at)}
               </span>
             </div>
-            {l.note && <p className="mt-1 text-xs whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">{l.note}</p>}
+            {l.note && (
+              <p className="mt-1 text-xs whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">
+                {l.note}
+              </p>
+            )}
             {l.payload_diff && Object.keys(l.payload_diff).length > 0 && (
               <details className="mt-1.5">
                 <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
@@ -355,7 +456,9 @@ export function AuditTimeline({ logs }: { logs: AuditLog[] }) {
                 <div className="mt-1.5 space-y-2">
                   {Object.entries(l.payload_diff).map(([field, d]) => (
                     <div key={field} className="text-xs">
-                      <div className="mb-0.5 font-mono text-[11px] text-zinc-500">{field}</div>
+                      <div className="mb-0.5 font-mono text-[11px] text-zinc-500">
+                        {field}
+                      </div>
                       <pre className="overflow-x-auto rounded bg-red-50 px-2 py-1 whitespace-pre-wrap text-red-800 line-through decoration-red-300 dark:bg-red-950/40 dark:text-red-300">
                         {show(d?.before)}
                       </pre>

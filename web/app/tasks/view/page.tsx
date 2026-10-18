@@ -542,7 +542,9 @@ function ApprovalCard({
     setBusy(decision);
     try {
       await api.decideApproval(m.task_id, approval.id, decision, note);
-      toast.success(decision === "approve" ? `${tool} approved, running` : "Rejected");
+      toast.success(
+        decision === "approve" ? `${tool} approved, running` : "Rejected",
+      );
       onDecided();
     } catch (e) {
       toast.error(e);
@@ -1190,6 +1192,37 @@ function Sidebar({
                     {(p.platforms ?? []).join(", ")}
                   </span>
                   <StatusBadge status={p.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Deliverables"
+          subtitle="Documents and other items produced for this task (they wait in Deliverables)"
+        />
+        {(t.deliverables ?? []).length === 0 ? (
+          <p className="px-4 py-3 text-xs text-zinc-500">
+            No deliverables yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {t.deliverables!.map((d) => (
+              <li key={d.id}>
+                <Link
+                  href={`/deliverables/view/?id=${d.id}`}
+                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {d.title || "(untitled)"}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-zinc-500">
+                    {d.kind}
+                  </span>
+                  <StatusBadge status={d.status} />
                 </Link>
               </li>
             ))}

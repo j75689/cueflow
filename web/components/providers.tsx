@@ -10,7 +10,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { UNAUTHORIZED_EVENT, api, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
+import {
+  UNAUTHORIZED_EVENT,
+  api,
+  errorMessage,
+  eventsURL,
+  getToken,
+  setToken,
+} from "@/lib/api";
 import type { Meta } from "@/lib/types";
 import { DialogProvider } from "./dialog";
 import { Button, Field, Input, Modal, cx } from "./ui";
@@ -24,21 +31,30 @@ interface Toast {
   text: string;
 }
 
-const ToastCtx = createContext<(kind: ToastKind, text: string) => void>(() => {});
+const ToastCtx = createContext<(kind: ToastKind, text: string) => void>(
+  () => {},
+);
 
 export function useToast() {
   const push = useContext(ToastCtx);
   return useMemo(
     () => ({
       success: (t: string) => push("success", t),
-      error: (t: string | unknown) => push("error", typeof t === "string" ? t : errorMessage(t)),
+      error: (t: string | unknown) =>
+        push("error", typeof t === "string" ? t : errorMessage(t)),
       info: (t: string) => push("info", t),
     }),
     [push],
   );
 }
 
-function ToastHost({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: number) => void }) {
+function ToastHost({
+  toasts,
+  dismiss,
+}: {
+  toasts: Toast[];
+  dismiss: (id: number) => void;
+}) {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end">
       {toasts.map((t) => (
@@ -70,7 +86,11 @@ interface MetaState {
   error: string | null;
   reload: () => void;
 }
-const MetaCtx = createContext<MetaState>({ meta: null, error: null, reload: () => {} });
+const MetaCtx = createContext<MetaState>({
+  meta: null,
+  error: null,
+  reload: () => {},
+});
 export const useMeta = () => useContext(MetaCtx);
 
 /**
@@ -89,7 +109,10 @@ interface Bus {
   subscribe: (event: string, fn: Listener) => () => void;
   connected: boolean;
 }
-const BusCtx = createContext<Bus>({ subscribe: () => () => {}, connected: false });
+const BusCtx = createContext<Bus>({
+  subscribe: () => () => {},
+  connected: false,
+});
 
 export function useServerEvents() {
   return useContext(BusCtx);
@@ -102,7 +125,9 @@ export function useServerEvent(events: string | string[], fn: Listener) {
   fnRef.current = fn;
   const key = Array.isArray(events) ? events.join(",") : events;
   useEffect(() => {
-    const offs = key.split(",").map((e) => subscribe(e, (d) => fnRef.current(d)));
+    const offs = key
+      .split(",")
+      .map((e) => subscribe(e, (d) => fnRef.current(d)));
     return () => offs.forEach((off) => off());
   }, [key, subscribe]);
 }
@@ -129,7 +154,10 @@ export function Providers({ children }: { children: ReactNode }) {
   // toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
-  const dismiss = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
+  const dismiss = useCallback(
+    (id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)),
+    [],
+  );
   const push = useCallback(
     (kind: ToastKind, text: string) => {
       const id = nextId.current++;
@@ -271,7 +299,10 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [authEpoch]);
 
   const bus = useMemo(() => ({ subscribe, connected }), [subscribe, connected]);
-  const metaState = useMemo(() => ({ meta, error: metaError, reload: loadMeta }), [meta, metaError, loadMeta]);
+  const metaState = useMemo(
+    () => ({ meta, error: metaError, reload: loadMeta }),
+    [meta, metaError, loadMeta],
+  );
 
   const saveToken = () => {
     setToken(tokenDraft.trim());
@@ -313,7 +344,8 @@ export function Providers({ children }: { children: ReactNode }) {
               className="space-y-3"
             >
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                This CueFlow server is protected by <code className="font-mono text-xs">CUEFLOW_ADMIN_TOKEN</code>.
+                This CueFlow server is protected by{" "}
+                <code className="font-mono text-xs">CUEFLOW_ADMIN_TOKEN</code>.
                 Paste it below; it is stored only in this browser.
               </p>
               <Field label="Token">
