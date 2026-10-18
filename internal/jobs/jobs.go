@@ -1,5 +1,5 @@
-// Package jobs is how CueFlow asks for background work to happen: "run this task", "publish this
-// post". In the local deployment nothing needs it (in-process loops wake each other and poll the
+// Package jobs is how CueFlow asks for background work to happen: "run this task", "fire this
+// schedule". In the local deployment nothing needs it (in-process loops wake each other and poll the
 // database as a safety net); in the cloud deployment a Queue (Cloud Tasks) delivers each request as
 // an HTTP call to /internal/work/{kind}/{id}, so the process can scale to zero between requests.
 //
@@ -25,18 +25,21 @@ const (
 	// KindCrew claims one TODO task (id is the task id, or uuid.Nil for "whichever is next") and
 	// works it to the end of its run.
 	KindCrew Kind = "crew"
-	// KindDispatch publishes queued posts (id is a post id, or uuid.Nil for "whichever is next").
-	KindDispatch Kind = "dispatch"
-	// KindPipeline runs one simple schedule (pipeline) to completion; id is the pipeline id.
-	KindPipeline Kind = "pipeline"
 	// KindSchedule creates the task of a recurring task schedule; id is the schedule id.
 	KindSchedule Kind = "schedule"
 	// KindApproval makes one approved tool call; id is the approval id.
 	KindApproval Kind = "approval"
 )
 
-// Kinds lists every kind the server handles.
-var Kinds = []Kind{KindCrew, KindDispatch, KindPipeline, KindSchedule, KindApproval}
+// Kinds lists every kind the server handles: the core's, then the ones modules Register.
+var Kinds = []Kind{KindCrew, KindSchedule, KindApproval}
+
+// Register adds a module's kind (the content module registers "dispatch" and "pipeline").
+func Register(k Kind) {
+	if !slices.Contains(Kinds, k) {
+		Kinds = append(Kinds, k)
+	}
+}
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {

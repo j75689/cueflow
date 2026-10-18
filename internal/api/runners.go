@@ -22,10 +22,10 @@ import (
 func (s *Server) listRunners(w http.ResponseWriter, r *http.Request) {
 	runners, err := s.Store.ListRunners(r.Context())
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runners)
+	WriteJSON(w, http.StatusOK, runners)
 }
 
 type registrationBody struct {
@@ -37,8 +37,8 @@ type registrationBody struct {
 
 func (s *Server) createRegistration(w http.ResponseWriter, r *http.Request) {
 	var body registrationBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	ttl := body.TTLMinutes
@@ -50,11 +50,11 @@ func (s *Server) createRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 	token, exp, err := s.Store.CreateRegistration(r.Context(), body.Labels, body.OrgIDs, time.Duration(ttl)*time.Minute)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	url := strings.TrimRight(s.machineURL(), "/")
-	writeJSON(w, http.StatusCreated, map[string]any{
+	WriteJSON(w, http.StatusCreated, map[string]any{
 		"token": token, "expires_at": exp, "url": url,
 		"command": fmt.Sprintf("cueflow runner register --url %s --token %s --name <name>", url, token),
 	})
@@ -69,34 +69,34 @@ type runnerBody struct {
 }
 
 func (s *Server) updateRunner(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var body runnerBody
-	if err := decode(r, &body); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	out, err := s.Store.UpdateRunner(r.Context(), id, store.RunnerPatch{Name: body.Name, Labels: body.Labels,
 		OrgIDs: body.OrgIDs, IsActive: body.IsActive, MaxConcurrency: body.MaxConcurrency})
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("runner.updated", map[string]any{"id": out.ID})
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) deleteRunner(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	if err := s.Store.DeleteRunner(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("runner.updated", map[string]any{"id": id})
@@ -104,17 +104,17 @@ func (s *Server) deleteRunner(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) taskRunnerJobs(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	jobs, err := s.Store.ListTaskRunnerJobs(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, jobs)
+	WriteJSON(w, http.StatusOK, jobs)
 }
 
 // --- runner side (/api/runner/v1) ---
@@ -138,7 +138,7 @@ func (s *Server) runnerAuth(next http.Handler) http.Handler {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		runner, err := s.Store.RunnerByToken(r.Context(), tok)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "missing, invalid or revoked runner token")
+			WriteError(w, http.StatusUnauthorized, "unauthorized", "missing, invalid or revoked runner token")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), runnerCtxKey{}, runner)))
@@ -151,7 +151,7 @@ func runnerFrom(r *http.Request) *store.Runner {
 
 func protocolOK(w http.ResponseWriter, v int) bool {
 	if v != runnerapi.ProtocolVersion {
-		writeError(w, http.StatusUpgradeRequired, "upgrade_required",
+		WriteError(w, http.StatusUpgradeRequired, "upgrade_required",
 			fmt.Sprintf("this server speaks runner protocol %d; update the runner", runnerapi.ProtocolVersion))
 		return false
 	}
@@ -160,8 +160,8 @@ func protocolOK(w http.ResponseWriter, v int) bool {
 
 func (s *Server) runnerRegister(w http.ResponseWriter, r *http.Request) {
 	var req runnerapi.RegisterRequest
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	if !protocolOK(w, req.Protocol) {
@@ -169,15 +169,15 @@ func (s *Server) runnerRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	runner, token, err := s.Store.RegisterRunner(r.Context(), req.Token, req.Name, req.Version, req.Platform, req.Labels, req.Concurrency)
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusUnauthorized, "invalid_registration", "the registration token is invalid, used or expired")
+		WriteError(w, http.StatusUnauthorized, "invalid_registration", "the registration token is invalid, used or expired")
 		return
 	}
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("runner.updated", map[string]any{"id": runner.ID})
-	writeJSON(w, http.StatusCreated, runnerapi.RegisterResponse{RunnerID: runner.ID.String(), Token: token,
+	WriteJSON(w, http.StatusCreated, runnerapi.RegisterResponse{RunnerID: runner.ID.String(), Token: token,
 		Name: runner.Name, Labels: runner.Labels})
 }
 
@@ -185,8 +185,8 @@ func (s *Server) runnerRegister(w http.ResponseWriter, r *http.Request) {
 // wait 0 (it polls), after up to ClaimWait otherwise (a long poll).
 func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 	var req runnerapi.ClaimRequest
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	if !protocolOK(w, req.Protocol) {
@@ -204,20 +204,20 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 	for {
 		job, err := s.Store.ClaimRunnerJob(r.Context(), runner)
 		if err != nil {
-			s.fail(w, err)
+			s.Fail(w, err)
 			return
 		}
 		if job != nil {
 			var out runnerapi.Job
 			if err := json.Unmarshal(job.Payload, &out); err != nil {
 				_, _ = s.Store.EndRunnerJob(r.Context(), job.ID, store.JobFailed, map[string]any{"error": "bad job payload"})
-				s.fail(w, err)
+				s.Fail(w, err)
 				return
 			}
 			out.ID = job.ID.String()
 			s.Crew.RunnerPickedUp(r.Context(), job.TaskID, runner.Name)
 			s.Broker.Publish("task.updated", map[string]any{"id": job.TaskID})
-			writeJSON(w, http.StatusOK, out)
+			WriteJSON(w, http.StatusOK, out)
 			return
 		}
 		if wait == 0 {
@@ -235,7 +235,7 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 		// Revoking or disabling a runner takes effect even mid-poll.
 		cur, err := s.Store.GetRunner(r.Context(), runner.ID)
 		if err != nil || !cur.IsActive {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "this runner was revoked or disabled")
+			WriteError(w, http.StatusUnauthorized, "unauthorized", "this runner was revoked or disabled")
 			return
 		}
 		runner = cur
@@ -244,15 +244,15 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 
 // ownedJob loads the job a runner is talking about; a job it does not own looks like it does not exist.
 func (s *Server) ownedJob(w http.ResponseWriter, r *http.Request) (*store.RunnerJob, *store.Runner, bool) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return nil, nil, false
 	}
 	runner := runnerFrom(r)
 	job, err := s.Store.GetRunnerJob(r.Context(), id)
 	if err != nil || job.RunnerID == nil || *job.RunnerID != runner.ID {
-		writeError(w, http.StatusNotFound, "not_found", "no such job")
+		WriteError(w, http.StatusNotFound, "not_found", "no such job")
 		return nil, nil, false
 	}
 	return job, runner, true
@@ -264,8 +264,8 @@ func (s *Server) runnerEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req runnerapi.EventsRequest
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	if len(req.Events) > 200 {
@@ -276,10 +276,10 @@ func (s *Server) runnerEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := s.Store.HeartbeatRunnerJob(r.Context(), job.ID, runner.ID)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
+	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
 }
 
 func (s *Server) runnerHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -289,10 +289,10 @@ func (s *Server) runnerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := s.Store.HeartbeatRunnerJob(r.Context(), job.ID, runner.ID)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
+	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
 }
 
 func (s *Server) runnerComplete(w http.ResponseWriter, r *http.Request) {
@@ -301,8 +301,8 @@ func (s *Server) runnerComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req runnerapi.CompleteRequest
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	status := store.JobDone
@@ -314,9 +314,9 @@ func (s *Server) runnerComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	changed, err := s.Store.CompleteRunnerJob(r.Context(), job.ID, runner.ID, status, req)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	// A job already closed by the server (canceled, expired) is not an error for the runner.
-	writeJSON(w, http.StatusOK, map[string]any{"accepted": changed})
+	WriteJSON(w, http.StatusOK, map[string]any{"accepted": changed})
 }

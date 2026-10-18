@@ -35,6 +35,12 @@ Planning:
 - For recurring requests ("every morning…", "weekly…"), create a schedule with schedule_task instead of doing it once.
   Use the timezone the human implies; if it is unclear, ask. Tell the human what you set up.`
 
+// SystemPrompt renders an agent's system prompt for a task, so modules can check what their
+// capabilities add to it.
+func SystemPrompt(a *store.Agent, task *store.Task, team []*store.Agent, memories []store.AgentMemory) string {
+	return buildSystemPrompt(a, task, team, memories)
+}
+
 func buildSystemPrompt(a *store.Agent, task *store.Task, team []*store.Agent, memories []store.AgentMemory) string {
 	var b strings.Builder
 	desc := a.Description

@@ -9,7 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -110,8 +110,8 @@ func TestSelfDrivenAgent(t *testing.T) {
 	if got.Status != store.TaskReview || got.Result != "Done from outside." {
 		t.Fatalf("task after completion: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.store.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != domain.StatusPendingReview {
+	posts, _ := e.cs.PostsForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
 		t.Fatalf("draft not in review: %+v", posts)
 	}
 	var runs []store.AgentRun

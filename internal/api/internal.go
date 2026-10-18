@@ -31,14 +31,14 @@ func (s *Server) internalRoutes(r chi.Router) {
 
 func (s *Server) tick(w http.ResponseWriter, r *http.Request) {
 	if s.Tick == nil {
-		writeError(w, http.StatusNotFound, "not_found", "no clock configured")
+		WriteError(w, http.StatusNotFound, "not_found", "no clock configured")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	if err := s.Tick(ctx); err != nil {
 		s.Logger.Error("tick", "err", err)
-		writeError(w, http.StatusInternalServerError, "tick_failed", err.Error())
+		WriteError(w, http.StatusInternalServerError, "tick_failed", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -51,18 +51,18 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 	handler, ok := s.Handlers[kind]
 	if !ok {
 		// Not retryable: a kind this build does not know.
-		writeError(w, http.StatusNotFound, "unknown_kind", "no handler for "+string(kind))
+		WriteError(w, http.StatusNotFound, "unknown_kind", "no handler for "+string(kind))
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_id", "bad work id")
+		WriteError(w, http.StatusBadRequest, "bad_id", "bad work id")
 		return
 	}
 	start := time.Now()
 	if err := handler(r.Context(), id); err != nil {
 		s.Logger.Error("work failed", "kind", kind, "id", id, "dur", time.Since(start), "err", err)
-		writeError(w, http.StatusInternalServerError, "work_failed", err.Error())
+		WriteError(w, http.StatusInternalServerError, "work_failed", err.Error())
 		return
 	}
 	s.Logger.Info("work done", "kind", kind, "id", id, "dur", time.Since(start))

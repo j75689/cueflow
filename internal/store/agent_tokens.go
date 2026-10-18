@@ -29,7 +29,7 @@ type AgentToken struct {
 func (s *Store) CreateAgentToken(ctx context.Context, agentID uuid.UUID, name string) (*AgentToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
-		return nil, "", invalid("a token name (1-64 characters) is required")
+		return nil, "", Invalid("a token name (1-64 characters) is required")
 	}
 	if _, err := s.GetAgent(ctx, agentID); err != nil {
 		return nil, "", err
@@ -80,7 +80,7 @@ func (s *Store) AgentByToken(ctx context.Context, plain string) (*Agent, error) 
 	err := s.pool.QueryRow(ctx, `UPDATE agent_tokens t SET last_used_at=NOW() FROM agents a
 		WHERE t.token_hash=$1 AND a.id=t.agent_id AND a.is_active RETURNING t.agent_id`, HashToken(plain)).Scan(&id)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	return s.GetAgent(ctx, id)
 }
@@ -98,7 +98,7 @@ func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID
 			LIMIT 1 FOR UPDATE SKIP LOCKED)
 		RETURNING id`, agentID, taskID, lease.Seconds()).Scan(&id)
 	if err != nil {
-		if notFound(err) == domain.ErrNotFound {
+		if NotFound(err) == domain.ErrNotFound {
 			return nil, nil
 		}
 		return nil, err
@@ -115,7 +115,7 @@ func (s *Store) RunningAgentRun(ctx context.Context, taskID, agentID uuid.UUID) 
 		Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens,
 			&r.OutputTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	return &r, nil
 }

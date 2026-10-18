@@ -86,7 +86,7 @@ func init() {
 			schema: Obj(map[string]any{"content": Str("Update text")}, "content"), run: toolAddComment},
 		{name: "ask_human", description: "Ask the human a question and pause until they reply. Use only when you genuinely need their decision or missing information.",
 			schema: Obj(map[string]any{"question": Str("The question, with options if helpful")}, "question"), run: toolAskHuman},
-		{name: "complete_task", description: "Finish the task with a concise summary of what you did and the outputs (draft IDs, subtask numbers, links).",
+		{name: "complete_task", description: "Finish the task with a concise summary of what you did and the outputs (subtask numbers, links, the ids of anything you created).",
 			schema: Obj(map[string]any{"summary": Str("Result summary for the human")}, "summary"), run: toolComplete},
 
 		// --- research ---

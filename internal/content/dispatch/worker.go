@@ -13,17 +13,17 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/media"
-	"github.com/j75689/cueflow/internal/store"
 )
 
 type Worker struct {
-	store   *store.Store
+	store   *content.Store
 	hub     *hub.Hub
 	broker  *events.Broker
 	logger  *slog.Logger
@@ -32,13 +32,13 @@ type Worker struct {
 	timeout time.Duration
 	wake    chan struct{}
 	// Queue, when set (cloud deployment), replaces the in-process wake-up: Wake enqueues a
-	// jobs.KindDispatch delivery, handled by Handle.
+	// content.KindDispatch delivery, handled by Handle.
 	Queue jobs.Queue
 	// MediaBaseURL turns stored media ("/media/{id}") into URLs publishers can fetch.
 	MediaBaseURL string
 }
 
-func NewWorker(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, every, lease, timeout time.Duration) *Worker {
+func NewWorker(st *content.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, every, lease, timeout time.Duration) *Worker {
 	return &Worker{store: st, hub: h, broker: b, logger: logger.With("component", "dispatch"),
 		every: every, lease: lease, timeout: timeout, wake: make(chan struct{}, 1)}
 }
@@ -48,7 +48,7 @@ func (w *Worker) Wake() {
 	if w.Queue != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := w.Queue.Enqueue(ctx, jobs.KindDispatch, uuid.Nil, 0); err != nil {
+		if err := w.Queue.Enqueue(ctx, content.KindDispatch, uuid.Nil, 0); err != nil {
 			w.logger.Warn("enqueue publish work", "err", err)
 		}
 		return
@@ -86,7 +86,7 @@ func (w *Worker) Tick(ctx context.Context) {
 		return
 	}
 	for _, id := range ids {
-		w.broker.Publish("post.updated", map[string]any{"id": id, "status": domain.StatusQueued})
+		w.broker.Publish("post.updated", map[string]any{"id": id, "status": content.StatusQueued})
 	}
 	for {
 		posts, err := w.store.ClaimQueued(ctx, w.lease, 5)
@@ -105,7 +105,7 @@ func (w *Worker) Tick(ctx context.Context) {
 	}
 }
 
-// Handle is the jobs.KindDispatch handler: one pass of Tick. Tick already drains every queued post,
+// Handle is the content.KindDispatch handler: one pass of Tick. Tick already drains every queued post,
 // and claiming is atomic, so duplicate deliveries are harmless.
 func (w *Worker) Handle(ctx context.Context) error {
 	w.Tick(ctx)
@@ -135,17 +135,17 @@ func (w *Worker) failExpired(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		msg := "worker stopped while publishing; the post may or may not have been published - check the platform before retrying"
-		if _, err := w.store.Transition(ctx, id, domain.StatusFailed, domain.ActionFailed, domain.ActorWorker, msg,
-			&store.TransitionOpts{ErrorMessage: &msg}); err != nil {
+		if _, err := w.store.Transition(ctx, id, content.StatusFailed, content.ActionFailed, content.ActorWorker, msg,
+			&content.TransitionOpts{ErrorMessage: &msg}); err != nil {
 			w.logger.Error("fail expired lease", "post", id, "err", err)
 			continue
 		}
-		w.broker.Publish("post.updated", map[string]any{"id": id, "status": domain.StatusFailed})
+		w.broker.Publish("post.updated", map[string]any{"id": id, "status": content.StatusFailed})
 	}
 	return nil
 }
 
-func (w *Worker) publish(ctx context.Context, p *domain.Post) {
+func (w *Worker) publish(ctx context.Context, p *content.Post) {
 	log := w.logger.With("post", p.ID)
 	res, err := w.doPublish(ctx, p)
 	if ctx.Err() != nil {
@@ -155,32 +155,32 @@ func (w *Worker) publish(ctx context.Context, p *domain.Post) {
 	if err != nil {
 		msg := err.Error()
 		log.Warn("publish failed", "err", err)
-		opts := &store.TransitionOpts{ErrorMessage: &msg}
+		opts := &content.TransitionOpts{ErrorMessage: &msg}
 		var partial *connector.PartialError
 		if errors.As(err, &partial) {
 			// Keep what did go out so a retry finishes this attempt instead of publishing again.
 			opts.ExternalIDs = partial.ExternalIDs
 		}
-		if _, terr := w.store.Transition(context.Background(), p.ID, domain.StatusFailed, domain.ActionFailed,
-			domain.ActorWorker, msg, opts); terr != nil {
+		if _, terr := w.store.Transition(context.Background(), p.ID, content.StatusFailed, content.ActionFailed,
+			content.ActorWorker, msg, opts); terr != nil {
 			log.Error("mark failed", "err", terr)
 		}
-		w.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": domain.StatusFailed})
+		w.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": content.StatusFailed})
 		return
 	}
 	now := time.Now().UTC()
 	empty := ""
 	note := fmt.Sprintf("external ids: %v", res.ExternalIDs)
-	if _, err := w.store.Transition(context.Background(), p.ID, domain.StatusPublished, domain.ActionPublished,
-		domain.ActorWorker, note, &store.TransitionOpts{ExternalIDs: res.ExternalIDs, PublishedAt: &now, ErrorMessage: &empty}); err != nil {
+	if _, err := w.store.Transition(context.Background(), p.ID, content.StatusPublished, content.ActionPublished,
+		content.ActorWorker, note, &content.TransitionOpts{ExternalIDs: res.ExternalIDs, PublishedAt: &now, ErrorMessage: &empty}); err != nil {
 		log.Error("mark published", "err", err)
 		return
 	}
 	log.Info("published", "external_ids", res.ExternalIDs)
-	w.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": domain.StatusPublished})
+	w.broker.Publish("post.updated", map[string]any{"id": p.ID, "status": content.StatusPublished})
 }
 
-func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.PublishResult, error) {
+func (w *Worker) doPublish(ctx context.Context, p *content.Post) (*connector.PublishResult, error) {
 	publisherID, err := w.resolvePublisher(ctx, p)
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.Publ
 		return nil, err
 	}
 	defer hub.Close(pub)
-	_ = w.store.AddAudit(ctx, p.ID, domain.ActionDispatched, domain.ActorWorker, "via "+c.Name)
+	_ = w.store.AddAudit(ctx, p.ID, content.ActionDispatched, content.ActorWorker, "via "+c.Name)
 
 	pctx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
@@ -222,7 +222,7 @@ func (w *Worker) doPublish(ctx context.Context, p *domain.Post) (*connector.Publ
 	return res, nil
 }
 
-func (w *Worker) resolvePublisher(ctx context.Context, p *domain.Post) (uuid.UUID, error) {
+func (w *Worker) resolvePublisher(ctx context.Context, p *content.Post) (uuid.UUID, error) {
 	if p.PublisherConnectorID != nil {
 		return *p.PublisherConnectorID, nil
 	}
@@ -237,7 +237,7 @@ func (w *Worker) resolvePublisher(ctx context.Context, p *domain.Post) (uuid.UUI
 }
 
 // mediaFor resolves a post's media for publishers: absolute URLs, and loaders for stored images.
-func (w *Worker) mediaFor(p *domain.Post) ([]string, []connector.MediaFile) {
+func (w *Worker) mediaFor(p *content.Post) ([]string, []connector.MediaFile) {
 	urls := make([]string, 0, len(p.MediaURLs))
 	files := make([]connector.MediaFile, 0, len(p.MediaURLs))
 	for _, raw := range p.MediaURLs {

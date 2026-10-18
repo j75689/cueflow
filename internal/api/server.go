@@ -25,7 +25,6 @@ import (
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/media"
-	"github.com/j75689/cueflow/internal/pipeline"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/store"
 	"github.com/j75689/cueflow/internal/webui"
@@ -33,16 +32,11 @@ import (
 
 const Version = "0.2.0"
 
-// Dispatcher is the part of the publish worker the API needs.
-type Dispatcher interface{ Wake() }
-
 type Server struct {
 	Store      *store.Store
 	Hub        *hub.Hub
 	Broker     *events.Broker
-	Runner     *pipeline.Runner
 	Scheduler  *scheduler.Scheduler
-	Dispatcher Dispatcher
 	Crew       *crew.Crew
 	Logger     *slog.Logger
 	AdminToken string
@@ -145,7 +139,7 @@ func (s *Server) Handler() http.Handler {
 		}
 
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+			WriteError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
 	if s.InternalAuth != nil || s.MediaRegisterAuth != nil {
@@ -209,7 +203,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		if s.Access != nil {
 			msg = "sign in through Cloudflare Access, or send the admin token"
 		}
-		writeError(w, http.StatusUnauthorized, "unauthorized", msg)
+		WriteError(w, http.StatusUnauthorized, "unauthorized", msg)
 	})
 }
 
@@ -249,7 +243,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if dbStatus != "ok" {
 		code = http.StatusServiceUnavailable
 	}
-	writeJSON(w, code, map[string]any{"status": "ok", "db": dbStatus, "time": time.Now().UTC()})
+	WriteJSON(w, code, map[string]any{"status": "ok", "db": dbStatus, "time": time.Now().UTC()})
 }
 
 func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
@@ -273,37 +267,37 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 			p.Meta(s, out)
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	org, err := s.reqOrg(r)
+	org, err := s.ReqOrg(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	ct, ca, _, _, err := s.Store.Counts(ctx, org.ID)
+	ct, ca, err := s.Store.CountConnectors(ctx)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	out := map[string]any{"connectors": map[string]int{"total": ct, "active": ca}}
 	for _, m := range s.Modules {
 		if p, ok := m.(StatsProvider); ok {
 			if err := p.Stats(ctx, s, org.ID, out); err != nil {
-				s.fail(w, err)
+				s.Fail(w, err)
 				return
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
+		WriteError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -336,42 +330,40 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 // --- helpers ---
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
+func WriteJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeError(w http.ResponseWriter, code int, errCode, msg string) {
-	writeJSON(w, code, map[string]any{"error": map[string]string{"code": errCode, "message": msg}})
+func WriteError(w http.ResponseWriter, code int, errCode, msg string) {
+	WriteJSON(w, code, map[string]any{"error": map[string]string{"code": errCode, "message": msg}})
 }
 
 // fail maps domain/store errors to HTTP responses.
-func (s *Server) fail(w http.ResponseWriter, err error) {
+func (s *Server) Fail(w http.ResponseWriter, err error) {
 	var te *domain.TransitionError
 	var ve *store.ValidationError
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "not found")
+		WriteError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, store.ErrMediaInUse):
-		writeError(w, http.StatusConflict, "in_use", "a post that is not yet published or rejected still uses this media; remove it from the post first")
+		WriteError(w, http.StatusConflict, "in_use", "a post that is not yet published or rejected still uses this media; remove it from the post first")
 	case errors.Is(err, domain.ErrVersionConflict):
-		writeError(w, http.StatusConflict, "version_conflict", "the post was changed by someone else; reload and try again")
+		WriteError(w, http.StatusConflict, "version_conflict", "the post was changed by someone else; reload and try again")
 	case errors.As(err, &te):
-		writeError(w, http.StatusConflict, "invalid_transition", te.Error())
+		WriteError(w, http.StatusConflict, "invalid_transition", te.Error())
 	case errors.As(err, &ve):
-		writeError(w, http.StatusBadRequest, "invalid_argument", ve.Error())
-	case errors.Is(err, pipeline.ErrAlreadyRunning):
-		writeError(w, http.StatusConflict, "already_running", err.Error())
+		WriteError(w, http.StatusBadRequest, "invalid_argument", ve.Error())
 	case errors.Is(err, context.Canceled):
-		writeError(w, 499, "canceled", "request canceled")
+		WriteError(w, 499, "canceled", "request canceled")
 	default:
 		s.Logger.Error("request failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
 	}
 }
 
-func decode(r *http.Request, v any) error {
+func Decode(r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
 	if err := dec.Decode(v); err != nil {
 		return &store.ValidationError{Msg: "invalid JSON body: " + err.Error()}
@@ -379,7 +371,7 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-func pathID(r *http.Request) (uuid.UUID, error) {
+func PathID(r *http.Request) (uuid.UUID, error) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		return uuid.Nil, domain.ErrNotFound
@@ -387,14 +379,14 @@ func pathID(r *http.Request) (uuid.UUID, error) {
 	return id, nil
 }
 
-func queryInt(r *http.Request, key string, def int) int {
+func QueryInt(r *http.Request, key string, def int) int {
 	if v, err := strconv.Atoi(r.URL.Query().Get(key)); err == nil {
 		return v
 	}
 	return def
 }
 
-func queryUUID(r *http.Request, key string) (*uuid.UUID, error) {
+func QueryUUID(r *http.Request, key string) (*uuid.UUID, error) {
 	v := r.URL.Query().Get(key)
 	if v == "" {
 		return nil, nil
@@ -404,4 +396,48 @@ func queryUUID(r *http.Request, key string) (*uuid.UUID, error) {
 		return nil, &store.ValidationError{Msg: key + " must be a UUID"}
 	}
 	return &id, nil
+}
+
+// Optional distinguishes an absent JSON field from an explicit null.
+type Optional[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (o *Optional[T]) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
+}
+
+// NullableID accepts a UUID, null, or "" (treated as null, which is what HTML selects send).
+type NullableID struct {
+	Set   bool
+	Value *uuid.UUID
+}
+
+func (n *NullableID) UnmarshalJSON(b []byte) error {
+	n.Set = true
+	var s *string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if s == nil || *s == "" {
+		n.Value = nil
+		return nil
+	}
+	id, err := uuid.Parse(*s)
+	if err != nil {
+		return &store.ValidationError{Msg: "invalid connector id " + *s}
+	}
+	n.Value = &id
+	return nil
 }

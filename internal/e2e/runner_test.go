@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -77,8 +77,8 @@ func TestRunnerExecutesTask(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "bash_refused=true") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.store.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != domain.StatusPendingReview {
+	posts, _ := e.cs.PostsForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
 		t.Fatalf("draft not created by the runner's agent: %+v", posts)
 	}
 	var msgs []store.TaskMessage

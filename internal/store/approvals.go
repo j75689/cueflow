@@ -35,7 +35,7 @@ func scanApproval(row pgx.Row) (*ToolApproval, error) {
 	var a ToolApproval
 	if err := row.Scan(&a.ID, &a.TaskID, &a.AgentID, &a.ConnectorID, &a.ServerName, &a.Tool, &a.Arguments, &a.Status,
 		&a.Result, &a.IsError, &a.Note, &a.CreatedAt, &a.DecidedAt); err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	return &a, nil
 }

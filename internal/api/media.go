@@ -28,26 +28,26 @@ func (s *Server) mediaService() *media.Service { return &media.Service{Store: s.
 func (s *Server) uploadMedia(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, media.MaxBytes+1<<20)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
 		return
 	}
 	f, _, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "send the file as multipart field \"file\" (images up to 10 MB, MP4 up to 100 MB)")
 		return
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, media.MaxBytes+1))
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	m, err := s.mediaService().Upload(r.Context(), data)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
+	WriteJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
 // generateMedia makes an image with an image connector and stores it.
@@ -57,8 +57,8 @@ func (s *Server) generateMedia(w http.ResponseWriter, r *http.Request) {
 		Aspect      string     `json:"aspect"`
 		ConnectorID *uuid.UUID `json:"connector_id"`
 	}
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -68,13 +68,13 @@ func (s *Server) generateMedia(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var ve *store.ValidationError
 		if errors.As(err, &ve) || errors.Is(err, domain.ErrNotFound) {
-			s.fail(w, err)
+			s.Fail(w, err)
 			return
 		}
-		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
+	WriteJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
 // serveMedia serves a stored image. It is public (publishers fetch it without the
@@ -113,28 +113,28 @@ func (s *Server) registerMedia(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Object string `json:"object"`
 	}
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	by, _, _ := strings.Cut(internalauth.EmailFrom(r.Context()), "@")
 	m, err := s.Store.AdoptMedia(r.Context(), req.Object, by, media.SniffHead)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
+	WriteJSON(w, http.StatusCreated, mediaResp{m, media.URLFor(m)})
 }
 
 // deleteMedia removes a media item and its file; 409 while an unfinished post uses it.
 func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(strings.TrimSuffix(chi.URLParam(r, "id"), ".mp4"))
 	if err != nil {
-		s.fail(w, &store.ValidationError{Msg: "bad media id"})
+		s.Fail(w, &store.ValidationError{Msg: "bad media id"})
 		return
 	}
 	if err := s.Store.DeleteMedia(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

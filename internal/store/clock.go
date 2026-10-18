@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,10 @@ import (
 // NextFunc computes the next activation of a cron expression after t.
 type NextFunc func(expr, tz string, t time.Time) (time.Time, error)
 
+// ClockTables are the tables ClaimDue may read: rows with cron_expr, timezone, is_active and
+// next_run_at columns. Modules append theirs (the content module adds "pipelines").
+var ClockTables = []string{"schedules"}
+
 // ClaimDue is the external clock's heart: it returns the ids of active schedules or pipelines
 // whose next_run_at has passed and moves each to its following activation, atomically, so that two
 // instances ticking at once fire a given activation once.
@@ -21,7 +26,7 @@ type NextFunc func(expr, tz string, t time.Time) (time.Time, error)
 // scheduled, never fired. An activation more than grace overdue (the clock was down) is skipped:
 // a missed daily post is better dropped than published at a random hour.
 func (s *Store) ClaimDue(ctx context.Context, table string, now time.Time, grace time.Duration, next NextFunc) ([]uuid.UUID, error) {
-	if table != "schedules" && table != "pipelines" {
+	if !slices.Contains(ClockTables, table) {
 		return nil, errors.New("store: ClaimDue: unknown table")
 	}
 	var fired []uuid.UUID
@@ -102,13 +107,6 @@ func (s *Store) TodoTaskCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// PublishableCount is how many posts wait to be published (approved, or queued without a lease).
-func (s *Store) PublishableCount(ctx context.Context) (int, error) {
-	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM posts WHERE status='APPROVED' OR (status='QUEUED' AND lease_until IS NULL)`).Scan(&n)
-	return n, err
-}
-
 // --- per-run MCP credentials ---
 
 // RunToken is the database record behind a per-run MCP URL.
@@ -132,7 +130,7 @@ func (s *Store) RunTokenByPlain(ctx context.Context, plain string) (*RunToken, e
 	err := s.pool.QueryRow(ctx, `SELECT task_id, agent_id, outcome FROM run_tokens
 		WHERE token_hash=$1 AND expires_at > NOW()`, HashToken(plain)).Scan(&t.TaskID, &t.AgentID, &t.Outcome)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	return t, nil
 }

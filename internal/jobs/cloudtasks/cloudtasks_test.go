@@ -92,9 +92,9 @@ func TestEnqueueDelayAndBucket(t *testing.T) {
 	defer srv.Close()
 	q := newQ(t, srv, nil)
 	ctx := context.Background()
-	_ = q.Enqueue(ctx, jobs.KindPipeline, id, 30*time.Second)
-	_ = q.Enqueue(ctx, jobs.KindPipeline, id, 30*time.Second)
-	_ = q.Enqueue(ctx, jobs.KindPipeline, id, 40*time.Second)
+	_ = q.Enqueue(ctx, jobs.KindSchedule, id, 30*time.Second)
+	_ = q.Enqueue(ctx, jobs.KindSchedule, id, 30*time.Second)
+	_ = q.Enqueue(ctx, jobs.KindSchedule, id, 40*time.Second)
 	if names[0] != names[1] {
 		t.Fatalf("same job within window should share a name: %v", names)
 	}

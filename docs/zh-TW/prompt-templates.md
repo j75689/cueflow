@@ -3,7 +3,7 @@
 > English: [docs/prompt-templates.md](../prompt-templates.md)
 
 Pipeline 的 **Topic** 與 **Instructions** 會接在 CueFlow 內建的 agent 提示詞
-（[`internal/agent/prompt.go`](../../internal/agent/prompt.go)）後面。內建提示詞已經處理了事實查證、各平台風格（Threads：短、有觀點、可自動拆串文；Instagram：段落整齊、條列重點、hashtag 與配圖提示詞），以及交給人工審核等規則，所以 Instructions 只需要寫**語氣、受眾與界線**。Agent 的 *Instructions* 欄位也適用同樣的原則。
+（[`internal/content/pipeline/prompt.go`](../../internal/content/pipeline/prompt.go)）後面。內建提示詞已經處理了事實查證、各平台風格（Threads：短、有觀點、可自動拆串文；Instagram：段落整齊、條列重點、hashtag 與配圖提示詞），以及交給人工審核等規則，所以 Instructions 只需要寫**語氣、受眾與界線**。Agent 的 *Instructions* 欄位也適用同樣的原則。
 
 Instructions 用中文或英文寫都可以；貼文要用什麼語言，是由 **Language** 設定決定的。以下範本可以直接複製來改。
 

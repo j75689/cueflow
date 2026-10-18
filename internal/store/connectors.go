@@ -92,14 +92,14 @@ func (s *Store) ListConnectors(ctx context.Context, kind string) ([]*Connector, 
 
 func (s *Store) GetConnector(ctx context.Context, id uuid.UUID) (*Connector, error) {
 	c, err := s.scanConnector(s.pool.QueryRow(ctx, "SELECT "+connectorColumns+" FROM connectors WHERE id=$1", id))
-	return c, notFound(err)
+	return c, NotFound(err)
 }
 
 // CreateConnector validates settings against the type's spec, encrypts secret fields and stores it.
 func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bool, settings map[string]any) (*Connector, error) {
 	spec, ok := connector.Lookup(typ)
 	if !ok {
-		return nil, invalid(fmt.Sprintf("unknown connector type %q", typ))
+		return nil, Invalid(fmt.Sprintf("unknown connector type %q", typ))
 	}
 	if strings.TrimSpace(name) == "" {
 		name = spec.NameFor(connector.Config(settings))
@@ -107,7 +107,7 @@ func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bo
 	cfg, secrets := spec.Split(settings)
 	dropEmpty(secrets)
 	if err := spec.Validate(spec.WithDefaults(merge(cfg, secrets))); err != nil {
-		return nil, invalid(err.Error())
+		return nil, Invalid(err.Error())
 	}
 	id := uuid.New()
 	sealed, err := s.box.SealMap(secrets, id[:])
@@ -133,11 +133,11 @@ func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch Connect
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		cur, err := s.scanConnector(tx.QueryRow(ctx, "SELECT "+connectorColumns+" FROM connectors WHERE id=$1 FOR UPDATE", id))
 		if err != nil {
-			return notFound(err)
+			return NotFound(err)
 		}
 		spec, ok := connector.Lookup(cur.Type)
 		if !ok {
-			return invalid(fmt.Sprintf("connector type %q is no longer installed", cur.Type))
+			return Invalid(fmt.Sprintf("connector type %q is no longer installed", cur.Type))
 		}
 		cfg := cur.Config
 		secrets, err := s.box.OpenMap(cur.secrets, id[:])
@@ -165,7 +165,7 @@ func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch Connect
 			}
 		}
 		if err := spec.Validate(spec.WithDefaults(merge(cfg, secrets))); err != nil {
-			return invalid(err.Error())
+			return Invalid(err.Error())
 		}
 		name, active := cur.Name, cur.IsActive
 		if patch.Name != nil && strings.TrimSpace(*patch.Name) != "" {
@@ -225,7 +225,7 @@ func (s *Store) SetConnectorCheck(ctx context.Context, id uuid.UUID, ok bool, ms
 func (s *Store) FirstActiveConnector(ctx context.Context, kind connector.Kind) (*Connector, error) {
 	c, err := s.scanConnector(s.pool.QueryRow(ctx, "SELECT "+connectorColumns+
 		" FROM connectors WHERE kind=$1 AND is_active ORDER BY created_at LIMIT 1", string(kind)))
-	return c, notFound(err)
+	return c, NotFound(err)
 }
 
 // connectorState implements connector.StateStore on the connectors.state column.
@@ -241,7 +241,7 @@ func (s *Store) ConnectorState(id uuid.UUID) connector.StateStore {
 func (c *connectorState) Load(ctx context.Context) (map[string]any, error) {
 	var raw []byte
 	if err := c.s.pool.QueryRow(ctx, "SELECT state FROM connectors WHERE id=$1", c.id).Scan(&raw); err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	m := map[string]any{}
 	_ = json.Unmarshal(raw, &m)

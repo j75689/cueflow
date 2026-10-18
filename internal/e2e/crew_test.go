@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/crew"
-	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
@@ -129,7 +129,7 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 	// Some collected material for the researcher.
 	var rss store.Connector
 	e.do("POST", "/connectors", map[string]any{"name": "Feed", "type": "rss", "config": map[string]any{"url": "http://example.invalid/feed"}}, &rss)
-	if _, err := e.store.InsertItems(ctx, rss.ID, []connector.Item{{ExternalID: "x1", Title: "MCP 1.0 released", URL: "https://example.com/mcp", Content: "The MCP spec reached 1.0."}}); err != nil {
+	if _, err := e.cs.InsertItems(ctx, rss.ID, []connector.Item{{ExternalID: "x1", Title: "MCP 1.0 released", URL: "https://example.com/mcp", Content: "The MCP spec reached 1.0."}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,8 +190,8 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 
 	var got struct {
 		store.Task
-		Subtasks []store.Task    `json:"subtasks"`
-		Posts    []store.PostRef `json:"posts"`
+		Subtasks []store.Task      `json:"subtasks"`
+		Posts    []content.PostRef `json:"posts"`
 	}
 	e.do("GET", "/tasks/"+task.ID.String(), nil, &got)
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "waiting for review") {
@@ -208,7 +208,7 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 
 	// The writer's draft is in the review queue, linked to its subtask, and was not published.
 	var posts struct {
-		Items []domain.Post `json:"items"`
+		Items []content.Post `json:"items"`
 	}
 	e.do("GET", "/posts?status=PENDING_REVIEW", nil, &posts)
 	if len(posts.Items) != 1 || posts.Items[0].TaskID == nil {

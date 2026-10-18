@@ -135,13 +135,13 @@ func deref(s *string) string {
 
 func (s *Store) GetTask(ctx context.Context, id uuid.UUID) (*Task, error) {
 	t, err := scanTask(s.pool.QueryRow(ctx, "SELECT "+taskColumns+taskFrom+" WHERE t.id=$1", id))
-	return t, notFound(err)
+	return t, NotFound(err)
 }
 
 // GetTaskByNumber finds a task by its #number within an org.
 func (s *Store) GetTaskByNumber(ctx context.Context, org uuid.UUID, n int64) (*Task, error) {
 	t, err := scanTask(s.pool.QueryRow(ctx, "SELECT "+taskColumns+taskFrom+" WHERE t.org_id=$1 AND t.number=$2", org, n))
-	return t, notFound(err)
+	return t, NotFound(err)
 }
 
 type TaskFilter struct {
@@ -240,13 +240,13 @@ type NewTask struct {
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 	in.Title = strings.TrimSpace(in.Title)
 	if in.Title == "" {
-		return nil, invalid("title is required")
+		return nil, Invalid("title is required")
 	}
 	if in.Priority == "" {
 		in.Priority = "normal"
 	}
 	if !validPriority(in.Priority) {
-		return nil, invalid("priority must be low, normal, high or urgent")
+		return nil, Invalid("priority must be low, normal, high or urgent")
 	}
 	if in.Status == "" {
 		in.Status = TaskBacklog
@@ -255,7 +255,7 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 		}
 	}
 	if !in.Status.Valid() || in.Status == TaskInProgress {
-		return nil, invalid("invalid initial status")
+		return nil, Invalid("invalid initial status")
 	}
 	if in.CreatedBy == "" {
 		in.CreatedBy = "human"
@@ -279,7 +279,7 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 		var number int64
 		if err := tx.QueryRow(ctx, `UPDATE orgs SET next_task_number = next_task_number + 1 WHERE id=$1
 			RETURNING next_task_number - 1`, org).Scan(&number); err != nil {
-			return notFound(err)
+			return NotFound(err)
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO tasks (title, description, status, priority, labels, assignee_agent_id,
 			created_by, creator_agent_id, parent_id, schedule_id, due_at, publisher_connector_id, publish_accounts, org_id, number, position)
@@ -288,7 +288,7 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (*Task, error) {
 			truncate(in.Title, 255), in.Description, string(in.Status), in.Priority, cleanLabels(in.Labels),
 			in.AssigneeAgentID, in.CreatedBy, in.CreatorAgentID, in.ParentID, in.ScheduleID, in.DueAt,
 			in.PublisherConnectorID, cleanList(in.PublishAccounts), org, number).Scan(&id); err != nil {
-			return notFound(err)
+			return NotFound(err)
 		}
 		return nil
 	})
@@ -316,7 +316,7 @@ func (s *Store) taskOrg(ctx context.Context, q querier, in NewTask) (uuid.UUID, 
 	}
 	var org uuid.UUID
 	err := q.QueryRow(ctx, "SELECT id FROM orgs ORDER BY created_at, id LIMIT 1").Scan(&org)
-	return org, notFound(err)
+	return org, NotFound(err)
 }
 
 type TaskPatch struct {
@@ -348,7 +348,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 	if p.Title != nil {
 		t := strings.TrimSpace(*p.Title)
 		if t == "" {
-			return nil, nil, invalid("title is required")
+			return nil, nil, Invalid("title is required")
 		}
 		add("title", truncate(t, 255))
 	}
@@ -358,10 +358,10 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 	if p.Status != nil {
 		st := *p.Status
 		if !st.Valid() {
-			return nil, nil, invalid("unknown status")
+			return nil, nil, Invalid("unknown status")
 		}
 		if st == TaskInProgress && before.Status != TaskInProgress {
-			return nil, nil, invalid("IN_PROGRESS is set by the agent runner; move the task to TODO to start it")
+			return nil, nil, Invalid("IN_PROGRESS is set by the agent runner; move the task to TODO to start it")
 		}
 		if st != before.Status {
 			add("status", string(st))
@@ -375,7 +375,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 	}
 	if p.Priority != nil {
 		if !validPriority(*p.Priority) {
-			return nil, nil, invalid("priority must be low, normal, high or urgent")
+			return nil, nil, Invalid("priority must be low, normal, high or urgent")
 		}
 		add("priority", *p.Priority)
 	}
@@ -401,7 +401,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		add("position", *p.Position)
 	}
 	if _, err := s.pool.Exec(ctx, "UPDATE tasks SET "+strings.Join(sets, ", ")+" WHERE id=$1", args...); err != nil {
-		return nil, nil, notFound(err)
+		return nil, nil, NotFound(err)
 	}
 	after, err = s.GetTask(ctx, id)
 	return before, after, err
@@ -540,7 +540,7 @@ func (s *Store) AddTaskMessage(ctx context.Context, taskID uuid.UUID, authorType
 	var id uuid.UUID
 	if err := s.pool.QueryRow(ctx, `INSERT INTO task_messages (task_id, author_type, agent_id, kind, content, data)
 		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, taskID, authorType, agentID, kind, content, raw).Scan(&id); err != nil {
-		return nil, notFound(err)
+		return nil, NotFound(err)
 	}
 	_, _ = s.pool.Exec(ctx, "UPDATE tasks SET updated_at=NOW() WHERE id=$1", taskID)
 	msgs, err := s.taskMessages(ctx, "m.id=$1", id)
@@ -657,34 +657,6 @@ func (s *Store) FailStaleAgentRuns(ctx context.Context) error {
 	return err
 }
 
-// --- posts linked to tasks ---
-
-type PostRef struct {
-	ID        uuid.UUID     `json:"id"`
-	Title     string        `json:"title"`
-	Status    domain.Status `json:"status"`
-	Platforms []string      `json:"platforms"`
-}
-
-func (s *Store) PostsForTask(ctx context.Context, taskID uuid.UUID) ([]PostRef, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, title, status, platforms FROM posts WHERE task_id=$1 ORDER BY created_at`, taskID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []PostRef{}
-	for rows.Next() {
-		var p PostRef
-		var st string
-		if err := rows.Scan(&p.ID, &p.Title, &st, &p.Platforms); err != nil {
-			return nil, err
-		}
-		p.Status = domain.Status(st)
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
 // --- schedules ---
 
 type Schedule struct {
@@ -727,7 +699,7 @@ func (sc *Schedule) normalize(validate CronValidator) error {
 	sc.Name = strings.TrimSpace(sc.Name)
 	sc.TaskTitle = strings.TrimSpace(sc.TaskTitle)
 	if sc.TaskTitle == "" {
-		return invalid("task title is required")
+		return Invalid("task title is required")
 	}
 	if sc.Name == "" {
 		sc.Name = sc.TaskTitle
@@ -736,13 +708,13 @@ func (sc *Schedule) normalize(validate CronValidator) error {
 		sc.Timezone = "UTC"
 	}
 	if _, err := time.LoadLocation(sc.Timezone); err != nil {
-		return invalid(fmt.Sprintf("unknown timezone %q", sc.Timezone))
+		return Invalid(fmt.Sprintf("unknown timezone %q", sc.Timezone))
 	}
 	if sc.Priority == "" {
 		sc.Priority = "normal"
 	}
 	if !validPriority(sc.Priority) {
-		return invalid("priority must be low, normal, high or urgent")
+		return Invalid("priority must be low, normal, high or urgent")
 	}
 	if sc.CreatedBy == "" {
 		sc.CreatedBy = "human"
@@ -750,7 +722,7 @@ func (sc *Schedule) normalize(validate CronValidator) error {
 	sc.CronExpr = strings.TrimSpace(sc.CronExpr)
 	if validate != nil {
 		if err := validate(sc.CronExpr, sc.Timezone); err != nil {
-			return invalid(fmt.Sprintf("invalid schedule: %v", err))
+			return Invalid(fmt.Sprintf("invalid schedule: %v", err))
 		}
 	}
 	return nil
@@ -776,7 +748,7 @@ func (s *Store) ListSchedules(ctx context.Context, org *uuid.UUID) ([]*Schedule,
 
 func (s *Store) GetSchedule(ctx context.Context, id uuid.UUID) (*Schedule, error) {
 	sc, err := scanSchedule(s.pool.QueryRow(ctx, "SELECT "+scheduleColumns+" FROM schedules WHERE id=$1", id))
-	return sc, notFound(err)
+	return sc, NotFound(err)
 }
 
 func (s *Store) CreateSchedule(ctx context.Context, sc *Schedule, validate CronValidator) (*Schedule, error) {
@@ -784,7 +756,7 @@ func (s *Store) CreateSchedule(ctx context.Context, sc *Schedule, validate CronV
 		return nil, err
 	}
 	if sc.OrgID == uuid.Nil {
-		return nil, invalid("org is required")
+		return nil, Invalid("org is required")
 	}
 	if err := sameOrg(ctx, s.pool, sc.OrgID, "agents", "assignee", sc.AssigneeAgentID); err != nil {
 		return nil, err
@@ -813,7 +785,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, sc *Schedule, validate CronV
 		WHERE id=$1 RETURNING `+scheduleColumns, sc.ID, truncate(sc.Name, 128), sc.CronExpr, sc.Timezone, sc.IsActive,
 		sc.AssigneeAgentID, truncate(sc.TaskTitle, 255), sc.TaskDescription, sc.Priority, sc.PublisherConnectorID,
 		cleanList(sc.PublishAccounts)))
-	return out, notFound(err)
+	return out, NotFound(err)
 }
 
 func (s *Store) DeleteSchedule(ctx context.Context, id uuid.UUID) error {

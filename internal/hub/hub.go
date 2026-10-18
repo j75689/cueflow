@@ -126,23 +126,3 @@ func (h *Hub) Notifier(ctx context.Context, id uuid.UUID) (connector.Notifier, *
 	}
 	return n, c, nil
 }
-
-// FetchSource pulls new items from a source connector into the store.
-func (h *Hub) FetchSource(ctx context.Context, id uuid.UUID, since time.Time, limit int) (int, error) {
-	src, c, err := h.Source(ctx, id)
-	if err != nil {
-		return 0, err
-	}
-	defer Close(src)
-	items, err := src.Fetch(ctx, connector.FetchOptions{Since: since, Limit: limit})
-	if err != nil {
-		_ = h.store.SetConnectorCheck(ctx, c.ID, false, err.Error())
-		return 0, err
-	}
-	n, err := h.store.InsertItems(ctx, c.ID, items)
-	if err != nil {
-		return n, err
-	}
-	_ = h.store.SetConnectorCheck(ctx, c.ID, true, "")
-	return n, nil
-}

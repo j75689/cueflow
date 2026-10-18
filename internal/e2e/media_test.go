@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -104,7 +104,7 @@ func TestMediaUploadGenerateAndServe(t *testing.T) {
 	var pub store.Connector
 	e.do("POST", "/connectors", map[string]any{"name": "Accounts", "type": "fake_accounts", "config": map[string]any{}}, &pub)
 	e.worker.MediaBaseURL = "http://cueflow:3000"
-	var post domain.Post
+	var post content.Post
 	e.do("POST", "/posts", map[string]any{"content": "hi", "platforms": []string{"threads"}, "media_urls": []string{gen.URL, "https://cdn.example.com/x.png"},
 		"publisher_connector_id": pub.ID, "submit": true}, &post)
 	accountsMu.Lock()
@@ -166,12 +166,12 @@ func TestWriterGeneratesImageWithinLimit(t *testing.T) {
 	if n := imagesMade.Load(); n != 2 {
 		t.Fatalf("images generated: %d, want 2 (the per-run limit)", n)
 	}
-	posts, _ := e.store.PostsForTask(ctx, task.ID)
+	posts, _ := e.cs.PostsForTask(ctx, task.ID)
 	if len(posts) != 1 {
 		t.Fatalf("posts: %+v", posts)
 	}
-	p, _ := e.store.GetPost(ctx, posts[0].ID)
-	if len(p.MediaURLs) != 2 || !strings.HasPrefix(p.MediaURLs[0], "/media/") || p.Status != domain.StatusPendingReview {
+	p, _ := e.cs.GetPost(ctx, posts[0].ID)
+	if len(p.MediaURLs) != 2 || !strings.HasPrefix(p.MediaURLs[0], "/media/") || p.Status != content.StatusPendingReview {
 		t.Fatalf("draft media: %v %s", p.MediaURLs, p.Status)
 	}
 }
