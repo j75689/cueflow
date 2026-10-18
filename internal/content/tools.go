@@ -34,7 +34,8 @@ const contentPrompt = `
 - You cannot publish to social media - no tool can. Drafts you create go to a human review queue. Say so honestly.
 - Name the draft IDs you created in your complete_task summary.`
 
-func init() {
+// registerTools adds the content capabilities, tools and brief section to the crew (see register).
+func registerTools() {
 	crew.RegisterCapability(crew.Capability{ID: "sources", Name: "Sources", Default: true,
 		Description: "Fetch and search material collected by source connectors (RSS feeds, mailboxes)."})
 	crew.RegisterCapability(crew.Capability{ID: "drafting", Name: "Drafting", Default: true,

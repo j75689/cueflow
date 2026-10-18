@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -17,8 +18,14 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
-func init() {
-	jobs.Register(KindDeliver)
+// registerOnce wires the module into the core's registries the first time a Module is attached.
+var registerOnce sync.Once
+
+func register() {
+	registerOnce.Do(func() {
+		jobs.Register(KindDeliver)
+		registerTools()
+	})
 }
 
 // Dispatcher is the part of the worker the handlers need (Worker implements it).
@@ -35,6 +42,10 @@ type Module struct {
 }
 
 func (m *Module) ID() string { return "deliverables" }
+
+// Attach wires the module into the core: the job kind and the agents' capability. Call it before
+// the server and the crew start.
+func (m *Module) Attach() { register() }
 
 func (m *Module) Routes(s *api.Server, r chi.Router) {
 	h := &handlers{m: m, s: s}

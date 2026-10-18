@@ -16,7 +16,7 @@ import {
 import { PlatformBadge } from "@/components/badges";
 import { useDialog } from "@/components/dialog";
 import { PublishTarget } from "@/components/publish-target";
-import { useMeta, useServerEvent, useToast } from "@/components/providers";
+import { useModule, useMeta, useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
   Card,
@@ -63,7 +63,8 @@ export default function SchedulesPage() {
   const router = useRouter();
   const agents = useAgents();
   const schedules = useAsync(() => api.listSchedules(), []);
-  const pipelines = useAsync(() => api.listPipelines(), []);
+  const hasContent = useModule("content");
+  const pipelines = useAsync(() => (hasContent ? api.listPipelines() : Promise.resolve([])), [hasContent]);
   useServerEvent("schedule.updated", () => void schedules.reload());
   const refreshSimple = useDebouncedCallback(
     () => void pipelines.reload(),
@@ -116,7 +117,11 @@ export default function SchedulesPage() {
     <div>
       <PageHeader
         title="Schedules"
-        subtitle="Work that runs on a timer: agent tasks (an agent researches and decides) or simple schedules (a fixed collect → draft flow)."
+        subtitle={
+          hasContent
+            ? "Work that runs on a timer: agent tasks (an agent researches and decides) or simple schedules (a fixed collect → draft flow)."
+            : "Work that runs on a timer: each activation opens a task for an agent."
+        }
         actions={
           <Button variant="primary" onClick={() => setChoosing(true)}>
             <Icon name="plus" className="h-4 w-4" /> New schedule
@@ -254,21 +259,23 @@ export default function SchedulesPage() {
               More tokens.
             </p>
           </button>
-          <button
-            className="rounded-lg border border-zinc-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-zinc-700 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/5"
-            onClick={() => {
-              setChoosing(false);
-              router.push("/schedules/simple/");
-            }}
-          >
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Simple schedule
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              A fixed flow: collect from your sources and search, then one LLM
-              call drafts posts for review. Cheaper and predictable.
-            </p>
-          </button>
+          {hasContent && (
+            <button
+              className="rounded-lg border border-zinc-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-zinc-700 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/5"
+              onClick={() => {
+                setChoosing(false);
+                router.push("/schedules/simple/");
+              }}
+            >
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Simple schedule
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                A fixed flow: collect from your sources and search, then one LLM
+                call drafts posts for review. Cheaper and predictable.
+              </p>
+            </button>
+          )}
         </div>
       </Modal>
 

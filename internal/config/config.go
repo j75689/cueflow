@@ -40,6 +40,9 @@ type Config struct {
 	DisableScheduler bool
 	// AgentConcurrency is how many agent tasks may run at once.
 	AgentConcurrency int
+	// Modules are the feature modules to mount (CUEFLOW_MODULES, comma-separated). Default: all of
+	// them. A module that is not mounted has no routes, tools, workers or cron; its tables stay.
+	Modules []string
 	// AgentAllowPrivateURLs lets agents' read_url reach private/LAN addresses (off by default).
 	AgentAllowPrivateURLs bool
 
@@ -97,6 +100,10 @@ func Load() (*Config, error) {
 		DisableScheduler:      envBool("CUEFLOW_DISABLE_SCHEDULER"),
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
+	}
+	var err error
+	if c.Modules, err = parseModules(os.Getenv("CUEFLOW_MODULES")); err != nil {
+		return nil, err
 	}
 	if os.Getenv("CUEFLOW_ADDR") == "" && os.Getenv("PORT") != "" {
 		c.Addr = "0.0.0.0:" + os.Getenv("PORT") // Cloud Run tells the container its port this way
@@ -210,4 +217,50 @@ func envInt(k string, def int) int {
 		return v
 	}
 	return def
+}
+
+// KnownModules are the modules this binary can mount, in mount order.
+var KnownModules = []string{"content", "deliverables"}
+
+// parseModules reads CUEFLOW_MODULES: blank or "all" means every known module; "none" means none.
+func parseModules(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "all" {
+		return append([]string{}, KnownModules...), nil
+	}
+	if raw == "none" {
+		return []string{}, nil
+	}
+	var out []string
+	for _, m := range strings.Split(raw, ",") {
+		m = strings.ToLower(strings.TrimSpace(m))
+		if m == "" {
+			continue
+		}
+		known := false
+		for _, k := range KnownModules {
+			known = known || k == m
+		}
+		if !known {
+			return nil, fmt.Errorf("CUEFLOW_MODULES: unknown module %q (known: %s)", m, strings.Join(KnownModules, ", "))
+		}
+		dup := false
+		for _, o := range out {
+			dup = dup || o == m
+		}
+		if !dup {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// Enabled reports whether a module is mounted.
+func (c *Config) Enabled(module string) bool {
+	for _, m := range c.Modules {
+		if m == module {
+			return true
+		}
+	}
+	return false
 }

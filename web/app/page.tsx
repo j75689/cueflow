@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { STATUS_LABEL, STATUS_STYLE } from "@/components/badges";
 import { PostCard, RejectDialog } from "@/components/post";
 import { accountMode, effectivePublisher } from "@/components/post-editor";
-import { useMeta, useServerEvent, useToast } from "@/components/providers";
+import { useMeta, useModule, useServerEvent, useToast } from "@/components/providers";
 import { Button, Checkbox, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
@@ -23,7 +24,18 @@ const COLUMNS: { key: string; title: string; statuses: PostStatus[] }[] = [
   { key: "draft", title: "Draft", statuses: ["DRAFT"] },
 ];
 
+// Without the content module there is nothing to review here: the board is the home page.
 export default function ReviewPage() {
+  const hasContent = useModule("content");
+  const router = useRouter();
+  useEffect(() => {
+    if (!hasContent) router.replace("/board/");
+  }, [hasContent, router]);
+  if (!hasContent) return <Loading />;
+  return <ReviewInbox />;
+}
+
+function ReviewInbox() {
   const toast = useToast();
   const [view, setView] = useState<View>("inbox");
   const [q, setQ] = useState("");
