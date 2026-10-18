@@ -16,6 +16,9 @@ func TestParseModules(t *testing.T) {
 	if _, err := parseModules("content,posts"); err == nil || !strings.Contains(err.Error(), "unknown module") {
 		t.Fatalf("unknown module accepted: %v", err)
 	}
+	if _, err := parseModules("content"); err == nil || !strings.Contains(err.Error(), `needs "deliverables"`) {
+		t.Fatalf("content without deliverables accepted: %v", err)
+	}
 	c := &Config{Modules: []string{"deliverables"}}
 	if c.Enabled("content") || !c.Enabled("deliverables") {
 		t.Fatal("Enabled")

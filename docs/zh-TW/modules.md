@@ -25,7 +25,7 @@ Deliverable 是 agent 寫進審核佇列的型別化項目（內建 `document`�
 
 ## content
 
-建在 deliverables 之上的社群內容：貼文是 kind 為 `post` 的 deliverable，會依各平台規則檢查，核准後透過發布器 connector（任何符合[發布器約定](../publisher-mcp.md)（英文）的 MCP 伺服器）發布。請和 `deliverables` 一起掛：少了它，草稿沒有審核頁，也沒有東西會發布它們。
+建在 deliverables 之上的社群內容：貼文是 kind 為 `post` 的 deliverable，會依各平台規則檢查，核准後透過發布器 connector（任何符合[發布器約定](../publisher-mcp.md)（英文）的 MCP 伺服器）發布。它需要 `deliverables`（少了它，草稿沒有審核頁，也沒有東西會發布它們），所以只設 `CUEFLOW_MODULES=content` 會啟動失敗。
 
 - **Agent**：能力 `post_deliverables`（`create_post_draft`、`list_posts`、`revise_draft`）、`imaging`（`generate_image`）與 `sources`（`search_materials`、`fetch_sources`）。
 - **Connector**：資料來源 connector（RSS、IMAP）與發布器提供的帳號（`/connectors/{id}/fetch`、`/items`、`/accounts`）。

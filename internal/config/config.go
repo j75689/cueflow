@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -219,6 +220,10 @@ func envInt(k string, def int) int {
 // KnownModules are the modules this binary can mount, in mount order.
 var KnownModules = []string{"content", "deliverables"}
 
+// moduleNeeds lists the modules each module cannot work without: content's posts are deliverables,
+// so without that module they would have no review page and nothing to publish them.
+var moduleNeeds = map[string][]string{"content": {"deliverables"}}
+
 // parseModules reads CUEFLOW_MODULES: blank or "all" means every known module; "none" means none.
 func parseModules(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)
@@ -247,6 +252,13 @@ func parseModules(raw string) ([]string, error) {
 		}
 		if !dup {
 			out = append(out, m)
+		}
+	}
+	for _, m := range out {
+		for _, need := range moduleNeeds[m] {
+			if !slices.Contains(out, need) {
+				return nil, fmt.Errorf("CUEFLOW_MODULES: module %q needs %q; add it to the list", m, need)
+			}
 		}
 	}
 	return out, nil

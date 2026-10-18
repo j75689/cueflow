@@ -44,8 +44,8 @@ worker acts on it (`DONE` or `FAILED`, and a failed one can be retried). Nothing
 
 Social content on top of deliverables: posts are deliverables of kind `post`, checked against each platform's
 rules and published through a publisher connector (any MCP server that follows the
-[publisher contract](publisher-mcp.md)) when approved. Mount it with `deliverables`: without it, drafts have no
-review page and nothing publishes them.
+[publisher contract](publisher-mcp.md)) when approved. It needs `deliverables` (drafts would have no review page and
+nothing would publish them), so `CUEFLOW_MODULES=content` alone refuses to start.
 
 - **Agents**: capabilities `post_deliverables` (`create_post_draft`, `list_posts`, `revise_draft`), `imaging`
   (`generate_image`) and `sources` (`search_materials`, `fetch_sources`).

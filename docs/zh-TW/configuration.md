@@ -31,7 +31,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
-| `CUEFLOW_MODULES` | `content,deliverables` | 要掛載的功能模組，逗號分隔（`all`、`none`，或 `content`、`deliverables` 任意組合）。沒掛載的模組沒有路由、agent 工具、worker 與 cron；資料表保留，儀表板會隱藏它的頁面（`/meta` 會列出掛載了哪些） |
+| `CUEFLOW_MODULES` | `content,deliverables` | 要掛載的功能模組，逗號分隔（`all`、`none`，或 `content`、`deliverables` 任意組合；`content` 需要 `deliverables`）。沒掛載的模組沒有路由、agent 工具、worker 與 cron；資料表保留，儀表板會隱藏它的頁面（`/meta` 會列出掛載了哪些） |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |
 
 ## 媒體
