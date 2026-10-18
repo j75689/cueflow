@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -127,12 +128,15 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, out)
 }
 
-// applyTeam adds a team template's agents to the org; slugs the org already has are skipped.
-func (s *Server) applyTeam(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Team string `json:"team"`
+// importTeam applies a team template file to the org; slugs the org already has are skipped.
+func (s *Server) importTeam(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		s.Fail(w, err)
+		return
 	}
-	if err := Decode(r, &body); err != nil {
+	team, err := crew.ParseTeam(body)
+	if err != nil {
 		s.Fail(w, err)
 		return
 	}
@@ -141,7 +145,7 @@ func (s *Server) applyTeam(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	created, skipped, err := crew.ApplyTeam(r.Context(), s.Store, org.ID, body.Team)
+	created, skipped, err := crew.ApplyTeam(r.Context(), s.Store, org.ID, team)
 	for _, a := range created {
 		s.Broker.Publish("agent.updated", map[string]any{"id": a.ID})
 	}
@@ -150,6 +154,22 @@ func (s *Server) applyTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"created": created, "skipped": skipped})
+}
+
+// exportTeam is the org's agents as a team template file.
+func (s *Server) exportTeam(w http.ResponseWriter, r *http.Request) {
+	org, err := s.ReqOrg(r)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	agents, err := s.Store.ListAgents(r.Context(), org.ID)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+store.Slugify(org.Name)+`-team.json"`)
+	WriteJSON(w, http.StatusOK, crew.TeamFromAgents(org.Name, agents))
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {

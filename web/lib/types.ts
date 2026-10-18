@@ -85,23 +85,25 @@ export interface Platform {
   requires_media: boolean;
 }
 
-/** One role of a team template a module offers (see Meta.agent_teams). */
+/** One role of a team template file (docs/examples/teams). */
 export interface TeamAgent {
   name: string;
   slug: string;
-  avatar: string;
-  role: AgentRole;
-  description: string;
-  instructions: string;
+  avatar?: string;
+  role?: AgentRole;
+  description?: string;
+  instructions?: string;
   capabilities: string[];
   platforms?: string[];
+  language?: string;
   max_turns?: number;
 }
 
-export interface AgentTeam {
-  id: string;
+/** A team template: a JSON file imported into an org (Agents → Import team) or exported from one. */
+export interface TeamTemplate {
+  version?: number;
   name: string;
-  description: string;
+  description?: string;
   agents: TeamAgent[];
 }
 
@@ -124,7 +126,6 @@ export interface Meta {
   platforms: Platform[];
   connector_types: ConnectorSpec[];
   agent_capabilities?: AgentCapability[];
-  agent_teams?: AgentTeam[];
   agent_roles?: AgentRole[];
   task_statuses?: TaskStatus[];
   task_priorities?: TaskPriority[];

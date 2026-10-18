@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/j75689/cueflow/internal/api"
-	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
@@ -23,7 +22,6 @@ func register() {
 		store.ValidatePlatforms = ValidatePlatforms
 		registerTools()
 		registerPostTools()
-		crew.RegisterTeam(socialContentTeam())
 	})
 }
 

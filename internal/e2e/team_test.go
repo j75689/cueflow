@@ -2,23 +2,37 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/google/uuid"
 
-	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// testSpecialists is the research/writing/editing crew the crew tests delegate to: the content
-// module's team template, so the tests run the roles a new install gets. New orgs only seed the
-// Chief; the tests add these themselves (or apply the template through the API).
-func testSpecialists() []*store.Agent {
-	team, ok := crew.TeamByID(content.TeamID)
-	if !ok {
-		panic("content team template not registered")
+const teamExample = "../../docs/examples/teams/social-content.json"
+
+// exampleTeam is the shipped example template: the research/writing/editing crew the crew tests
+// delegate to, so the file in docs is the one the tests run.
+func exampleTeam(t *testing.T) (crew.Team, []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(teamExample)
+	if err != nil {
+		t.Fatal(err)
 	}
+	team, err := crew.ParseTeam(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return team, raw
+}
+
+// testSpecialists is the example team as agents, org to be set by the caller. New orgs only seed the
+// Chief; the tests add these themselves (or import the file through the API).
+func testSpecialists(t *testing.T) []*store.Agent {
+	team, _ := exampleTeam(t)
 	var out []*store.Agent
 	for _, ta := range team.Agents {
 		out = append(out, ta.Agent(uuid.Nil))
@@ -26,34 +40,17 @@ func testSpecialists() []*store.Agent {
 	return out
 }
 
-// A team template is listed in /meta, applied when an org is created or later through
-// POST /agents/template, and never duplicates a slug the org already has.
-func TestTeamTemplates(t *testing.T) {
+// A team template is a JSON file: imported with POST /agents/template (skipping slugs the org has),
+// exported with GET /agents/template, and the export imports again elsewhere.
+func TestTeamTemplateImportExport(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
-
-	var meta struct {
-		Teams []crew.Team `json:"agent_teams"`
-	}
-	e.do("GET", "/meta", nil, &meta)
-	if len(meta.Teams) != 1 || meta.Teams[0].ID != content.TeamID || len(meta.Teams[0].Agents) != 3 {
-		t.Fatalf("meta teams: %+v", meta.Teams)
+	team, raw := exampleTeam(t)
+	if len(team.Agents) != 3 {
+		t.Fatalf("example team: %+v", team)
 	}
 
-	// Created with the template: Chief + the three specialists.
-	var org store.Org
-	if code := e.do("POST", "/orgs", map[string]any{"name": "Content", "seed_agents": true, "team": content.TeamID}, &org); code != 201 {
-		t.Fatalf("create org: %d", code)
-	}
-	agents, _ := e.store.ListAgents(ctx, org.ID)
-	if len(agents) != 4 {
-		t.Fatalf("org agents: %d", len(agents))
-	}
-	if code := e.do("POST", "/orgs", map[string]any{"name": "Nope", "team": "no-such-team"}, nil); code != 400 {
-		t.Fatalf("unknown team on create: %d", code)
-	}
-
-	// Applied later to the default org, which has only a hand-made writer: the writer is skipped.
+	// The default org has a hand-made writer: importing the file skips it and adds the other two.
 	def, _ := e.store.DefaultOrg(ctx)
 	if _, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: def.ID, Name: "My writer", Slug: "writer", Capabilities: []string{"research"}}); err != nil {
 		t.Fatal(err)
@@ -62,22 +59,38 @@ func TestTeamTemplates(t *testing.T) {
 		Created []store.Agent `json:"created"`
 		Skipped []string      `json:"skipped"`
 	}
-	if code := e.do("POST", "/agents/template", map[string]any{"team": content.TeamID}, &res); code != 200 {
-		t.Fatalf("apply: %d", code)
+	if code := e.do("POST", "/agents/template", json.RawMessage(raw), &res); code != 200 {
+		t.Fatalf("import: %d", code)
 	}
 	if len(res.Created) != 2 || len(res.Skipped) != 1 || res.Skipped[0] != "writer" {
-		t.Fatalf("apply result: %+v", res)
+		t.Fatalf("import result: %+v", res)
 	}
 	for _, a := range res.Created {
 		if a.OrgID != def.ID || !a.IsActive || a.MaxTurns != 12 || a.Language != "en" {
 			t.Fatalf("created agent: %+v", a)
 		}
 	}
-	// Applying again adds nothing.
-	if code := e.do("POST", "/agents/template", map[string]any{"team": content.TeamID}, &res); code != 200 || len(res.Created) != 0 || len(res.Skipped) != 3 {
-		t.Fatalf("second apply: %d %+v", code, res)
+	if code := e.do("POST", "/agents/template", json.RawMessage(raw), &res); code != 200 || len(res.Created) != 0 || len(res.Skipped) != 3 {
+		t.Fatalf("second import: %d %+v", code, res)
 	}
-	if code := e.do("POST", "/agents/template", map[string]any{"team": "no-such-team"}, nil); code != 400 {
-		t.Fatalf("unknown team: %d", code)
+	for _, bad := range []string{`{"name":`, `{"name":"x","agents":[]}`, `{"name":"x","agents":[{"name":"A","slug":"a","capabilities":["no-such-capability"]}]}`} {
+		if code := e.do("POST", "/agents/template", json.RawMessage(bad), nil); code != 400 {
+			t.Fatalf("bad template %q: %d", bad, code)
+		}
+	}
+
+	// Export the default org, import it into a fresh org: same roles, nothing install-specific.
+	var exported crew.Team
+	if code := e.do("GET", "/agents/template", nil, &exported); code != 200 || exported.Version != crew.TeamVersion || len(exported.Agents) != 3 {
+		t.Fatalf("export: %d %+v", code, exported)
+	}
+	var other store.Org
+	e.do("POST", "/orgs", map[string]any{"name": "Other"}, &other)
+	if code := e.do("POST", "/agents/template?org=other", exported, &res); code != 200 || len(res.Created) != 3 {
+		t.Fatalf("re-import: %d %+v", code, res)
+	}
+	agents, _ := e.store.ListAgents(ctx, other.ID)
+	if len(agents) != 3 || agents[0].OrgID != other.ID {
+		t.Fatalf("other org agents: %d", len(agents))
 	}
 }

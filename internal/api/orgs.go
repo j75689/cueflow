@@ -33,8 +33,6 @@ type orgBody struct {
 	Slug *string `json:"slug"`
 	// SeedAgents creates the starter Chief agent in a new org.
 	SeedAgents bool `json:"seed_agents"`
-	// Team is a team template (see /meta agent_teams) to apply to the new org.
-	Team string `json:"team"`
 }
 
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
@@ -42,12 +40,6 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 	if err := Decode(r, &body); err != nil {
 		s.Fail(w, err)
 		return
-	}
-	if body.Team != "" {
-		if _, ok := crew.TeamByID(body.Team); !ok {
-			s.Fail(w, store.Invalid("unknown team "+body.Team))
-			return
-		}
 	}
 	o := &store.Org{}
 	if body.Name != nil {
@@ -64,11 +56,6 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 	if body.SeedAgents {
 		if _, err := crew.SeedDefaults(r.Context(), s.Store, out.ID); err != nil {
 			s.Logger.Warn("seed org agents", "org", out.Slug, "err", err)
-		}
-	}
-	if body.Team != "" {
-		if _, _, err := crew.ApplyTeam(r.Context(), s.Store, out.ID, body.Team); err != nil {
-			s.Logger.Warn("apply team template", "org", out.Slug, "team", body.Team, "err", err)
 		}
 	}
 	s.Broker.Publish("org.updated", map[string]any{"id": out.ID})

@@ -4,17 +4,18 @@ import Link from "next/link";
 import { useState } from "react";
 import { AgentAvatar, NewTaskModal, ROLE_LABEL, useAgents } from "@/components/agents";
 import { useMeta, useToast } from "@/components/providers";
-import { Button, Card, EmptyState, ErrorBox, Icon, Loading, Modal, PageHeader, Pill, Toggle } from "@/components/ui";
+import { useOrg } from "@/components/org";
+import { Button, Card, EmptyState, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Pill, Textarea, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { Agent, AgentTeam } from "@/lib/types";
+import type { Agent, TeamTemplate } from "@/lib/types";
 
 export default function AgentsPage() {
   const agents = useAgents();
   const { meta } = useMeta();
   const toast = useToast();
   const [assignTo, setAssignTo] = useState<Agent | null>(null);
-  const [teamsOpen, setTeamsOpen] = useState(false);
-  const teams = meta?.agent_teams ?? [];
+  const [importOpen, setImportOpen] = useState(false);
+  const { org } = useOrg();
 
   const capName = (id: string) => meta?.agent_capabilities?.find((c) => c.id === id)?.name ?? id;
 
@@ -27,6 +28,22 @@ export default function AgentsPage() {
     }
   };
 
+  // Export downloads the org's agents as a team template file (see docs/examples/teams).
+  const exportTeam = async () => {
+    try {
+      const team = await api.exportTeam();
+      const blob = new Blob([JSON.stringify(team, null, 2) + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(org?.slug ?? "cueflow").replace(/[^a-z0-9-]+/gi, "-")}-team.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -34,11 +51,12 @@ export default function AgentsPage() {
         subtitle="Your team of AI roles. Each has a persona, a set of capabilities and its own memory. None of them can publish: drafts always wait for your review."
         actions={
           <div className="flex gap-2">
-            {teams.length > 0 && (
-              <Button variant="secondary" onClick={() => setTeamsOpen(true)}>
-                <Icon name="users" className="h-4 w-4" /> Add a team
-              </Button>
-            )}
+            <Button variant="ghost" onClick={() => void exportTeam()} disabled={(agents.data ?? []).length === 0}>
+              Export team
+            </Button>
+            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              <Icon name="users" className="h-4 w-4" /> Import team
+            </Button>
             <Link href="/agents/edit/">
               <Button variant="primary">
                 <Icon name="plus" className="h-4 w-4" /> New agent
@@ -57,11 +75,9 @@ export default function AgentsPage() {
             hint="Create a manager to receive your instructions, plus specialists (researcher, writer…) it can delegate to."
             action={
               <div className="flex gap-2">
-                {teams.length > 0 && (
-                  <Button variant="secondary" onClick={() => setTeamsOpen(true)}>
-                    Add a team
-                  </Button>
-                )}
+                <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                  Import a team
+                </Button>
                 <Link href="/agents/edit/">
                   <Button variant="primary">Create an agent</Button>
                 </Link>
@@ -125,12 +141,11 @@ export default function AgentsPage() {
           ))}
         </div>
       )}
-      <TeamsModal
-        open={teamsOpen}
-        onClose={() => setTeamsOpen(false)}
-        teams={teams}
+      <ImportTeamModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
         agents={agents.data ?? []}
-        onApplied={() => void agents.reload()}
+        onImported={() => void agents.reload()}
       />
       <NewTaskModal
         open={assignTo !== null}
@@ -142,83 +157,123 @@ export default function AgentsPage() {
   );
 }
 
-/** TeamsModal lists the team templates modules offer; applying one adds the roles the org is missing. */
-function TeamsModal({
+/** ImportTeamModal takes a team template file (pasted or picked) and adds the roles the org is missing. */
+function ImportTeamModal({
   open,
   onClose,
-  teams,
   agents,
-  onApplied,
+  onImported,
 }: {
   open: boolean;
   onClose: () => void;
-  teams: AgentTeam[];
   agents: Agent[];
-  onApplied: () => void;
+  onImported: () => void;
 }) {
   const toast = useToast();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
   const have = new Set(agents.map((a) => a.slug));
 
-  const apply = async (t: AgentTeam) => {
-    setBusy(t.id);
+  let team: TeamTemplate | null = null;
+  let problem: string | null = null;
+  if (text.trim()) {
     try {
-      const res = await api.applyTeam(t.id);
-      onApplied();
-      if (res.created.length === 0) toast.success(`Nothing to add: ${t.name} is already on the team`);
+      const parsed = JSON.parse(text) as TeamTemplate;
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.agents) || !parsed.name) {
+        problem = "Not a team template: it needs a name and an agents list.";
+      } else team = parsed;
+    } catch (e) {
+      problem = e instanceof Error ? e.message : "Invalid JSON";
+    }
+  }
+  const missing = team ? team.agents.filter((a) => a.slug && !have.has(a.slug.toLowerCase())) : [];
+
+  const pick = (file: File | undefined) => {
+    if (!file) return;
+    file
+      .text()
+      .then(setText)
+      .catch((e) => toast.error(e));
+  };
+
+  const close = () => {
+    setText("");
+    onClose();
+  };
+
+  const run = async () => {
+    if (!team) return;
+    setBusy(true);
+    try {
+      const res = await api.importTeam(team);
+      onImported();
+      if (res.created.length === 0) toast.success("Nothing to add: every role is already on the team");
       else toast.success(`Added ${res.created.map((a) => a.name).join(", ")}`);
-      onClose();
+      close();
     } catch (e) {
       toast.error(e);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add a team">
+    <Modal open={open} onClose={close} title="Import a team">
       <div className="space-y-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          A template adds the roles your org does not have yet (matched by slug) and leaves existing agents alone. Every
-          agent it creates is editable afterwards.
+          A team template is a JSON file (name, roles, capabilities, instructions), like a dashboard you import. Roles
+          whose slug this org already has are skipped; everything it creates is editable afterwards. An example lives
+          in the repository under <span className="font-mono text-xs">docs/examples/teams/</span>.
         </p>
-        {teams.map((t) => {
-          const missing = t.agents.filter((a) => !have.has(a.slug));
-          return (
-            <div key={t.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-zinc-900 dark:text-zinc-100">{t.name}</div>
-                  <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{t.description}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  loading={busy === t.id}
-                  disabled={missing.length === 0}
-                  onClick={() => void apply(t)}
-                >
-                  {missing.length === 0 ? "Already added" : `Add ${missing.length}`}
-                </Button>
-              </div>
-              <ul className="mt-3 space-y-1.5">
-                {t.agents.map((a) => (
-                  <li key={a.slug} className="flex items-start gap-2 text-sm">
-                    <span className="w-6 shrink-0 text-center">{a.avatar}</span>
+        <Field label="Template file">
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => pick(e.target.files?.[0])}
+            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-900 hover:file:bg-zinc-200 dark:text-zinc-400 dark:file:bg-zinc-800 dark:file:text-zinc-100 dark:hover:file:bg-zinc-700"
+          />
+        </Field>
+        <Field label="Or paste it">
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            spellCheck={false}
+            className="font-mono text-xs"
+          />
+        </Field>
+        {problem && <p className="text-sm text-red-600 dark:text-red-400">{problem}</p>}
+        {team && (
+          <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="font-medium text-zinc-900 dark:text-zinc-100">{team.name}</div>
+            {team.description && <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{team.description}</p>}
+            <ul className="mt-3 space-y-1.5">
+              {team.agents.map((a, i) => {
+                const present = !!a.slug && have.has(a.slug.toLowerCase());
+                return (
+                  <li key={`${a.slug}-${i}`} className="flex items-start gap-2 text-sm">
+                    <span className="w-6 shrink-0 text-center">{a.avatar ?? "🤖"}</span>
                     <span className="min-w-0 flex-1">
-                      <span className={have.has(a.slug) ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>
-                        {a.name}
-                      </span>
+                      <span className={present ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>{a.name}</span>
                       <span className="ml-2 font-mono text-xs text-zinc-500">@{a.slug}</span>
-                      <span className="ml-2 text-xs text-zinc-500">{ROLE_LABEL[a.role] ?? a.role}</span>
-                      <span className="block text-xs text-zinc-500">{a.description}</span>
+                      {a.role && <span className="ml-2 text-xs text-zinc-500">{ROLE_LABEL[a.role] ?? a.role}</span>}
+                      {present && <span className="ml-2 text-xs text-zinc-500">already here</span>}
+                      {a.description && <span className="block text-xs text-zinc-500">{a.description}</span>}
                     </span>
                   </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={busy} disabled={!team || missing.length === 0} onClick={() => void run()}>
+            {team && missing.length === 0 ? "Nothing to add" : `Import${missing.length ? ` ${missing.length}` : ""}`}
+          </Button>
+        </div>
       </div>
     </Modal>
   );
