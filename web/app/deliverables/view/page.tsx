@@ -21,6 +21,7 @@ import {
   Loading,
   PageHeader,
   Pill,
+  Select,
   Textarea,
 } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -166,11 +167,11 @@ function ActionPicker({
           : "Which action connector runs once this is approved (default: the first active one)."
       }
     >
-      <select
+      <Select
+        aria-label="Action connector"
         value={value ?? ""}
         disabled={readOnly || active.length === 0}
         onChange={(e) => onChange(e.target.value || null)}
-        className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
       >
         <option value="">{active.length ? `Default (${active[0].name})` : "None"}</option>
         {active.map((c) => (
@@ -178,7 +179,7 @@ function ActionPicker({
             {c.name}
           </option>
         ))}
-      </select>
+      </Select>
     </Field>
   );
 }
@@ -245,20 +246,20 @@ function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions:
             )}
             {kinds.length > 1 && (
               <Field label="Kind">
-                <select
+                <Select
+                  aria-label="Kind"
                   value={kind}
                   onChange={(e) => {
                     setKind(e.target.value);
                     setDraft({ ...draft, payload: {} });
                   }}
-                  className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                 >
                   {kinds.map((k) => (
                     <option key={k.id} value={k.id}>
                       {k.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             )}
           </div>
