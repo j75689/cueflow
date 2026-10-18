@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/textutil"
 )
 
 const basePrompt = `You are %s %s, an AI agent on a team inside CueFlow, a self-hosted agent operations console.
@@ -21,12 +22,6 @@ How you work:
 - Keep the human informed with short add_comment updates on long tasks.
 - When done, call complete_task with a concise summary: what you did, decisions made, and outputs (task numbers, links, anything you created).
 - Write to the human in %s.`
-
-// contentPrompt is added for agents that draft posts: nothing they write is published until a human
-// approves it, and they should say so.
-const contentPrompt = `
-- You cannot publish to social media - no tool can. Drafts you create go to a human review queue. Say so honestly.
-- Name the draft IDs you created in your complete_task summary.`
 
 const delegationPrompt = `
 Delegation:
@@ -47,11 +42,8 @@ func buildSystemPrompt(a *store.Agent, task *store.Task, team []*store.Agent, me
 		desc = a.Role
 	}
 	fmt.Fprintf(&b, basePrompt, a.Avatar, a.Name, desc, task.Number, languageName(a.Language))
-	if a.Has("drafting") {
-		b.WriteString(contentPrompt)
-		if len(a.Platforms) > 0 {
-			fmt.Fprintf(&b, "\n- Unless told otherwise, write drafts for: %s.", strings.Join(a.Platforms, ", "))
-		}
+	for _, p := range capabilityPrompts(a) {
+		b.WriteString(p)
 	}
 	if a.Has("delegation") {
 		b.WriteString("\n" + delegationPrompt)
@@ -109,30 +101,9 @@ func (c *Crew) buildBrief(ctx context.Context, task *store.Task) string {
 			}
 		}
 	}
-	if posts, err := c.store.PostsForTask(ctx, task.ID); err == nil && len(posts) > 0 {
-		b.WriteString("\n## Drafts created for this task\n")
-		for _, p := range posts {
-			fmt.Fprintf(&b, "- %s [%s] %s: %s\n", p.ID, p.Status, strings.Join(p.Platforms, ","), p.Title)
-		}
-	}
-	if pt := c.publishTarget(ctx, task); pt != nil {
-		b.WriteString("\n## Publishing\n")
-		name := pt.name
-		if name == "" {
-			name = "the chosen publisher"
-		}
-		if pls, ok := pt.platforms(); ok {
-			var labels []string
-			for _, id := range pt.picked {
-				if a, ok := pt.known[id]; ok {
-					labels = append(labels, a.Platform+" "+a.Name)
-				}
-			}
-			fmt.Fprintf(&b, "Drafts for this task go to %s: %s. Only write drafts for: %s.\n",
-				name, strings.Join(labels, ", "), strings.Join(pls, ", "))
-		} else {
-			fmt.Fprintf(&b, "Drafts for this task go to %s.\n", name)
-		}
+	deps := Deps{Store: c.store, Hub: c.hub, Broker: c.broker, Logger: c.logger}
+	for _, section := range briefs() {
+		b.WriteString(section(ctx, deps, task))
 	}
 	msgs, _ := c.store.TaskMessages(ctx, task.ID)
 	const keep = 60
@@ -202,11 +173,4 @@ func languageName(code string) string {
 	return code
 }
 
-func clip(s string, n int) string {
-	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if n > 0 && len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
-}
+func clip(s string, n int) string { return textutil.Clip(s, n) }

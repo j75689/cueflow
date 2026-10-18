@@ -65,6 +65,8 @@ type Server struct {
 	MediaRegisterAuth func(http.Handler) http.Handler
 	Handlers          jobs.Handlers
 	Tick              func(context.Context) error
+	// Modules are the feature sets mounted on top of the core (see Module); main sets them.
+	Modules []Module
 }
 
 func (s *Server) Handler() http.Handler {
@@ -83,17 +85,6 @@ func (s *Server) Handler() http.Handler {
 		r.Patch("/orgs/{id}", s.updateOrg)
 		r.Delete("/orgs/{id}", s.deleteOrg)
 
-		r.Get("/posts", s.listPosts)
-		r.Post("/posts", s.createPost)
-		r.Get("/posts/{id}", s.getPost)
-		r.Patch("/posts/{id}", s.updatePost)
-		r.Delete("/posts/{id}", s.deletePost)
-		r.Post("/posts/{id}/submit", s.submitPost)
-		r.Post("/posts/{id}/approve", s.approvePost)
-		r.Post("/posts/{id}/reject", s.rejectPost)
-		r.Post("/posts/{id}/retry", s.retryPost)
-		r.Get("/posts/{id}/audit", s.postAudit)
-
 		r.Get("/connectors", s.listConnectors)
 		r.Post("/connectors", s.createConnector)
 		r.Get("/connectors/{id}", s.getConnector)
@@ -101,20 +92,8 @@ func (s *Server) Handler() http.Handler {
 		r.Delete("/connectors/{id}", s.deleteConnector)
 		r.Post("/connectors/{id}/test", s.testConnector)
 		r.Get("/connectors/{id}/tools", s.connectorTools)
-		r.Get("/connectors/{id}/accounts", s.connectorAccounts)
 		r.Get("/connectors/{id}/tool-permissions", s.toolPermissions)
 		r.Put("/connectors/{id}/tool-permissions", s.setToolPermissions)
-		r.Post("/connectors/{id}/fetch", s.fetchConnector)
-		r.Get("/connectors/{id}/items", s.connectorItems)
-
-		r.Get("/pipelines", s.listPipelines)
-		r.Post("/pipelines", s.createPipeline)
-		r.Get("/pipelines/{id}", s.getPipeline)
-		r.Patch("/pipelines/{id}", s.updatePipeline)
-		r.Delete("/pipelines/{id}", s.deletePipeline)
-		r.Post("/pipelines/{id}/run", s.runPipeline)
-		r.Get("/runs", s.listRuns)
-		r.Get("/runs/{id}", s.getRun)
 
 		r.Get("/agents", s.listAgents)
 		r.Post("/agents", s.createAgent)
@@ -160,6 +139,10 @@ func (s *Server) Handler() http.Handler {
 		r.Patch("/schedules/{id}", s.updateSchedule)
 		r.Delete("/schedules/{id}", s.deleteSchedule)
 		r.Post("/schedules/{id}/run", s.runSchedule)
+
+		for _, m := range s.Modules {
+			m.Routes(s, r)
+		}
 
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
@@ -270,27 +253,27 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
-	transitions := map[string][]domain.Status{}
-	for k, v := range domain.Transitions() {
-		transitions[string(k)] = v
-	}
 	specs := connector.Specs()
 	for i := range specs {
 		if specs[i].Fields == nil {
 			specs[i].Fields = []connector.Field{}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"version":            Version,
-		"statuses":           domain.AllStatuses,
-		"transitions":        transitions,
-		"platforms":          domain.Platforms(),
+		"modules":            s.moduleIDs(),
 		"connector_types":    specs,
 		"agent_capabilities": crew.Capabilities(),
 		"agent_roles":        store.AgentRoles,
 		"task_statuses":      store.TaskStatuses,
 		"task_priorities":    store.TaskPriorities,
-	})
+	}
+	for _, m := range s.Modules {
+		if p, ok := m.(MetaProvider); ok {
+			p.Meta(s, out)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
@@ -300,26 +283,21 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	byStatus, err := s.Store.CountPostsByStatus(ctx, org.ID)
+	ct, ca, _, _, err := s.Store.Counts(ctx, org.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	ct, ca, pt, pa, err := s.Store.Counts(ctx, org.ID)
-	if err != nil {
-		s.fail(w, err)
-		return
+	out := map[string]any{"connectors": map[string]int{"total": ct, "active": ca}}
+	for _, m := range s.Modules {
+		if p, ok := m.(StatsProvider); ok {
+			if err := p.Stats(ctx, s, org.ID, out); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
 	}
-	var last *store.Run
-	if runs, err := s.Store.ListRuns(ctx, &org.ID, nil, 1); err == nil && len(runs) > 0 {
-		last = runs[0]
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"posts_by_status": byStatus,
-		"connectors":      map[string]int{"total": ct, "active": ca},
-		"pipelines":       map[string]int{"total": pt, "active": pa},
-		"last_run":        last,
-	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {

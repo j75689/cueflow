@@ -109,28 +109,32 @@ type mcpCommentIn struct {
 	Org     string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
-type mcpListDraftsIn struct {
-	Status string `json:"status,omitempty" jsonschema:"post status (default PENDING_REVIEW): DRAFT, PENDING_REVIEW, APPROVED, REJECTED, QUEUED, PUBLISHED or FAILED"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"maximum posts to return (default 20)"`
-	Org    string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
-}
-
 type mcpOrgIn struct {
 	Org string `json:"org,omitempty" jsonschema:"org slug (see list_orgs); blank means the default org"`
 }
 
 type mcpNoInput struct{}
 
+// mcpTool declares a tool of the operator MCP endpoint.
+func mcpTool(name, desc string, readOnly bool) *mcp.Tool {
+	return &mcp.Tool{Name: name, Description: desc, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly}}
+}
+
 func (s *Server) newMCPServer() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
-		Instructions: "CueFlow runs a crew of AI agents on a kanban board. " +
-			"Create tasks for agents, follow their progress, answer their questions and steer them with comments. " +
-			"Each org has its own crew and board: pass org (see list_orgs) to work outside the default org. " +
-			"Anything agents draft for publishing waits for a human to review it in the CueFlow dashboard; nothing here publishes.",
-	})
-	tool := func(name, desc string, readOnly bool) *mcp.Tool {
-		return &mcp.Tool{Name: name, Description: desc, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly}}
+	instructions := []string{"CueFlow runs a crew of AI agents on a kanban board. " +
+		"Create tasks for agents, follow their progress, answer their questions and steer them with comments. " +
+		"Each org has its own crew and board: pass org (see list_orgs) to work outside the default org."}
+	for _, m := range s.Modules {
+		if p, ok := m.(MCPProvider); ok {
+			if line := p.MCPInstructions(); line != "" {
+				instructions = append(instructions, line)
+			}
+		}
 	}
+	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
+		Instructions: strings.Join(instructions, " "),
+	})
+	tool := mcpTool
 
 	mcp.AddTool(srv, tool("list_orgs", "List the orgs. Each org has its own crew, board, schedules and review queue; the first one is the default.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, any, error) {
@@ -202,17 +206,13 @@ func (s *Server) newMCPServer() *mcp.Server {
 			return mcpJSON(out)
 		})
 
-	mcp.AddTool(srv, tool("get_task", "Show a task with its description, subtasks, linked drafts and the latest messages in its thread.", true),
+	mcp.AddTool(srv, tool("get_task", "Show a task with its description, subtasks, what was produced for it (such as drafts) and the latest messages in its thread.", true),
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTaskRef) (*mcp.CallToolResult, any, error) {
 			t, err := s.mcpResolveTask(ctx, in.Org, in.Task)
 			if err != nil {
 				return mcpErr(err)
 			}
 			subs, err := s.Store.ListTasks(ctx, store.TaskFilter{ParentID: &t.ID, All: true})
-			if err != nil {
-				return nil, nil, err
-			}
-			posts, err := s.Store.PostsForTask(ctx, t.ID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -227,7 +227,9 @@ func (s *Server) newMCPServer() *mcp.Server {
 				subOut = append(subOut, mcpTaskSummary(st))
 			}
 			out["subtasks"] = subOut
-			out["drafts"] = posts
+			if err := s.taskDetails(ctx, t, out); err != nil {
+				return nil, nil, err
+			}
 			if len(msgs) > mcpThreadLimit {
 				out["earlier_messages_omitted"] = len(msgs) - mcpThreadLimit
 				msgs = msgs[len(msgs)-mcpThreadLimit:]
@@ -351,35 +353,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 			return mcpJSON(mcpTaskSummary(after))
 		})
 
-	mcp.AddTool(srv, tool("list_drafts", "List social posts by status (default: drafts waiting for human review). Read-only: approving and publishing happen in the CueFlow dashboard.", true),
-		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpListDraftsIn) (*mcp.CallToolResult, any, error) {
-			st := domain.Status(strings.ToUpper(strings.TrimSpace(in.Status)))
-			if st == "" {
-				st = domain.StatusPendingReview
-			}
-			if !slices.Contains(domain.AllStatuses, st) {
-				return mcpError("unknown post status %q", in.Status)
-			}
-			limit := in.Limit
-			if limit <= 0 || limit > 100 {
-				limit = 20
-			}
-			org, err := s.mcpOrg(ctx, in.Org)
-			if err != nil {
-				return mcpErr(err)
-			}
-			posts, total, err := s.Store.ListPosts(ctx, store.PostFilter{OrgID: &org.ID, Statuses: []domain.Status{st}, Limit: limit})
-			if err != nil {
-				return nil, nil, err
-			}
-			out := make([]map[string]any, 0, len(posts))
-			for _, p := range posts {
-				out = append(out, map[string]any{"id": p.ID, "status": p.Status, "platforms": p.Platforms,
-					"content": p.Content, "task_id": p.TaskID, "updated_at": p.UpdatedAt})
-			}
-			return mcpJSON(map[string]any{"total": total, "items": out})
-		})
-
+	for _, m := range s.Modules {
+		if p, ok := m.(MCPProvider); ok {
+			p.MCPTools(s, srv)
+		}
+	}
 	return srv
 }
 

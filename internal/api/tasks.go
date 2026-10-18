@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strings"
@@ -73,21 +74,26 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	posts, err := s.Store.PostsForTask(ctx, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
 	var parent *store.Task
 	if t.ParentID != nil {
 		parent, _ = s.Store.GetTask(ctx, *t.ParentID)
 	}
-	writeJSON(w, http.StatusOK, struct {
-		*store.Task
-		Subtasks []*store.Task   `json:"subtasks"`
-		Parent   *store.Task     `json:"parent"`
-		Posts    []store.PostRef `json:"posts"`
-	}{t, subs, parent, posts})
+	out := asMap(t)
+	out["subtasks"] = subs
+	out["parent"] = parent
+	if err := s.taskDetails(ctx, t, out); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// asMap renders v's JSON form as a map, so other keys can be added next to its fields.
+func asMap(v any) map[string]any {
+	b, _ := json.Marshal(v)
+	out := map[string]any{}
+	_ = json.Unmarshal(b, &out)
+	return out
 }
 
 type createTaskReq struct {

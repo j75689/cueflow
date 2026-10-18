@@ -200,6 +200,7 @@ func serve() error {
 	apiSrv := &api.Server{
 		Store: st, Hub: h, Broker: broker, Runner: runner, Scheduler: sched, Dispatcher: worker, Crew: team,
 		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
+		Modules: []api.Module{api.Content{}},
 	}
 	if cfg.CFAccessTeamDomain != "" {
 		apiSrv.Access = cfaccess.New(ctx, cfg.CFAccessTeamDomain, cfg.CFAccessAudience)

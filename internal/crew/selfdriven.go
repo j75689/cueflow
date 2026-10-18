@@ -51,13 +51,13 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 	taskProp := map[string]any{"type": "string", "description": "task number (e.g. 12 or #12) or task id; optional when you have exactly one task in progress"}
 
 	add("list_my_tasks", "List tasks assigned to you that are waiting (TODO), in progress, or waiting for a human.",
-		obj(map[string]any{"status": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+		Obj(map[string]any{"status": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 			"description": "limit to these statuses (default TODO, IN_PROGRESS, WAITING_HUMAN, BLOCKED)"}}),
 		func(ctx context.Context, args json.RawMessage) (string, bool) {
 			var in struct {
 				Status []string `json:"status"`
 			}
-			if err := decodeArgs(args, &in); err != nil {
+			if err := DecodeArgs(args, &in); err != nil {
 				return err.Error(), true
 			}
 			statuses := []store.TaskStatus{store.TaskTodo, store.TaskInProgress, store.TaskWaitingHuman, store.TaskBlocked}
@@ -79,17 +79,17 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 			for _, t := range list {
 				rows = append(rows, map[string]any{"number": t.Number, "id": t.ID, "title": t.Title, "status": t.Status, "priority": t.Priority})
 			}
-			out, _ := jsonResult(rows)
+			out, _ := JSONResult(rows)
 			return out, false
 		})
 
 	add("claim_task", "Claim a task assigned to you (the most urgent TODO one by default) and start working on it. Returns your instructions and the task brief. The claim lasts 30 minutes and is extended by every tool call.",
-		obj(map[string]any{"task": taskProp}),
+		Obj(map[string]any{"task": taskProp}),
 		func(ctx context.Context, args json.RawMessage) (string, bool) {
 			var in struct {
 				Task string `json:"task"`
 			}
-			if err := decodeArgs(args, &in); err != nil {
+			if err := DecodeArgs(args, &in); err != nil {
 				return err.Error(), true
 			}
 			var want *uuid.UUID
@@ -124,7 +124,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 		})
 
 	add("get_task", "Re-read a task you have claimed: the brief with the latest thread.",
-		obj(map[string]any{"task": taskProp}),
+		Obj(map[string]any{"task": taskProp}),
 		func(ctx context.Context, args json.RawMessage) (string, bool) {
 			task, err := c.ownedTask(ctx, a, args, false)
 			if err != nil {
@@ -164,7 +164,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 
 func selfDrivenPreamble(t *store.Task) string {
 	return fmt.Sprintf(`You are now working task #%d in CueFlow. Work only through the cueflow tools; pass "task": "%d" when you call them
-if you have more than one task in progress. Drafts go to a human review queue and are never published by you.
+if you have more than one task in progress. Anything you produce for publication waits for a human to review it; you never publish.
 Finish by calling complete_task (or ask_human if you need a decision). Your instructions and the task follow.
 
 `, t.Number, t.Number)
