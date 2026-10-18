@@ -11,6 +11,7 @@ import (
 	_ "github.com/j75689/cueflow/internal/connectors/external"
 	_ "github.com/j75689/cueflow/internal/connectors/googleimage"
 	_ "github.com/j75689/cueflow/internal/connectors/imap"
+	_ "github.com/j75689/cueflow/internal/connectors/mcpaction"
 	_ "github.com/j75689/cueflow/internal/connectors/mcppublisher"
 	_ "github.com/j75689/cueflow/internal/connectors/mcptools"
 	_ "github.com/j75689/cueflow/internal/connectors/openai"

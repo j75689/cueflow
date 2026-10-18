@@ -67,6 +67,18 @@ func (h *Hub) Publisher(ctx context.Context, id uuid.UUID) (connector.Publisher,
 	return p, c, nil
 }
 
+func (h *Hub) Actor(ctx context.Context, id uuid.UUID) (connector.Actor, *store.Connector, error) {
+	inst, c, err := h.Instance(ctx, id, false)
+	if err != nil {
+		return nil, c, err
+	}
+	a, ok := inst.(connector.Actor)
+	if !ok {
+		return nil, c, fmt.Errorf("connector %q is not an action connector", c.Name)
+	}
+	return a, c, nil
+}
+
 func (h *Hub) Source(ctx context.Context, id uuid.UUID) (connector.Source, *store.Connector, error) {
 	inst, c, err := h.Instance(ctx, id, false)
 	if err != nil {

@@ -90,6 +90,7 @@ flowchart TB
 | `internal/content` | The content workflow module: post state machine and platform rules, posts/items/pipelines queries, the `/posts*`, `/pipelines*`, `/runs*` endpoints, the drafting tools, the review digest; mounted on the core through `api.Module` and the crew registry |
 | `internal/content/pipeline` | Simple schedules: collect → generate (an LLM loop with two fixed tools) → store for review → notify |
 | `internal/content/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/deliverable` | The deliverables module: typed items (kinds with payload validation) any agent can produce, the same review state machine and audit log as posts, and a worker that runs an action connector under a grant after approval |
 | `internal/scheduler` | cron: spawns scheduled tasks, fires the cron rows and periodic jobs modules register (pipelines, the review digest) |
 | `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
 | `internal/jobs` | Background work requests ("run this task", "fire this schedule", plus the kinds modules register): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |

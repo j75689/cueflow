@@ -36,11 +36,14 @@ const (
 	KindImage Kind = "image"
 	// KindTools is an external tool server (MCP) whose tools agents may use, per tool permissions.
 	KindTools Kind = "tools"
+	// KindAction carries out an approved deliverable (files it, sends it, publishes it...). Like a
+	// publisher it is only reachable from the worker that holds the grant for that one item.
+	KindAction Kind = "action"
 )
 
 func (k Kind) Valid() bool {
 	switch k {
-	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime, KindImage, KindTools:
+	case KindPublisher, KindSource, KindSearch, KindLLM, KindNotifier, KindRuntime, KindImage, KindTools, KindAction:
 		return true
 	}
 	return false
@@ -111,6 +114,31 @@ type PartialError struct {
 
 func (e *PartialError) Error() string { return e.Err.Error() }
 func (e *PartialError) Unwrap() error { return e.Err }
+
+// Actor carries out an approved deliverable. Build wraps every action connector so Act fails
+// unless the context carries the worker's grant for req.DeliverableID (see package guard).
+type Actor interface {
+	Instance
+	Act(ctx context.Context, req ActRequest) (*ActResult, error)
+}
+
+// ActRequest is one approved deliverable handed to an action connector.
+type ActRequest struct {
+	DeliverableID uuid.UUID
+	Kind          string
+	Title         string
+	Payload       json.RawMessage
+	// Previous holds the external IDs recorded by an earlier, partly successful attempt, so a
+	// retry can finish that attempt instead of acting twice.
+	Previous map[string]string
+}
+
+// ActResult is what the action created or reported. ExternalIDs are kept on the deliverable for
+// retries; Details is shown to the reviewer.
+type ActResult struct {
+	ExternalIDs map[string]string `json:"external_ids"`
+	Details     map[string]any    `json:"details,omitempty"`
+}
 
 // AccountLister is implemented by publishers that post to individual accounts, so the review UI
 // can offer them.
@@ -372,6 +400,9 @@ func Build(typ string, cfg Config, env Env) (Instance, error) {
 	if p, ok := inst.(Publisher); ok && r.spec.Kind == KindPublisher {
 		return &guardedPublisher{Publisher: p}, nil
 	}
+	if a, ok := inst.(Actor); ok && r.spec.Kind == KindAction {
+		return &guardedActor{Actor: a}, nil
+	}
 	return inst, nil
 }
 
@@ -394,6 +425,8 @@ func checkKind(k Kind, inst Instance) error {
 		_, ok = inst.(ImageGenerator)
 	case KindTools:
 		_, ok = inst.(ToolProvider)
+	case KindAction:
+		_, ok = inst.(Actor)
 	}
 	if !ok {
 		return fmt.Errorf("instance does not implement the %s interface", k)
@@ -433,6 +466,32 @@ func (g *guardedPublisher) ListAccounts(ctx context.Context) ([]Account, error) 
 
 func (g *guardedPublisher) Close() error {
 	if c, ok := g.Publisher.(interface{ Close() error }); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+// guardedActor is the choke point for action connectors: the same rule as publishing.
+type guardedActor struct {
+	Actor
+}
+
+func (g *guardedActor) Act(ctx context.Context, req ActRequest) (*ActResult, error) {
+	if err := guard.CheckPublish(ctx, req.DeliverableID); err != nil {
+		return nil, err
+	}
+	return g.Actor.Act(ctx, req)
+}
+
+func (g *guardedActor) ListTools(ctx context.Context) ([]ToolInfo, error) {
+	if tl, ok := g.Actor.(ToolLister); ok {
+		return tl.ListTools(ctx)
+	}
+	return nil, fmt.Errorf("connector does not expose tools")
+}
+
+func (g *guardedActor) Close() error {
+	if c, ok := g.Actor.(interface{ Close() error }); ok {
 		return c.Close()
 	}
 	return nil

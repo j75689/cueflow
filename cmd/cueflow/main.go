@@ -40,6 +40,7 @@ import (
 	"github.com/j75689/cueflow/internal/content/pipeline"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/internalauth"
@@ -181,6 +182,11 @@ func serve() error {
 		Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL}
 	contentModule.Attach(cfg.DigestCron)
 
+	// The deliverables module: typed items any agent can produce, reviewed by a human, then acted on.
+	ds := deliverable.NewStore(st)
+	deliverer := deliverable.NewWorker(ds, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
+	deliverableModule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
+
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
 	team.Concurrency = cfg.AgentConcurrency
 	team.MCPBaseURL = localBaseURL(cfg.Addr)
@@ -208,7 +214,7 @@ func serve() error {
 	apiSrv := &api.Server{
 		Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team,
 		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
-		Modules: []api.Module{contentModule},
+		Modules: []api.Module{contentModule, deliverableModule},
 	}
 	if cfg.CFAccessTeamDomain != "" {
 		apiSrv.Access = cfaccess.New(ctx, cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
@@ -220,7 +226,7 @@ func serve() error {
 		if err != nil {
 			return fmt.Errorf("cloud tasks: %w", err)
 		}
-		team.Queue, worker.Queue, sched.Queue = q, q, q
+		team.Queue, worker.Queue, deliverer.Queue, sched.Queue = q, q, q, q
 	}
 	if cfg.Tick == "external" {
 		// The clock and the queue live outside: Cloud Scheduler calls /internal/tick, Cloud Tasks
@@ -228,18 +234,19 @@ func serve() error {
 		sched.External = true
 		apiSrv.InternalAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.InternalServiceAccounts))
 		apiSrv.Handlers = jobs.Handlers{
-			jobs.KindCrew:        func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
-			jobs.KindSchedule:    sched.HandleSchedule,
-			jobs.KindApproval:    team.RunApproval,
-			content.KindDispatch: func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
-			content.KindPipeline: func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") },
+			jobs.KindCrew:           func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
+			jobs.KindSchedule:       sched.HandleSchedule,
+			jobs.KindApproval:       team.RunApproval,
+			content.KindDispatch:    func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
+			content.KindPipeline:    func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") },
+			deliverable.KindDeliver: func(ctx context.Context, _ uuid.UUID) error { return deliverer.Handle(ctx) },
 		}
 		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
 		if len(cfg.MediaRegisterAccounts) > 0 {
 			apiSrv.MediaRegisterAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.MediaRegisterAccounts))
 		}
 		apiSrv.Tick = func(ctx context.Context) error {
-			return errors.Join(sched.Tick(ctx), team.Sweep(ctx), worker.Sweep(ctx))
+			return errors.Join(sched.Tick(ctx), team.Sweep(ctx), worker.Sweep(ctx), deliverer.Sweep(ctx))
 		}
 		logger.Info("external clock: waiting for /internal/tick and /internal/work deliveries", "queue", cfg.Queue)
 	} else {
@@ -249,6 +256,7 @@ func serve() error {
 			}
 		}
 		go worker.Run(ctx)
+		go deliverer.Run(ctx)
 		go team.Run(ctx)
 	}
 

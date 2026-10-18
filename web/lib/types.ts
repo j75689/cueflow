@@ -9,7 +9,7 @@ export type PostStatus =
   | "PUBLISHED"
   | "FAILED";
 
-export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image" | "tools";
+export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image" | "tools" | "action";
 
 export type FieldType =
   | "string"
