@@ -28,9 +28,9 @@ flowchart TB
         API["REST API + SSE<br/>internal/api"]
         Broker(("Event Broker<br/>internal/events"))
         Sched["Scheduler（cron）<br/>internal/scheduler"]
-        Pipe["Pipeline Runner<br/>internal/pipeline"]
+        Pipe["Pipeline Runner<br/>internal/content/pipeline"]
         Crew["Agent Team Runner<br/>internal/crew"]
-        Disp["Dispatch Worker<br/>internal/dispatch"]
+        Disp["Dispatch Worker<br/>internal/content/dispatch"]
         Hub["Connector Hub<br/>internal/hub"]
         Reg["Connector Registry<br/>internal/connector"]
         Guard{{"Publish Guard<br/>internal/guard"}}
@@ -76,7 +76,7 @@ flowchart TB
 | `cmd/mock-publisher-mcp` | 不會真的發文的發布器 MCP 伺服器，給開發與示範用（`internal/publishermock`） |
 | `internal/config` | 從環境變數載入設定（`CUEFLOW_*`、`DATABASE_URL`） |
 | `internal/db` | 連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate） |
-| `internal/domain` | 貼文狀態機、平台規則（字數、hashtag、是否支援串文、是否需要圖片） |
+| `internal/domain` | 各層共用的錯誤（`ErrNotFound`、`ErrVersionConflict`、`TransitionError`） |
 | `internal/store` | 所有 PostgreSQL 存取；交易內同時寫狀態與稽核紀錄 |
 | `internal/secret` | AES-256-GCM 加解密 connector 機密欄位 |
 | `internal/connector` | 插件註冊表、設定 schema、五種 kind 介面、發布器授權包裝 |
@@ -85,13 +85,13 @@ flowchart TB
 | `internal/mcpx` | MCP client 封裝（Streamable HTTP / SSE / stdio）、工具分類 |
 | `internal/guard` | 發布授權（context 上的 grant 與 agent 標記） |
 | `internal/llm` | 工具迴圈共用、與供應商無關的對話型別；LLM connector 負責轉成各自的格式 |
-| `internal/agent` | Pipeline 用的草稿產生器（固定兩個工具的 LLM 迴圈） |
-| `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶 |
-| `internal/pipeline` | 排程內容管線：收集 → 產生 → 存成待審 → 通知 |
-| `internal/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
-| `internal/scheduler` | cron：觸發 pipeline、產生定時任務、寄送待審摘要 |
+| `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶；模組用來登記能力與工具的註冊表 |
+| `internal/content` | 內容工作流程模組：貼文狀態機與平台規則、posts/items/pipelines 的查詢、`/posts*`、`/pipelines*`、`/runs*` 端點、寫稿工具、待審摘要；透過 `api.Module` 與 crew 註冊表掛在核心上 |
+| `internal/content/pipeline` | 簡單排程：收集 → 產生（固定兩個工具的 LLM 迴圈）→ 存成待審 → 通知 |
+| `internal/content/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/scheduler` | cron：產生定時任務，觸發模組登記的 cron 資料列與週期工作（pipeline、待審摘要） |
 | `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |
-| `internal/jobs` | 背景工作請求（「跑這個任務」、「發這篇貼文」）：本機在程序內處理，雲端模式交給 Cloud Tasks（`internal/jobs/cloudtasks`） |
+| `internal/jobs` | 背景工作請求（「跑這個任務」、「觸發這個排程」，加上模組登記的種類）：本機在程序內處理，雲端模式交給 Cloud Tasks（`internal/jobs/cloudtasks`） |
 | `internal/acpx` / `internal/acpdrive` | 以 stdio 啟動 ACP agent；在 CueFlow 的沙箱政策下讓它執行一次 prompt；伺服器與 Runner 共用 |
 | `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status`（Runner 的機器端）與通訊協定 |
 | `internal/blob` | 把媒體位元組存到資料庫之外（`file://`、`gcs://` 加簽名網址）；每一列記錄存放在哪個後端 |
@@ -244,7 +244,7 @@ stateDiagram-v2
     PUBLISHED --> [*]
 ```
 
-- 轉換規則只定義在 `internal/domain/post.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
+- 轉換規則只定義在 `internal/content/post.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
 - 只有 `DRAFT` / `PENDING_REVIEW` 可以編輯，編輯需帶 `version`，版本不符回 `409`。
 - 每次轉換與稽核紀錄在**同一個交易**內寫入。
 
@@ -288,7 +288,7 @@ Pipeline 是比 agent 團隊更簡單、更可預測的自動化：
 1. cron 觸發，以 `SELECT … FOR UPDATE` 加上「同一 pipeline 只能有一個 RUNNING」防止重疊執行。
 2. 對每個來源 connector 增量抓取，寫入 `source_items`（重複的自動略過）。
 3. 取回看回時間內、尚未用過的素材（上限 `max_items`）。
-4. `internal/agent` 的產生器只開放 `web_search` 與 `submit_drafts` 兩個工具，產出每個平台一篇草稿；超過字數的 Threads / X 內容會自動拆成串文。
+4. `internal/content/pipeline` 的產生器只開放 `web_search` 與 `submit_drafts` 兩個工具，產出每個平台一篇草稿；超過字數的 Threads / X 內容會自動拆成串文。
 5. 存成 `PENDING_REVIEW` 貼文、標記素材已使用、寄出審核提醒信。
 
 需要「理解需求、拆解、委派、追問」的工作交給 agent 團隊；固定格式、每天產稿的工作用 pipeline 比較省、也比較穩定。
@@ -360,8 +360,8 @@ flowchart LR
 | 想做的事 | 從哪裡改 |
 |---|---|
 | 接新的發布管道、資料來源、搜尋、LLM、通知 | 新增 connector 插件（[connectors.md](../connectors.md)） |
-| 新增平台規則（字數、hashtag 上限） | `internal/domain/platform.go` |
-| 給 agent 新工具 | `internal/crew/tools.go`：定義工具、歸屬能力（不要給任何能發布的工具） |
+| 新增平台規則（字數、hashtag 上限） | `internal/content/platform.go` |
+| 給 agent 新工具 | 核心工具在 `internal/crew/tools.go`；模組用 `crew.RegisterCapability` / `crew.RegisterTool` 登記自己的（見 `internal/content/tools.go`）。不要給任何能發布的工具 |
 | 新增預設角色 | `internal/crew/defaults.go` |
 | 改 agent 的工作守則 | `internal/crew/prompt.go`（全體）或在 UI 編輯單一角色的 instructions |
 | 新增資料表 | `internal/db/migrations/000N_*.sql` |

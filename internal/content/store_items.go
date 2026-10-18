@@ -1,4 +1,4 @@
-package store
+package content
 
 import (
 	"context"
@@ -47,7 +47,7 @@ func (s *Store) InsertItems(ctx context.Context, connectorID uuid.UUID, items []
 			VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (connector_id, external_id) DO NOTHING`,
 			connectorID, it.ExternalID, it.Title, it.URL, it.Author, it.Content, it.PublishedAt)
 	}
-	br := s.pool.SendBatch(ctx, batch)
+	br := s.Pool().SendBatch(ctx, batch)
 	defer br.Close()
 	n := 0
 	for i := 0; i < batch.Len(); i++ {
@@ -66,7 +66,7 @@ func (s *Store) UnconsumedItems(ctx context.Context, connectorIDs []uuid.UUID, s
 	if len(connectorIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM source_items
+	rows, err := s.Pool().Query(ctx, `SELECT `+itemColumns+` FROM source_items
 		WHERE connector_id = ANY($1) AND consumed_at IS NULL AND COALESCE(published_at, fetched_at) >= $2
 		ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT $3`, connectorIDs, since, limit)
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *Store) MarkItemsConsumed(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx, "UPDATE source_items SET consumed_at=NOW() WHERE id = ANY($1)", ids)
+	_, err := s.Pool().Exec(ctx, "UPDATE source_items SET consumed_at=NOW() WHERE id = ANY($1)", ids)
 	return err
 }
 
@@ -96,7 +96,7 @@ func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int)
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM source_items WHERE connector_id=$1
+	rows, err := s.Pool().Query(ctx, `SELECT `+itemColumns+` FROM source_items WHERE connector_id=$1
 		ORDER BY fetched_at DESC, COALESCE(published_at, fetched_at) DESC LIMIT $2`, connectorID, limit)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (s *Store) SearchItems(ctx context.Context, connectorIDs []uuid.UUID, query
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM source_items
+	rows, err := s.Pool().Query(ctx, `SELECT `+itemColumns+` FROM source_items
 		WHERE (cardinality($1::uuid[]) = 0 OR connector_id = ANY($1))
 		  AND COALESCE(published_at, fetched_at) >= $2
 		  AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR content ILIKE '%' || $3 || '%')

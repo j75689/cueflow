@@ -28,7 +28,7 @@ func TestRegistryExposesModuleCapabilities(t *testing.T) {
 	if cap == nil || !slices.Equal(cap.Tools, []string{"run_tests"}) {
 		t.Fatalf("registered capability not in the catalog: %+v", cap)
 	}
-	for _, id := range []string{"research", "sources", "drafting", "testing"} {
+	for _, id := range []string{"research", "testing"} {
 		if !store.ValidCapability(id) {
 			t.Errorf("%s should be a valid capability", id)
 		}
@@ -36,13 +36,13 @@ func TestRegistryExposesModuleCapabilities(t *testing.T) {
 	if store.ValidCapability("flying") {
 		t.Error("unknown capability accepted")
 	}
-	if d := DefaultCapabilities(); !slices.Contains(d, "testing") || !slices.Contains(d, "drafting") || slices.Contains(d, "imaging") {
+	if d := DefaultCapabilities(); !slices.Contains(d, "testing") || !slices.Contains(d, "research") {
 		t.Fatalf("default capabilities: %v", d)
 	}
 
 	a := &store.Agent{Name: "T", Capabilities: []string{"testing"}, Language: "en"}
 	prompt := buildSystemPrompt(a, &store.Task{Number: 1}, nil, nil)
-	if !strings.Contains(prompt, "Test everything.") || strings.Contains(prompt, "You cannot publish") {
+	if !strings.Contains(prompt, "Test everything.") {
 		t.Fatalf("prompt should carry only the agent's capabilities:\n%s", prompt)
 	}
 
@@ -66,7 +66,7 @@ func TestRegistryExposesModuleCapabilities(t *testing.T) {
 		t.Fatal("research tools missing")
 	}
 	for _, tl := range toolsFor(&store.Agent{Capabilities: []string{"research"}}) {
-		if tl.name == "run_tests" || tl.name == "create_post_draft" {
+		if tl.name == "run_tests" {
 			t.Fatalf("tool %s offered without its capability", tl.name)
 		}
 	}

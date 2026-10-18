@@ -34,7 +34,7 @@ func scanOrg(row pgx.Row) (*Org, error) {
 func (o *Org) normalize() error {
 	o.Name = strings.TrimSpace(o.Name)
 	if o.Name == "" {
-		return invalid("name is required")
+		return Invalid("name is required")
 	}
 	o.Slug = strings.ToLower(strings.TrimSpace(o.Slug))
 	if o.Slug == "" {
@@ -44,7 +44,7 @@ func (o *Org) normalize() error {
 		}
 	}
 	if !slugRe.MatchString(o.Slug) {
-		return invalid("slug may only contain lowercase letters, digits and dashes")
+		return Invalid("slug may only contain lowercase letters, digits and dashes")
 	}
 	return nil
 }
@@ -52,7 +52,7 @@ func (o *Org) normalize() error {
 func dupOrgSlug(err error) error {
 	var pg *pgconn.PgError
 	if asPg(err, &pg) && pg.Code == "23505" {
-		return invalid("another org already uses this slug")
+		return Invalid("another org already uses this slug")
 	}
 	return err
 }
@@ -77,13 +77,13 @@ func (s *Store) ListOrgs(ctx context.Context) ([]*Org, error) {
 
 func (s *Store) GetOrg(ctx context.Context, id uuid.UUID) (*Org, error) {
 	o, err := scanOrg(s.pool.QueryRow(ctx, "SELECT "+orgColumns+" FROM orgs WHERE id=$1", id))
-	return o, notFound(err)
+	return o, NotFound(err)
 }
 
 // DefaultOrg is the oldest org; requests that name no org use it.
 func (s *Store) DefaultOrg(ctx context.Context) (*Org, error) {
 	o, err := scanOrg(s.pool.QueryRow(ctx, "SELECT "+orgColumns+" FROM orgs ORDER BY created_at, id LIMIT 1"))
-	return o, notFound(err)
+	return o, NotFound(err)
 }
 
 // ResolveOrg finds an org by id or slug; an empty ref means the default org.
@@ -96,7 +96,7 @@ func (s *Store) ResolveOrg(ctx context.Context, ref string) (*Org, error) {
 		return s.GetOrg(ctx, id)
 	}
 	o, err := scanOrg(s.pool.QueryRow(ctx, "SELECT "+orgColumns+" FROM orgs WHERE slug=$1", strings.ToLower(ref)))
-	return o, notFound(err)
+	return o, NotFound(err)
 }
 
 func (s *Store) CreateOrg(ctx context.Context, o *Org) (*Org, error) {
@@ -133,13 +133,13 @@ func (s *Store) DeleteOrg(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	if n <= 1 {
-		return invalid("the last org can't be deleted")
+		return Invalid("the last org can't be deleted")
 	}
 	tag, err := s.pool.Exec(ctx, "DELETE FROM orgs WHERE id=$1", id)
 	if err != nil {
 		var pg *pgconn.PgError
 		if asPg(err, &pg) && pg.Code == "23503" {
-			return invalid("the org still has agents, tasks, schedules, pipelines or posts; delete them first")
+			return Invalid("the org still has agents, tasks, schedules, pipelines or posts; delete them first")
 		}
 		return err
 	}
@@ -153,7 +153,7 @@ func (s *Store) DeleteOrg(ctx context.Context, id uuid.UUID) error {
 func orgOf(ctx context.Context, q querier, table string, id uuid.UUID) (uuid.UUID, error) {
 	var org uuid.UUID
 	err := q.QueryRow(ctx, "SELECT org_id FROM "+table+" WHERE id=$1", id).Scan(&org)
-	return org, notFound(err)
+	return org, NotFound(err)
 }
 
 // sameOrg rejects references to a row (an agent, a parent task...) that lives in another org.
@@ -163,13 +163,13 @@ func sameOrg(ctx context.Context, q querier, org uuid.UUID, table, what string, 
 	}
 	got, err := orgOf(ctx, q, table, *id)
 	if errors.Is(err, domain.ErrNotFound) {
-		return invalid(what + " not found")
+		return Invalid(what + " not found")
 	}
 	if err != nil {
 		return err
 	}
 	if got != org {
-		return invalid(what + " belongs to another org")
+		return Invalid(what + " belongs to another org")
 	}
 	return nil
 }

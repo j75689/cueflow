@@ -37,7 +37,7 @@ type NewMedia struct {
 
 func (s *Store) CreateMedia(ctx context.Context, in NewMedia) (*Media, error) {
 	if len(in.Data) == 0 {
-		return nil, invalid("image is empty")
+		return nil, Invalid("image is empty")
 	}
 	if in.CreatedBy == "" {
 		in.CreatedBy = "human"
@@ -76,7 +76,7 @@ func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*Med
 		dest = append(dest, &m.Data)
 	}
 	if err := s.pool.QueryRow(ctx, q+` FROM media WHERE id=$1`, id).Scan(dest...); err != nil {
-		return nil, "", notFound(err)
+		return nil, "", NotFound(err)
 	}
 	return m, kind, nil
 }
@@ -143,7 +143,7 @@ func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*Media, io.ReadSee
 	if kind == blob.KindDB {
 		var data []byte
 		if err := s.pool.QueryRow(ctx, `SELECT data FROM media WHERE id=$1`, id).Scan(&data); err != nil {
-			return nil, nil, notFound(err)
+			return nil, nil, NotFound(err)
 		}
 		return m, nopCloser{bytes.NewReader(data)}, nil
 	}
@@ -232,18 +232,18 @@ const inUseSQL = `SELECT EXISTS (SELECT 1 FROM posts p, unnest(p.media_urls) AS 
 func (s *Store) AdoptMedia(ctx context.Context, staged, createdBy string, validate func(head []byte, size int64) (string, error)) (*Media, error) {
 	a, ok := s.blobs.(blob.Adopter)
 	if !ok {
-		return nil, invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
+		return nil, Invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
 	}
 	st, err := a.Stat(ctx, staged)
 	if errors.Is(err, blob.ErrNotFound) {
-		return nil, invalid("no such staged file: " + staged)
+		return nil, Invalid("no such staged file: " + staged)
 	}
 	if err != nil {
-		return nil, invalid(err.Error())
+		return nil, Invalid(err.Error())
 	}
 	mt, err := validate(st.Head, st.Size)
 	if err != nil {
-		return nil, invalid(err.Error())
+		return nil, Invalid(err.Error())
 	}
 	id := uuid.New()
 	if err := a.Adopt(ctx, staged, id.String()); err != nil {

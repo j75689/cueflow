@@ -1,7 +1,8 @@
-package domain
+package content
 
 import (
 	"errors"
+	"github.com/j75689/cueflow/internal/domain"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestNoStageSkipping(t *testing.T) {
 	for _, from := range []Status{StatusDraft, StatusPendingReview, StatusRejected} {
 		for _, to := range []Status{StatusQueued, StatusPublished} {
 			err := CheckTransition(from, to)
-			var te *TransitionError
+			var te *domain.TransitionError
 			if !errors.As(err, &te) {
 				t.Errorf("%s -> %s should be rejected, got %v", from, to, err)
 			}

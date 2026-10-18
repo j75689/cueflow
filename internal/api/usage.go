@@ -6,9 +6,9 @@ import (
 )
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
-	days := queryInt(r, "days", 30)
+	days := QueryInt(r, "days", 30)
 	if days < 1 || days > 365 {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "days must be between 1 and 365")
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "days must be between 1 and 365")
 		return
 	}
 	tz := r.URL.Query().Get("tz")
@@ -17,7 +17,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "unknown timezone "+tz)
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "unknown timezone "+tz)
 		return
 	}
 	// Start at local midnight so the first day is complete.
@@ -25,8 +25,8 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
 	u, err := s.Store.UsageReport(r.Context(), start, tz)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, u)
+	WriteJSON(w, http.StatusOK, u)
 }

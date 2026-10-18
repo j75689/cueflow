@@ -16,7 +16,7 @@ type pingModule struct{}
 func (pingModule) ID() string { return "ping" }
 func (pingModule) Routes(_ *Server, r chi.Router) {
 	r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"pong": true})
+		WriteJSON(w, http.StatusOK, map[string]any{"pong": true})
 	})
 }
 func (pingModule) Meta(_ *Server, out map[string]any) { out["ping_flavours"] = []string{"plain"} }
@@ -51,16 +51,5 @@ func TestModulesMountRoutesAndMeta(t *testing.T) {
 	}
 	if meta.Statuses != nil {
 		t.Fatalf("post statuses belong to the content module, which is not mounted: %+v", meta)
-	}
-}
-
-// The content module's constants are present when it is mounted, so the dashboard keeps working.
-func TestContentModuleMeta(t *testing.T) {
-	out := map[string]any{}
-	Content{}.Meta(nil, out)
-	for _, k := range []string{"statuses", "transitions", "platforms"} {
-		if out[k] == nil {
-			t.Errorf("meta key %s missing", k)
-		}
 	}
 }

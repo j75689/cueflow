@@ -248,7 +248,7 @@ func stripTaskArg(args json.RawMessage) json.RawMessage {
 	return out
 }
 
-// selfDrivenEnv keeps one runEnv per task so per-run limits (drafts, images, subtasks) hold across calls.
+// selfDrivenEnv keeps one runEnv per task so per-run limits (subtasks and the modules' counters) hold across calls.
 func (c *Crew) selfDrivenEnv(task *store.Task, a *store.Agent) *runEnv {
 	if v, ok := c.selfEnvs.Load(task.ID); ok {
 		return v.(*runEnv)

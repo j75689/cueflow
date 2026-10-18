@@ -3,7 +3,7 @@
 > Traditional Chinese version: [docs/zh-TW/prompt-templates.md](zh-TW/prompt-templates.md)
 
 A pipeline's **Topic** and **Instructions** are added to CueFlow's built-in agent prompt
-([`internal/agent/prompt.go`](../internal/agent/prompt.go)), which already covers grounding, per-platform
+([`internal/content/pipeline/prompt.go`](../internal/content/pipeline/prompt.go)), which already covers grounding, per-platform
 style (Threads: short and opinionated with thread splitting; Instagram: tidy paragraphs, bullet summary,
 hashtags and an image prompt) and the hand-off to human review. Use the instructions for **voice,
 audience and boundaries**. The same advice applies to an agent's *Instructions* field.

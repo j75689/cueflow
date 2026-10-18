@@ -16,12 +16,12 @@ import (
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.TaskFilter{Query: q.Get("q"), All: q.Get("all") == "1" || q.Get("all") == "true",
-		CreatedBy: q.Get("created_by"), Limit: queryInt(r, "limit", 500)}
+		CreatedBy: q.Get("created_by"), Limit: QueryInt(r, "limit", 500)}
 	for _, raw := range q["status"] {
 		for _, st := range strings.Split(raw, ",") {
 			ts := store.TaskStatus(strings.ToUpper(strings.TrimSpace(st)))
 			if !ts.Valid() {
-				writeError(w, http.StatusBadRequest, "invalid_argument", "unknown status "+st)
+				WriteError(w, http.StatusBadRequest, "invalid_argument", "unknown status "+st)
 				return
 			}
 			f.Statuses = append(f.Statuses, ts)
@@ -34,44 +34,44 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	default:
 		id, err := uuid.Parse(a)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_argument", "assignee must be an agent id or 'none'")
+			WriteError(w, http.StatusBadRequest, "invalid_argument", "assignee must be an agent id or 'none'")
 			return
 		}
 		f.AssigneeID = &id
 	}
-	org, err := s.reqOrg(r)
+	org, err := s.ReqOrg(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	f.OrgID = &org.ID
-	if f.ParentID, err = queryUUID(r, "parent_id"); err != nil {
-		s.fail(w, err)
+	if f.ParentID, err = QueryUUID(r, "parent_id"); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	tasks, err := s.Store.ListTasks(r.Context(), f)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": tasks})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": tasks})
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	ctx := r.Context()
 	t, err := s.Store.GetTask(ctx, id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	subs, err := s.Store.ListTasks(ctx, store.TaskFilter{ParentID: &id, All: true})
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var parent *store.Task
@@ -82,10 +82,10 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	out["subtasks"] = subs
 	out["parent"] = parent
 	if err := s.taskDetails(ctx, t, out); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	WriteJSON(w, http.StatusOK, out)
 }
 
 // asMap renders v's JSON form as a map, so other keys can be added next to its fields.
@@ -112,8 +112,8 @@ type createTaskReq struct {
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req createTaskReq
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	in := store.NewTask{
@@ -122,19 +122,19 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		PublisherConnectorID: req.PublisherConnectorID, PublishAccounts: req.PublishAccounts,
 	}
 	if req.ParentID == nil { // a subtask lives in its parent's org
-		org, err := s.reqOrg(r)
+		org, err := s.ReqOrg(r)
 		if err != nil {
-			s.fail(w, err)
+			s.Fail(w, err)
 			return
 		}
 		in.OrgID = org.ID
 	}
 	t, err := s.createTaskOp(r.Context(), in)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, t)
+	WriteJSON(w, http.StatusCreated, t)
 }
 
 // createTaskOp creates a task on behalf of the operator (dashboard or MCP) and wakes its agent.
@@ -160,23 +160,23 @@ type updateTaskReq struct {
 	Status          *store.TaskStatus   `json:"status"`
 	Priority        *string             `json:"priority"`
 	Labels          *[]string           `json:"labels"`
-	AssigneeAgentID nullableID          `json:"assignee_agent_id"`
-	DueAt           optional[time.Time] `json:"due_at"`
+	AssigneeAgentID NullableID          `json:"assignee_agent_id"`
+	DueAt           Optional[time.Time] `json:"due_at"`
 	Position        *float64            `json:"position"`
 	// Publishing defaults for drafts made for this task.
-	PublisherConnectorID nullableID `json:"publisher_connector_id"`
+	PublisherConnectorID NullableID `json:"publisher_connector_id"`
 	PublishAccounts      *[]string  `json:"publish_accounts"`
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var req updateTaskReq
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	patch := store.TaskPatch{Title: req.Title, Description: req.Description, Status: req.Status, Priority: req.Priority,
@@ -193,10 +193,10 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	patch.PublishAccounts = req.PublishAccounts
 	after, err := s.updateTaskOp(r.Context(), id, patch)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, after)
+	WriteJSON(w, http.StatusOK, after)
 }
 
 // updateTaskOp applies an operator edit; moving or reassigning a running card stops its run.
@@ -227,14 +227,14 @@ func sameAgent(a, b *uuid.UUID) bool {
 }
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Crew.Cancel(id)
 	if err := s.Store.DeleteTask(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	s.Broker.Publish("task.deleted", map[string]any{"id": id})
@@ -242,21 +242,21 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) taskMessages(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	if _, err := s.Store.GetTask(r.Context(), id); err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	msgs, err := s.Store.TaskMessages(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, msgs)
+	WriteJSON(w, http.StatusOK, msgs)
 }
 
 var mentionRe = regexp.MustCompile(`^@([a-z0-9][a-z0-9-]*)\b`)
@@ -264,24 +264,24 @@ var mentionRe = regexp.MustCompile(`^@([a-z0-9][a-z0-9-]*)\b`)
 // postTaskMessage records a human comment. A leading @slug hands the task to that agent; if the
 // task has an agent and is not parked in BACKLOG/CANCELED, the agent is (re)started to respond.
 func (s *Server) postTaskMessage(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	var req struct {
 		Content string `json:"content"`
 	}
-	if err := decode(r, &req); err != nil {
-		s.fail(w, err)
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
 		return
 	}
 	msg, err := s.postTaskMessageOp(r.Context(), id, req.Content)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, msg)
+	WriteJSON(w, http.StatusCreated, msg)
 }
 
 func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content string) (*store.TaskMessage, error) {
@@ -329,17 +329,17 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 }
 
 func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	t, err := s.runTaskOp(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	WriteJSON(w, http.StatusOK, t)
 }
 
 func (s *Server) runTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, error) {
@@ -364,17 +364,17 @@ func (s *Server) runTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, erro
 }
 
 func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	t, err := s.cancelTaskOp(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	WriteJSON(w, http.StatusOK, t)
 }
 
 func (s *Server) cancelTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, error) {
@@ -395,15 +395,15 @@ func (s *Server) cancelTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, e
 }
 
 func (s *Server) taskRuns(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
+	id, err := PathID(r)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
 	runs, err := s.Store.ListAgentRuns(r.Context(), id)
 	if err != nil {
-		s.fail(w, err)
+		s.Fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runs)
+	WriteJSON(w, http.StatusOK, runs)
 }

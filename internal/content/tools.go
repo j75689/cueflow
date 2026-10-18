@@ -1,8 +1,7 @@
-package crew
+package content
 
 // The content workflow's agent tools: collecting material from source connectors, writing post
-// drafts into the human review queue and illustrating them. They only use the module API (Run,
-// RegisterTool, RegisterCapability, RegisterBrief), so they can move out of this package as a unit.
+// drafts into the human review queue and illustrating them. They register with the crew at init.
 
 import (
 	"context"
@@ -15,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/j75689/cueflow/internal/agent"
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/media"
@@ -36,9 +35,9 @@ const contentPrompt = `
 - Name the draft IDs you created in your complete_task summary.`
 
 func init() {
-	RegisterCapability(Capability{ID: "sources", Name: "Sources", Default: true,
+	crew.RegisterCapability(crew.Capability{ID: "sources", Name: "Sources", Default: true,
 		Description: "Fetch and search material collected by source connectors (RSS feeds, mailboxes)."})
-	RegisterCapability(Capability{ID: "drafting", Name: "Drafting", Default: true,
+	crew.RegisterCapability(crew.Capability{ID: "drafting", Name: "Drafting", Default: true,
 		Description: "Write social post drafts into the human review queue and revise drafts that are still pending.",
 		Prompt: func(a *store.Agent) string {
 			p := contentPrompt
@@ -47,67 +46,67 @@ func init() {
 			}
 			return p
 		}})
-	RegisterCapability(Capability{ID: "imaging", Name: "Images",
+	crew.RegisterCapability(crew.Capability{ID: "imaging", Name: "Images",
 		Description: "Generate images for drafts with the image connector (each image costs money; at most a few per run)."})
 	for _, t := range contentTools {
-		RegisterTool(t)
+		crew.RegisterTool(t)
 	}
-	RegisterBrief(contentBrief)
+	crew.RegisterBrief(contentBrief)
 }
 
-var contentTools = []ToolSpec{
+var contentTools = []crew.ToolSpec{
 	{Name: "search_materials", Capability: "sources", Description: "Search items already collected from RSS feeds and mailboxes.",
-		Schema: Obj(map[string]any{"query": Str("Keyword (blank = latest)"), "days": Integer("Look back this many days (default 7)"), "limit": Integer("Max items (default 10)")}), Run: toolSearchMaterials},
+		Schema: crew.Obj(map[string]any{"query": crew.Str("Keyword (blank = latest)"), "days": crew.Integer("Look back this many days (default 7)"), "limit": crew.Integer("Max items (default 10)")}), Run: toolSearchMaterials},
 	{Name: "fetch_sources", Capability: "sources", Description: "Pull the latest items from your source connectors (RSS, IMAP) right now.",
-		Schema: Obj(map[string]any{}), Run: toolFetchSources},
+		Schema: crew.Obj(map[string]any{}), Run: toolFetchSources},
 
 	// --- drafting ---
 	{Name: "create_post_draft", Capability: "drafting", Description: "Create one social post draft for one platform. It goes to the human review queue; it is NOT published.",
-		Schema: Obj(map[string]any{
+		Schema: crew.Obj(map[string]any{
 			"platform":     map[string]any{"type": "string", "enum": platformIDs()},
-			"title":        Str("Short internal title for the reviewer"),
-			"content":      Str("Post body, plain text, no hashtags"),
-			"thread_parts": StrList("The whole thread in order, first part included, for thread-capable platforms (optional; content is then the first part)"),
-			"hashtags":     StrList("Hashtags without '#'"),
-			"image_prompt": Str("Prompt for an accompanying image (Instagram)"),
-			"topic":        Str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
-			"link":         Str("Optional URL shown as a link preview card (Threads); defaults to the first source_urls entry"),
-			"publish_at":   Str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
-			"media_urls":   StrList("Optional images or videos to attach: CueFlow media URLs (/media/...) returned by tools, or public https URLs"),
-			"source_urls":  StrList("URLs backing the claims in this post"),
+			"title":        crew.Str("Short internal title for the reviewer"),
+			"content":      crew.Str("Post body, plain text, no hashtags"),
+			"thread_parts": crew.StrList("The whole thread in order, first part included, for thread-capable platforms (optional; content is then the first part)"),
+			"hashtags":     crew.StrList("Hashtags without '#'"),
+			"image_prompt": crew.Str("Prompt for an accompanying image (Instagram)"),
+			"topic":        crew.Str("Threads only: one topic tag, up to 50 characters, no '.' or '&' (optional)"),
+			"link":         crew.Str("Optional URL shown as a link preview card (Threads); defaults to the first source_urls entry"),
+			"publish_at":   crew.Str("Optional RFC 3339 time to publish once approved, e.g. 2026-10-07T12:00:00+08:00 (must be in the future)"),
+			"media_urls":   crew.StrList("Optional images or videos to attach: CueFlow media URLs (/media/...) returned by tools, or public https URLs"),
+			"source_urls":  crew.StrList("URLs backing the claims in this post"),
 		}, "platform", "content"), Run: toolCreateDraft},
 	{Name: "list_posts", Capability: "drafting", Description: "List recent posts and drafts with their review status.",
-		Schema: Obj(map[string]any{"status": Str("Optional status filter, e.g. PENDING_REVIEW"), "limit": Integer("Max posts (default 10)")}), Run: toolListPosts},
+		Schema: crew.Obj(map[string]any{"status": crew.Str("Optional status filter, e.g. PENDING_REVIEW"), "limit": crew.Integer("Max posts (default 10)")}), Run: toolListPosts},
 	{Name: "revise_draft", Capability: "drafting", Description: "Revise a draft that is still DRAFT or PENDING_REVIEW.",
-		Schema: Obj(map[string]any{
-			"post_id": Str("Post ID"), "title": Str("New title"), "content": Str("New body"),
-			"thread_parts": StrList("New thread parts"), "hashtags": StrList("New hashtags"),
-			"image_prompt": Str("New image prompt"), "topic": Str("New Threads topic tag (empty removes it)"),
-			"link": Str("New link card URL (empty removes it)"), "note": Str("Why you changed it"),
-			"media_urls": StrList("Replace the attached images or videos (CueFlow media URLs like /media/... returned by tools, or public https URLs); an empty list removes them"),
+		Schema: crew.Obj(map[string]any{
+			"post_id": crew.Str("Post ID"), "title": crew.Str("New title"), "content": crew.Str("New body"),
+			"thread_parts": crew.StrList("New thread parts"), "hashtags": crew.StrList("New hashtags"),
+			"image_prompt": crew.Str("New image prompt"), "topic": crew.Str("New Threads topic tag (empty removes it)"),
+			"link": crew.Str("New link card URL (empty removes it)"), "note": crew.Str("Why you changed it"),
+			"media_urls": crew.StrList("Replace the attached images or videos (CueFlow media URLs like /media/... returned by tools, or public https URLs); an empty list removes them"),
 		}, "post_id"), Run: toolReviseDraft},
 
 	// --- imaging ---
 	{Name: "generate_image", Capability: "imaging", Description: fmt.Sprintf("Generate an image for a draft that is still DRAFT or PENDING_REVIEW and attach it. Uses the draft's image_prompt unless you give a prompt. Costs money: at most %d per run.", maxImagesPerRun),
-		Schema: Obj(map[string]any{
-			"post_id": Str("Draft (post) ID"),
-			"prompt":  Str("Image prompt in English: subject, style, composition, no text in the image (optional; defaults to the draft's image_prompt)"),
+		Schema: crew.Obj(map[string]any{
+			"post_id": crew.Str("Draft (post) ID"),
+			"prompt":  crew.Str("Image prompt in English: subject, style, composition, no text in the image (optional; defaults to the draft's image_prompt)"),
 			"aspect":  map[string]any{"type": "string", "enum": connector.Aspects, "description": "Aspect ratio (default 4:5 for Instagram, else 1:1)"},
 		}, "post_id"), Run: toolGenerateImage},
 }
 
 func platformIDs() []string {
 	var ids []string
-	for _, p := range domain.Platforms() {
+	for _, p := range Platforms() {
 		ids = append(ids, p.ID)
 	}
 	return ids
 }
 
 // contentBrief tells the agent which drafts this task already has and where they will be published.
-func contentBrief(ctx context.Context, d Deps, task *store.Task) string {
+func contentBrief(ctx context.Context, d crew.Deps, task *store.Task) string {
 	var b strings.Builder
-	if posts, err := d.Store.PostsForTask(ctx, task.ID); err == nil && len(posts) > 0 {
+	if posts, err := NewStore(d.Store).PostsForTask(ctx, task.ID); err == nil && len(posts) > 0 {
 		b.WriteString("\n## Drafts created for this task\n")
 		for _, p := range posts {
 			fmt.Fprintf(&b, "- %s [%s] %s: %s\n", p.ID, p.Status, strings.Join(p.Platforms, ","), p.Title)
@@ -137,19 +136,19 @@ func contentBrief(ctx context.Context, d Deps, task *store.Task) string {
 
 // --- sources ---
 
-func toolSearchMaterials(ctx context.Context, r *Run, raw json.RawMessage) (string, error) {
+func toolSearchMaterials(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		Query string
 		Days  int
 		Limit int
 	}
-	if err := DecodeArgs(raw, &a); err != nil {
+	if err := crew.DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if a.Days <= 0 || a.Days > 90 {
 		a.Days = 7
 	}
-	items, err := r.Store.SearchItems(ctx, r.Agent.SourceConnectorIDs, a.Query, time.Now().AddDate(0, 0, -a.Days), a.Limit)
+	items, err := NewStore(r.Store).SearchItems(ctx, r.Agent.SourceConnectorIDs, a.Query, time.Now().AddDate(0, 0, -a.Days), a.Limit)
 	if err != nil {
 		return "", err
 	}
@@ -171,10 +170,10 @@ func toolSearchMaterials(ctx context.Context, r *Run, raw json.RawMessage) (stri
 	if len(out) == 0 {
 		return "No matching material. Try fetch_sources first, or web_search.", nil
 	}
-	return JSONResult(out)
+	return crew.JSONResult(out)
 }
 
-func toolFetchSources(ctx context.Context, r *Run, _ json.RawMessage) (string, error) {
+func toolFetchSources(ctx context.Context, r *crew.Run, _ json.RawMessage) (string, error) {
 	ids := r.Agent.SourceConnectorIDs
 	if len(ids) == 0 {
 		cs, err := r.Store.ListConnectors(ctx, string(connector.KindSource))
@@ -192,7 +191,7 @@ func toolFetchSources(ctx context.Context, r *Run, _ json.RawMessage) (string, e
 	}
 	var lines []string
 	for _, id := range ids {
-		n, err := r.Hub.FetchSource(ctx, id, time.Now().AddDate(0, 0, -7), 0)
+		n, err := FetchSource(ctx, r.Hub, NewStore(r.Store), id, time.Now().AddDate(0, 0, -7), 0)
 		name := id.String()
 		if c, cerr := r.Store.GetConnector(ctx, id); cerr == nil {
 			name = c.Name
@@ -208,7 +207,7 @@ func toolFetchSources(ctx context.Context, r *Run, _ json.RawMessage) (string, e
 
 // --- drafting ---
 
-func toolCreateDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, error) {
+func toolCreateDraft(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		Platform    string   `json:"platform"`
 		Title       string   `json:"title"`
@@ -222,7 +221,7 @@ func toolCreateDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 		MediaURLs   []string `json:"media_urls"`
 		SourceURLs  []string `json:"source_urls"`
 	}
-	if err := DecodeArgs(raw, &a); err != nil {
+	if err := crew.DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if r.Count("drafts") >= maxDraftsPerRun {
@@ -247,10 +246,10 @@ func toolCreateDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 		}
 		publishAt = &t
 	}
-	if _, ok := domain.PlatformByID(a.Platform); !ok {
+	if _, ok := PlatformByID(a.Platform); !ok {
 		return "", fmt.Errorf("unknown platform %q (use one of %s)", a.Platform, strings.Join(platformIDs(), ", "))
 	}
-	drafts := agent.Normalize([]agent.Draft{{Platform: a.Platform, Title: a.Title, Content: a.Content,
+	drafts := Normalize([]Draft{{Platform: a.Platform, Title: a.Title, Content: a.Content,
 		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt}}, []string{a.Platform})
 	if len(drafts) == 0 {
 		return "", errors.New("content is empty")
@@ -266,12 +265,12 @@ func toolCreateDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 		}
 		publisher, accounts = &pt.connectorID, pt.accountsOn(d.Platform)
 	}
-	post, err := r.Store.CreatePost(ctx, store.NewPost{
+	post, err := NewStore(r.Store).CreatePost(ctx, NewPost{
 		TaskID: &taskID, Title: d.Title, Content: d.Content, ThreadParts: d.ThreadParts, Hashtags: d.Hashtags,
 		ImagePrompt: d.ImagePrompt, Platforms: []string{d.Platform}, Topic: a.Topic, LinkURL: a.Link,
 		PublisherConnectorID: publisher, Accounts: accounts, ScheduledAt: publishAt, MediaURLs: mediaURLs,
 		SourceContext: map[string]any{"task": r.Task.Number, "agent": r.Agent.Name, "urls": a.SourceURLs},
-	}, domain.ActorAgent, true)
+	}, ActorAgent, true)
 	if err != nil {
 		return "", err
 	}
@@ -294,7 +293,7 @@ type publishTarget struct {
 
 // resolvePublishTarget resolves the task's publishing defaults, or nil when it has none. The account list
 // comes from the publisher; if it cannot be read, accounts are taken as given.
-func resolvePublishTarget(ctx context.Context, d Deps, t *store.Task) *publishTarget {
+func resolvePublishTarget(ctx context.Context, d crew.Deps, t *store.Task) *publishTarget {
 	if t.PublisherConnectorID == nil {
 		return nil
 	}
@@ -363,49 +362,49 @@ func (pt *publishTarget) accountsOn(platform string) []string {
 }
 
 // postInOrg loads a post of the task's org; other orgs' posts don't exist for the agent.
-func postInOrg(ctx context.Context, r *Run, id uuid.UUID) (*domain.Post, error) {
-	p, err := r.Store.GetPost(ctx, id)
+func postInOrg(ctx context.Context, r *crew.Run, id uuid.UUID) (*Post, error) {
+	p, err := NewStore(r.Store).GetPost(ctx, id)
 	if err == nil && p.OrgID != r.Task.OrgID {
 		err = domain.ErrNotFound
 	}
 	return p, err
 }
 
-func toolListPosts(ctx context.Context, r *Run, raw json.RawMessage) (string, error) {
+func toolListPosts(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		Status string
 		Limit  int
 	}
-	if err := DecodeArgs(raw, &a); err != nil {
+	if err := crew.DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
-	f := store.PostFilter{OrgID: &r.Task.OrgID, Limit: a.Limit}
+	f := PostFilter{OrgID: &r.Task.OrgID, Limit: a.Limit}
 	if f.Limit <= 0 || f.Limit > 30 {
 		f.Limit = 10
 	}
-	if st := domain.Status(strings.ToUpper(strings.TrimSpace(a.Status))); st != "" {
+	if st := Status(strings.ToUpper(strings.TrimSpace(a.Status))); st != "" {
 		if !st.Valid() {
 			return "", fmt.Errorf("unknown status %q", a.Status)
 		}
-		f.Statuses = []domain.Status{st}
+		f.Statuses = []Status{st}
 	}
-	posts, _, err := r.Store.ListPosts(ctx, f)
+	posts, _, err := NewStore(r.Store).ListPosts(ctx, f)
 	if err != nil {
 		return "", err
 	}
 	type row struct {
-		ID        uuid.UUID     `json:"id"`
-		Status    domain.Status `json:"status"`
-		Platforms []string      `json:"platforms"`
-		Title     string        `json:"title"`
-		Excerpt   string        `json:"excerpt"`
-		Warnings  []string      `json:"warnings,omitempty"`
+		ID        uuid.UUID `json:"id"`
+		Status    Status    `json:"status"`
+		Platforms []string  `json:"platforms"`
+		Title     string    `json:"title"`
+		Excerpt   string    `json:"excerpt"`
+		Warnings  []string  `json:"warnings,omitempty"`
 	}
 	out := []row{}
 	for _, p := range posts {
 		out = append(out, row{p.ID, p.Status, p.Platforms, p.Title, textutil.Clip(p.Content, 240), p.Warnings})
 	}
-	return JSONResult(out)
+	return crew.JSONResult(out)
 }
 
 // cleanMediaURLs trims the list and accepts only CueFlow media URLs (/media/...) and public https URLs.
@@ -424,7 +423,7 @@ func cleanMediaURLs(in []string) ([]string, error) {
 	return out, nil
 }
 
-func toolReviseDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, error) {
+func toolReviseDraft(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		PostID      string    `json:"post_id"`
 		Title       *string   `json:"title"`
@@ -437,7 +436,7 @@ func toolReviseDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 		MediaURLs   *[]string `json:"media_urls"`
 		Note        string    `json:"note"`
 	}
-	if err := DecodeArgs(raw, &a); err != nil {
+	if err := crew.DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	id, err := uuid.Parse(strings.TrimSpace(a.PostID))
@@ -463,9 +462,9 @@ func toolReviseDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 	if a.Note != "" {
 		note += ": " + a.Note
 	}
-	p, err := r.Store.UpdatePostAs(ctx, id, cur.Version, store.PostPatch{Title: a.Title, Content: a.Content,
+	p, err := NewStore(r.Store).UpdatePostAs(ctx, id, cur.Version, PostPatch{Title: a.Title, Content: a.Content,
 		ThreadParts: a.ThreadParts, Hashtags: a.Hashtags, ImagePrompt: a.ImagePrompt, Topic: a.Topic, LinkURL: a.Link,
-		MediaURLs: mediaPatch}, domain.ActorAgent, note)
+		MediaURLs: mediaPatch}, ActorAgent, note)
 	if err != nil {
 		return "", err
 	}
@@ -479,13 +478,13 @@ func toolReviseDraft(ctx context.Context, r *Run, raw json.RawMessage) (string, 
 
 // --- imaging ---
 
-func toolGenerateImage(ctx context.Context, r *Run, raw json.RawMessage) (string, error) {
+func toolGenerateImage(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		PostID string `json:"post_id"`
 		Prompt string `json:"prompt"`
 		Aspect string `json:"aspect"`
 	}
-	if err := DecodeArgs(raw, &a); err != nil {
+	if err := crew.DecodeArgs(raw, &a); err != nil {
 		return "", err
 	}
 	if r.Count("images") >= maxImagesPerRun {
@@ -520,7 +519,7 @@ func toolGenerateImage(ctx context.Context, r *Run, raw json.RawMessage) (string
 		return "", err
 	}
 	urls := append(append([]string{}, post.MediaURLs...), media.URL(m.ID))
-	p, err := r.Store.UpdatePostAs(ctx, id, post.Version, store.PostPatch{MediaURLs: &urls}, domain.ActorAgent,
+	p, err := NewStore(r.Store).UpdatePostAs(ctx, id, post.Version, PostPatch{MediaURLs: &urls}, ActorAgent,
 		fmt.Sprintf("image generated by @%s", r.Agent.Slug))
 	if err != nil {
 		return "", err

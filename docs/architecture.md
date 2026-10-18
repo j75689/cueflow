@@ -29,9 +29,9 @@ flowchart TB
         API["REST API + SSE<br/>internal/api"]
         Broker(("Event Broker<br/>internal/events"))
         Sched["Scheduler (cron)<br/>internal/scheduler"]
-        Pipe["Pipeline Runner<br/>internal/pipeline"]
+        Pipe["Pipeline Runner<br/>internal/content/pipeline"]
         Crew["Agent Team Runner<br/>internal/crew"]
-        Disp["Dispatch Worker<br/>internal/dispatch"]
+        Disp["Dispatch Worker<br/>internal/content/dispatch"]
         Hub["Connector Hub<br/>internal/hub"]
         Reg["Connector Registry<br/>internal/connector"]
         Guard{{"Publish Guard<br/>internal/guard"}}
@@ -77,7 +77,7 @@ flowchart TB
 | `cmd/mock-publisher-mcp` | A publisher MCP server that posts nowhere, for development and demos (`internal/publishermock`) |
 | `internal/config` | Load settings from environment variables (`CUEFLOW_*`, `DATABASE_URL`) |
 | `internal/db` | Connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) |
-| `internal/domain` | Post state machine, platform rules (character limits, hashtags, thread support, media requirement) |
+| `internal/domain` | The errors every layer shares (`ErrNotFound`, `ErrVersionConflict`, `TransitionError`) |
 | `internal/store` | All PostgreSQL access; status changes and audit entries are written in the same transaction |
 | `internal/secret` | AES-256-GCM encryption of connector secret fields |
 | `internal/connector` | Plugin registry, config schema, the five kind interfaces, the publisher authorization wrapper |
@@ -86,13 +86,13 @@ flowchart TB
 | `internal/mcpx` | MCP client wrapper (Streamable HTTP / SSE / stdio), tool classification |
 | `internal/guard` | Publish authorization (a grant and an agent marker carried on the context) |
 | `internal/llm` | Provider-neutral chat types used by the tool loops; LLM connectors translate to their wire formats |
-| `internal/agent` | Draft generator used by pipelines (an LLM loop with two fixed tools) |
-| `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory |
-| `internal/pipeline` | Scheduled content pipeline: collect → generate → store for review → notify |
-| `internal/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
-| `internal/scheduler` | cron: triggers pipelines, spawns scheduled tasks, sends the review digest |
+| `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory; the capability/tool registry modules add to |
+| `internal/content` | The content workflow module: post state machine and platform rules, posts/items/pipelines queries, the `/posts*`, `/pipelines*`, `/runs*` endpoints, the drafting tools, the review digest; mounted on the core through `api.Module` and the crew registry |
+| `internal/content/pipeline` | Simple schedules: collect → generate (an LLM loop with two fixed tools) → store for review → notify |
+| `internal/content/dispatch` | Publish worker: `APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/scheduler` | cron: spawns scheduled tasks, fires the cron rows and periodic jobs modules register (pipelines, the review digest) |
 | `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
-| `internal/jobs` | Background work requests ("run this task", "publish this post"): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |
+| `internal/jobs` | Background work requests ("run this task", "fire this schedule", plus the kinds modules register): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |
 | `internal/acpx` / `internal/acpdrive` | Launches ACP agents over stdio; drives one prompt through one under CueFlow's sandbox policy; shared by the server and runners |
 | `internal/runner` / `internal/runnerapi` | `cueflow runner register\|run\|status` (the machine side of Runners) and the wire protocol |
 | `internal/blob` | Byte storage for media outside the database (`file://`, `gcs://` with signed URLs); rows record which backend holds them |
@@ -248,7 +248,7 @@ stateDiagram-v2
     PUBLISHED --> [*]
 ```
 
-- Transitions are defined in exactly one place, `internal/domain/post.go`; anything not in the table returns `invalid_transition`.
+- Transitions are defined in exactly one place, `internal/content/post.go`; anything not in the table returns `invalid_transition`.
 - Only `DRAFT` / `PENDING_REVIEW` posts can be edited; edits must carry `version`, and a stale version returns `409`.
 - Each transition and its audit entry are written in **the same transaction**.
 
@@ -293,7 +293,7 @@ the agent team:
 1. cron triggers it; `SELECT … FOR UPDATE` plus "only one RUNNING run per pipeline" prevents overlapping runs.
 2. Each source connector is fetched incrementally into `source_items` (duplicates are skipped).
 3. Unused items within the lookback window are loaded (up to `max_items`).
-4. The generator in `internal/agent` exposes only `web_search` and `submit_drafts` and produces one draft per platform; Threads / X content over the character limit is split into a thread automatically.
+4. The generator in `internal/content/pipeline` exposes only `web_search` and `submit_drafts` and produces one draft per platform; Threads / X content over the character limit is split into a thread automatically.
 5. Drafts are stored as `PENDING_REVIEW` posts, the items are marked consumed, and a review reminder email is sent.
 
 Work that needs understanding, breakdown, delegation or follow-up questions goes to the agent team; fixed-format daily drafting is cheaper and steadier as a pipeline.
@@ -365,8 +365,8 @@ Not covered by automated tests (they need a real project): the Cloud Tasks and C
 | What you want to do | Where to change |
 |---|---|
 | Add a publishing channel, source, search engine, LLM or notifier | Add a connector plugin ([connectors.md](connectors.md)) |
-| Add platform rules (character limits, hashtag caps) | `internal/domain/platform.go` |
-| Give agents a new tool | `internal/crew/tools.go`: define the tool and its capability (never add a tool that can publish) |
+| Add platform rules (character limits, hashtag caps) | `internal/content/platform.go` |
+| Give agents a new tool | Core tools in `internal/crew/tools.go`; a module registers its own with `crew.RegisterCapability` / `crew.RegisterTool` (see `internal/content/tools.go`). Never add a tool that can publish |
 | Add a default role | `internal/crew/defaults.go` |
 | Change the agents' working rules | `internal/crew/prompt.go` (all agents) or edit one role's instructions in the UI |
 | Add a table | `internal/db/migrations/000N_*.sql` |

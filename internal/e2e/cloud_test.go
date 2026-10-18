@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/crew"
-	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
@@ -179,7 +179,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 		})
 	}
 	srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger), Broker: events.NewBroker(),
-		Runner: e.runner, Scheduler: e.sched, Dispatcher: e.worker, Crew: e.crew, Logger: logger,
+		Scheduler: e.sched, Crew: e.crew, Logger: logger,
 		InternalAuth: auth,
 		Handlers: jobs.Handlers{jobs.KindCrew: func(context.Context, uuid.UUID) error {
 			calls++
@@ -216,7 +216,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 	if c := post(work, "good"); c != http.StatusInternalServerError {
 		t.Fatalf("a failing handler must answer 500 so the queue retries, got %d", c)
 	}
-	if c := post(jobs.WorkPath(jobs.KindDispatch, id), "good"); c != http.StatusNotFound {
+	if c := post(jobs.WorkPath(content.KindDispatch, id), "good"); c != http.StatusNotFound {
 		t.Fatalf("a kind without a handler: %d", c)
 	}
 	if c := post("/internal/work/crew/not-a-uuid", "good"); c != http.StatusBadRequest {
@@ -231,7 +231,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 
 	// Without the cloud settings the routes simply do not exist.
 	local := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger), Broker: events.NewBroker(),
-		Runner: e.runner, Scheduler: e.sched, Dispatcher: e.worker, Crew: e.crew, Logger: logger}).Handler())
+		Scheduler: e.sched, Crew: e.crew, Logger: logger}).Handler())
 	defer local.Close()
 	resp, err := http.Post(local.URL+jobs.TickPath, "application/json", strings.NewReader(""))
 	if err != nil {
@@ -290,8 +290,8 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "Done via ACP") {
 		t.Fatalf("task: %s %q", got.Status, got.Result)
 	}
-	posts, _ := e.store.PostsForTask(ctx, task.ID)
-	if len(posts) != 1 || posts[0].Status != domain.StatusPendingReview {
+	posts, _ := e.cs.PostsForTask(ctx, task.ID)
+	if len(posts) != 1 || posts[0].Status != content.StatusPendingReview {
 		t.Fatalf("the draft made through instance B is missing: %+v", posts)
 	}
 	var tokens int

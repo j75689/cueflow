@@ -4,7 +4,7 @@
 // submit_drafts (returns drafts to CueFlow). Publishing is not reachable from here: no publisher is
 // passed in, the loop rejects any tool name outside its allowlist, and the context is marked as an
 // agent context so a publish attempt fails in package guard even if one were wired in by mistake.
-package agent
+package pipeline
 
 import (
 	"context"
@@ -15,10 +15,9 @@ import (
 	"strings"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/content"
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
-	"github.com/j75689/cueflow/internal/textutil"
 )
 
 const (
@@ -36,18 +35,8 @@ type Input struct {
 	CanSearch     bool
 }
 
-type Draft struct {
-	Platform    string   `json:"platform"`
-	Title       string   `json:"title"`
-	Content     string   `json:"content"`
-	ThreadParts []string `json:"thread_parts"`
-	Hashtags    []string `json:"hashtags"`
-	ImagePrompt string   `json:"image_prompt"`
-	SourceRefs  []string `json:"source_refs"`
-}
-
 type Result struct {
-	Drafts        []Draft
+	Drafts        []content.Draft
 	SearchResults []connector.SearchResult
 	ToolCalls     int
 	Usage         llm.Usage
@@ -149,7 +138,7 @@ func (g *Generator) Run(ctx context.Context, in Input) (*Result, error) {
 		if len(resp.Message.ToolCalls) == 0 {
 			// Some local models answer in text despite the instruction; salvage JSON if present.
 			if drafts, ok := draftsFromText(resp.Message.Content); ok {
-				res.Drafts = normalizeDrafts(drafts, in.Platforms)
+				res.Drafts = content.Normalize(drafts, in.Platforms)
 				if len(res.Drafts) > 0 {
 					return res, nil
 				}
@@ -162,7 +151,7 @@ func (g *Generator) Run(ctx context.Context, in Input) (*Result, error) {
 			continue
 		}
 
-		var submitted []Draft
+		var submitted []content.Draft
 		submittedOK := false
 		for _, call := range resp.Message.ToolCalls {
 			res.ToolCalls++
@@ -170,7 +159,7 @@ func (g *Generator) Run(ctx context.Context, in Input) (*Result, error) {
 			msgs = append(msgs, llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Content: out, IsError: isErr})
 		}
 		if submittedOK {
-			res.Drafts = normalizeDrafts(submitted, in.Platforms)
+			res.Drafts = content.Normalize(submitted, in.Platforms)
 			if len(res.Drafts) == 0 {
 				return res, ErrNoDrafts
 			}
@@ -181,7 +170,7 @@ func (g *Generator) Run(ctx context.Context, in Input) (*Result, error) {
 }
 
 func (g *Generator) execTool(ctx context.Context, call llm.ToolCall, allowed map[string]bool, searches *int, maxSearches int,
-	res *Result, submitted *[]Draft, ok *bool) (string, bool) {
+	res *Result, submitted *[]content.Draft, ok *bool) (string, bool) {
 	if !allowed[call.Name] {
 		g.logf("warn", "blocked tool call %q (not permitted for the agent)", call.Name)
 		return fmt.Sprintf("Tool %q is not permitted. Publishing is done by humans after review.", call.Name), true
@@ -209,7 +198,7 @@ func (g *Generator) execTool(ctx context.Context, call llm.ToolCall, allowed map
 		return string(raw), false
 	case toolSubmit:
 		var args struct {
-			Drafts []Draft `json:"drafts"`
+			Drafts []content.Draft `json:"drafts"`
 		}
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
 			return "invalid arguments: " + err.Error(), true
@@ -226,7 +215,7 @@ func (g *Generator) execTool(ctx context.Context, call llm.ToolCall, allowed map
 
 var jsonBlock = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{.*?\\})\\s*```|(\\{.*\\})")
 
-func draftsFromText(text string) ([]Draft, bool) {
+func draftsFromText(text string) ([]content.Draft, bool) {
 	m := jsonBlock.FindStringSubmatch(text)
 	if m == nil {
 		return nil, false
@@ -236,98 +225,10 @@ func draftsFromText(text string) ([]Draft, bool) {
 		raw = m[2]
 	}
 	var args struct {
-		Drafts []Draft `json:"drafts"`
+		Drafts []content.Draft `json:"drafts"`
 	}
 	if err := json.Unmarshal([]byte(raw), &args); err != nil || len(args.Drafts) == 0 {
 		return nil, false
 	}
 	return args.Drafts, true
 }
-
-// normalizeDrafts keeps drafts for requested platforms (first per platform), enforces length limits
-// by splitting threads, and strips stray hashtags/markdown.
-func normalizeDrafts(drafts []Draft, platforms []string) []Draft {
-	want := map[string]bool{}
-	for _, p := range platforms {
-		want[p] = true
-	}
-	seen := map[string]bool{}
-	var out []Draft
-	for _, d := range drafts {
-		d.Platform = strings.ToLower(strings.TrimSpace(d.Platform))
-		if !want[d.Platform] || seen[d.Platform] {
-			continue
-		}
-		pl, _ := domain.PlatformByID(d.Platform)
-		d.Content = cleanText(d.Content)
-		parts := make([]string, 0, len(d.ThreadParts)+1)
-		for _, p := range d.ThreadParts {
-			if p = cleanText(p); p != "" {
-				parts = append(parts, p)
-			}
-		}
-		// Some models put the first part in content and only the replies in thread_parts. Keep it as the
-		// first part instead of dropping it, unless content is just the thread again.
-		if all := strings.Join(parts, "\n\n"); len(parts) > 0 && d.Content != "" && !strings.Contains(all, d.Content) {
-			parts = append([]string{d.Content}, parts...)
-		}
-		if pl.SupportsThread {
-			if len(parts) == 0 && runeLen(d.Content) > pl.MaxChars {
-				parts = textutil.SplitThread(d.Content, pl.MaxChars)
-			} else if len(parts) > 0 {
-				parts = textutil.FitParts(parts, pl.MaxChars)
-			}
-			if len(parts) == 1 {
-				d.Content, parts = parts[0], nil
-			}
-		} else if len(parts) > 0 {
-			if d.Content == "" {
-				d.Content = strings.Join(parts, "\n\n")
-			}
-			parts = nil
-		}
-		if len(parts) > 0 {
-			d.Content = strings.Join(parts, "\n\n")
-		}
-		d.ThreadParts = parts
-		d.Hashtags = cleanTags(d.Hashtags, pl.MaxHashtags)
-		if d.Content == "" {
-			continue
-		}
-		if strings.TrimSpace(d.Title) == "" {
-			d.Title = clip(oneLine(d.Content), 60)
-		}
-		seen[d.Platform] = true
-		out = append(out, d)
-	}
-	return out
-}
-
-var mdMarkers = strings.NewReplacer("**", "", "__", "", "### ", "", "## ", "", "# ", "")
-
-func cleanText(s string) string {
-	return strings.TrimSpace(mdMarkers.Replace(s))
-}
-
-func cleanTags(tags []string, max int) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, t := range tags {
-		t = strings.ReplaceAll(strings.TrimLeft(strings.TrimSpace(t), "#"), " ", "")
-		if t == "" || seen[strings.ToLower(t)] {
-			continue
-		}
-		seen[strings.ToLower(t)] = true
-		out = append(out, t)
-		if max > 0 && len(out) >= max {
-			break
-		}
-	}
-	return out
-}
-
-func runeLen(s string) int { return len([]rune(s)) }
-
-// Normalize applies the same cleanup and length enforcement used for pipeline drafts
-// (thread splitting, hashtag caps, markdown stripping) to drafts produced elsewhere.
-func Normalize(drafts []Draft, platforms []string) []Draft { return normalizeDrafts(drafts, platforms) }
