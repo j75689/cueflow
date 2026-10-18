@@ -30,7 +30,7 @@ type Config struct {
 	// be reachable from the publishing service (e.g. http://cueflow:3000 for a publisher in the same compose file).
 	MediaBaseURL string
 	// MediaStorage is where new media bytes go: empty (the database) or file:///data/media.
-	MediaStorage string
+	MediaStorage     string
 	DispatchEvery    time.Duration
 	DispatchLease    time.Duration
 	PublishTimeout   time.Duration

@@ -48,16 +48,12 @@ parent's org; assigning an agent from another org (task create/update, schedules
 
 ### `GET /api/v1/meta`
 Static info the UI uses to render forms and badges. `modules` lists the feature modules mounted on this
-server; the keys below `connector_types` come from the `content` module (posts, pipelines, publishing)
-and are absent when it is not mounted.
+server; `platforms` comes from the `content` module and the `deliverable_*` keys from the `deliverables` module.
 ```json
 {
   "version": "0.1.0",
   "modules": ["content"],
   "connector_types": [ConnectorSpec, ...],
-  "statuses": ["DRAFT","PENDING_REVIEW","APPROVED","REJECTED","QUEUED","PUBLISHED","FAILED"],
-  "transitions": {"DRAFT":["PENDING_REVIEW"],"PENDING_REVIEW":["APPROVED","REJECTED"],"APPROVED":["QUEUED"],
-                  "QUEUED":["PUBLISHED","FAILED"],"FAILED":["QUEUED"],"REJECTED":[],"PUBLISHED":[]},
   "platforms": [
     {"id":"threads","name":"Threads","max_chars":500,"supports_thread":true,"max_hashtags":1,"requires_media":false},
     {"id":"instagram","name":"Instagram","max_chars":2200,"supports_thread":false,"max_hashtags":30,"requires_media":true},
@@ -96,64 +92,19 @@ Posts and pipelines of the org; connectors are global.
 
 ---
 
-## Posts
-
-`Post`:
-```json
-{
-  "id":"uuid","group_id":"uuid|null","pipeline_id":"uuid|null","run_id":"uuid|null",
-  "publisher_connector_id":"uuid|null",
-  "title":"string","content":"string",
-  "thread_parts":["part 1","part 2"],     // Threads/X split; empty = single post
-  "hashtags":["ai","golang"],             // without '#'
-  "image_prompt":"string",
-  "platforms":["threads"],
-  "media_urls":["https://..."],
-  "accounts":["acc-id"],                  // per-account publishers (MCP publisher): accounts to post to
-  "topic":"string",                       // Threads topic tag (MCP publisher); others ignore it
-  "link_url":"https://...",               // link preview card (MCP publisher, Threads)
-  "status":"PENDING_REVIEW",
-  "review_note":"string",                 // reject reason
-  "source_context":{"topic":"...","items":[{"title":"...","url":"...","source":"Hacker News"}],"search":[{"title":"...","url":"..."}]},
-  "error_message":"string",
-  "external_post_ids":{"threads":"123"},
-  "attempts":0,"version":3,
-  "warnings":["threads: part 2 exceeds 500 characters"],  // computed by server from platform rules
-  "scheduled_at":"...|null","published_at":"...|null","created_at":"...","updated_at":"..."
-}
-```
-
-| Method | Path | Body | Notes |
-|---|---|---|---|
-| GET | `/posts?status=PENDING_REVIEW&status=FAILED&q=&pipeline_id=&run_id=&limit=50&offset=0` | | → `{"items":[Post],"total":n}`; newest first; `status` repeatable (or comma-separated) |
-| GET | `/posts/{id}` | | → `Post` |
-| POST | `/posts` | `{title,content,platforms,thread_parts?,hashtags?,media_urls?,accounts?,topic?,link_url?,image_prompt?,scheduled_at?,publisher_connector_id?,submit?:bool}` | manual draft; `submit:true` moves it straight to `PENDING_REVIEW` |
-| PATCH | `/posts/{id}` | any of `{title,content,platforms,thread_parts,hashtags,media_urls,accounts,topic,link_url,image_prompt,scheduled_at,publisher_connector_id}` + required `version` | only in `DRAFT`/`PENDING_REVIEW`; `409 version_conflict` if stale; writes `EDITED` audit with diff |
-| DELETE | `/posts/{id}` | | only `DRAFT`/`REJECTED` |
-| POST | `/posts/{id}/submit` | | `DRAFT → PENDING_REVIEW` |
-| POST | `/posts/{id}/approve` | `{scheduled_at?, publisher_connector_id?}` | `PENDING_REVIEW → APPROVED`; worker then moves it to `QUEUED → PUBLISHED/FAILED` |
-| POST | `/posts/{id}/reject` | `{reason?}` (optional; archived as `review_note` when given) | `PENDING_REVIEW → REJECTED` |
-| POST | `/posts/{id}/retry` | | `FAILED → QUEUED` |
-| GET | `/posts/{id}/audit` | | → `[AuditLog]` oldest first |
-
-`AuditLog`: `{"id","post_id","action","actor","from_status","to_status","note","payload_diff","created_at"}`
-`action` ∈ `GENERATED, CREATED, EDITED, SUBMITTED, APPROVED, REJECTED, QUEUED, DISPATCHED, PUBLISHED, FAILED, RETRIED`.
-`actor` ∈ `system_agent`, `system_worker`, `human_reviewer`.
-`payload_diff` for `EDITED`: `{"content":{"before":"...","after":"..."}, ...}`.
-
----
-
 ## Deliverables
 
 The general form of "an agent produces something, a human approves it, then the system acts". A deliverable
 has a `kind` (registered by modules; `document`, a Markdown text, is built in), a JSON `payload` the kind
-validates, and a state machine like posts' with `DONE` in place of `PUBLISHED`. Kinds built in: `document` (Markdown), and
-`post` from the content module, a social post whose approval publishes it through the publisher connector (agents
-with the `post_deliverables` capability write their drafts as these instead of posts):
+validates, and a review state machine:
 `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`, `FAILED → QUEUED` on retry. After
 approval the worker hands the item, under a grant, to an **action connector** (kind `action`, e.g. `mcp_action`):
 the item's `action_connector_id`, else the first active one. With no action connector configured an approved
-item is `DONE` at once: the review itself was the point. `/meta` lists `deliverable_kinds`, `deliverable_statuses`
+item is `DONE` at once: the review itself was the point. Kinds built in: `document` (Markdown) and, from the
+content module, `post`: a social post (content, thread parts, hashtags, platforms, media, accounts, topic, link;
+validated with the platform rules) whose action is publishing through the publisher connector named in its
+payload, else the first active one. Agents with the `post_deliverables` capability (`create_post_draft`,
+`list_posts`, `revise_draft`) write these. `/meta` lists `deliverable_kinds`, `deliverable_statuses`
 and `deliverable_transitions`; `/stats` adds `deliverables_by_status`; `GET /tasks/{id}` adds `deliverables`.
 
 | Method | Path | Body | Notes |
@@ -205,41 +156,6 @@ nothing they can call acts on an item.
 | GET | `/connectors/{id}/items?limit=50` | | `source` kind only → `[SourceItem]` |
 
 `SourceItem`: `{"id","connector_id","external_id","title","url","author","content","published_at","fetched_at","consumed_at"}`
-
----
-
-## Pipelines (simple schedules)
-
-The dashboard calls these *simple schedules* and lists them on the Schedules page; the API keeps the
-name `pipelines`.
-
-`Pipeline`:
-```json
-{
-  "id":"uuid","name":"Daily AI digest","description":"","is_active":true,
-  "cron_expr":"0 8 * * *","timezone":"Asia/Taipei",
-  "topic":"AI tooling news","instructions":"Write as a senior engineer...","language":"en",
-  "platforms":["threads","instagram"],
-  "llm_connector_id":"uuid","source_connector_ids":["uuid"],
-  "search_connector_id":"uuid|null","search_queries":["LLM agents"],
-  "publisher_connector_id":"uuid|null","notifier_connector_id":"uuid|null",
-  "lookback_hours":24,"max_items":20,
-  "last_run_at":"...|null","next_run_at":"...|null","created_at":"...","updated_at":"..."
-}
-```
-
-| Method | Path | Body | Notes |
-|---|---|---|---|
-| GET | `/pipelines` | | → `[Pipeline]` |
-| POST | `/pipelines` | Pipeline fields (no id/timestamps) | cron validated (5 fields, or `@daily`, `@every 1h`) |
-| GET/PATCH/DELETE | `/pipelines/{id}` | | |
-| POST | `/pipelines/{id}/run` | | async → `202 {"run_id":"uuid"}` |
-| GET | `/runs?pipeline_id=&limit=50` | | → `[PipelineRun]` newest first |
-| GET | `/runs/{id}` | | |
-
-`PipelineRun`: `{"id","pipeline_id","pipeline_name","trigger":"cron|manual","status":"RUNNING|SUCCEEDED|FAILED",
-"started_at","finished_at","error","stats":{"items_fetched":12,"items_used":5,"posts_created":2,"tool_calls":3},
-"log":[{"at":"...","level":"info","msg":"fetched 12 items from Hacker News"}]}`
 
 ---
 
@@ -321,7 +237,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 |---|---|---|---|
 | GET | `/tasks?status=&assignee=<agentId|none>&parent_id=&q=&all=1` | | → `{"items":[Task]}` ordered by status then `position`; `DONE`/`CANCELED` older than 14 days omitted unless `all=1` |
 | POST | `/tasks` | `{title, description?, assignee_agent_id?, priority?, labels?, due_at?, status?, parent_id?}` | default status: `TODO` if assigned else `BACKLOG`. This is also the "command" entry point (assign to the manager agent) |
-| GET | `/tasks/{id}` | | → `Task` + `"subtasks":[Task]`, `"parent":Task|null`, `"posts":[{"id","title","status","platforms"}]` |
+| GET | `/tasks/{id}` | | → `Task` + `"subtasks":[Task]`, `"parent":Task|null`, `"deliverables":[{"id","kind","title","status"}]` |
 | PATCH | `/tasks/{id}` | any of `{title, description, status, priority, labels, assignee_agent_id, due_at, position}` | `status: IN_PROGRESS` is rejected. Moving to `TODO` with an agent queues a run; moving a running task elsewhere stops the run |
 | DELETE | `/tasks/{id}` | | stops a run; deletes subtasks |
 | GET | `/tasks/{id}/messages` | | → `[TaskMessage]` oldest first |
@@ -481,12 +397,11 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 | `list_orgs` | Orgs: slug, name, whether it is the default |
 | `list_agents` | The org's crew: slug, name, role, description, active |
 | `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query`, `all`, `limit` |
-| `get_task` | One task (`#12`, `12` or id) with description, subtasks, its posts and the last 30 thread messages |
+| `get_task` | One task (`#12`, `12` or id) with description, subtasks, its deliverables and the last 30 thread messages |
 | `create_task` | `title`, `description`, `assignee` slug, `status` `TODO` (default) or `BACKLOG`, `priority`, `labels` |
 | `update_task` | Title, description, priority, labels, assignee (`none` unassigns), status `BACKLOG`/`TODO`/`REVIEW`/`DONE`/`CANCELED` |
 | `comment_task` | Operator message in the thread, same rules as `POST /tasks/{id}/messages` (`@slug` hand-off, resumes the agent) |
 | `run_task` / `stop_task` | Same as `POST /tasks/{id}/run` and `/cancel` |
-| `list_drafts` | Posts by status (default `PENDING_REVIEW`), read-only |
 | `list_deliverables` | Deliverables by status and kind (default `PENDING_REVIEW`), read-only |
 
 Every tool except `list_orgs` takes an optional `org` slug (default org when blank); task numbers and agent

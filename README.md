@@ -15,10 +15,11 @@ Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](doc
                        needs a decision / risky tool call ─▶ you approve in the thread ─▶ it continues
 ```
 
-It ships with a **content workflow** as its built-in example: agents collect material (RSS, mailboxes, web
-search), write platform-specific drafts, a human reviews every draft, and only then it is handed to a publisher:
-any MCP server that follows the four-tool [publisher contract](docs/publisher-mcp.md). Agents never publish: no
-agent tool can, and publishers refuse unless the dispatch worker attached a grant for that exact, human-approved post.
+Everything an agent produces is a **deliverable** that waits for a human: a document, or, with the built-in content
+module, a social post that agents draft from collected material (RSS, mailboxes, web search) and that, once approved,
+is published through any MCP server following the four-tool [publisher contract](docs/publisher-mcp.md). Agents
+never act on their own output: no agent tool can, and publishers and action connectors refuse unless the worker
+attached a grant for that exact, human-approved item.
 
 ## How it works
 
@@ -38,16 +39,16 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 
 ## Highlights
 
-- **Human-in-the-loop by construction.** Posts follow a strict state machine
-  (`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → PUBLISHED | FAILED`) and every change is in an
+- **Human-in-the-loop by construction.** Deliverables follow a strict state machine
+  (`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`) and every change is in an
   audit log, including diffs of reviewer edits.
 - **Everything is a connector plugin.** Publishers, sources, search engines, LLMs, notifiers and image
   generators implement small Go interfaces and self-register with a config schema; the UI renders their forms.
 - **Private by default.** At home it only makes outbound connections and binds to `127.0.0.1:3000`; in the
   cloud the dashboard sits behind Cloudflare Access and machine-to-machine calls carry Google-signed identities.
   Connector secrets are encrypted at rest (AES-256-GCM).
-- **Crash-safe publishing.** Dispatch uses leases; a worker that dies mid-publish leaves the post `FAILED`
-  with a "check before retrying" note instead of silently double-posting.
+- **Crash-safe actions.** The worker uses leases; one that dies mid-action leaves the item `FAILED`
+  with a "check before retrying" note instead of silently acting twice.
 - **Single binary, runs anywhere.** Go API + scheduler + worker with the Next.js dashboard embedded. Docker
   Compose on your own hardware, or Cloud Run with Cloud Tasks and Cloud Scheduler, so nothing runs between jobs.
 
@@ -67,7 +68,7 @@ CueFlow is at <http://localhost:3000>. Then:
    [publisher contract](docs/publisher-mcp.md), or the bundled mock (`docker compose --profile mock up -d`,
    endpoint `http://mock-publisher:4010/mcp`, token `dev-token`) to try the flow without posting anywhere.
 2. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
-3. **Review**: edit, pick the accounts, approve or reject. Approved posts reach the publisher within seconds.
+3. **Deliverables**: edit, pick the accounts, approve or reject. Approved posts reach the publisher within seconds.
 
 Image variants, web search, the mock publisher, remote access: [docs/docker.md](docs/docker.md).
 
@@ -99,7 +100,6 @@ Writing one: [docs/connectors.md](docs/connectors.md).
 - [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) · [Publisher MCP contract](docs/publisher-mcp.md)
 - [External agents, runners and MCP](docs/external-agents.md)
 - [Images and videos](docs/media.md)
-- [Prompt templates](docs/prompt-templates.md)
 - [Deploying on Google Cloud Run](deploy/cloudrun/README.md) · [A runner in a container](deploy/runner/README.md)
 - Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 

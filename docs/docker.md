@@ -25,11 +25,9 @@ docker compose up -d
    - optional: SearXNG/Tavily for web search, SMTP for review reminders.
 2. Either:
    - **Command**: tell the agent team what you want, or
-   - **Schedules**: run work on a timer. An *agent task* schedule opens a task for an agent each time
-     (it researches, reads originals and decides); a *simple schedule* is a fixed collect → one LLM call →
-     drafts flow (cron such as `0 8 * * *`, topic, platforms, instructions - see
-     [prompt-templates.md](prompt-templates.md)). Press **Run now** to try one.
-3. **Review**: edit drafts, pick the accounts, approve or reject. Approved posts are handed to the publisher
+   - **Schedules**: run work on a timer. A schedule opens a task for an agent each time (it researches,
+     reads originals and decides). Press **Run now** to try one.
+3. **Deliverables**: edit drafts, pick the accounts, approve or reject. Approved posts are handed to the publisher
    within seconds; failures show the reason and a **Retry** button.
 
 ## Image variants

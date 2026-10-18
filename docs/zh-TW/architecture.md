@@ -86,9 +86,7 @@ flowchart TB
 | `internal/guard` | 發布授權（context 上的 grant 與 agent 標記） |
 | `internal/llm` | 工具迴圈共用、與供應商無關的對話型別；LLM connector 負責轉成各自的格式 |
 | `internal/crew` | Agent 團隊執行器：認領任務、工具迴圈、委派、排程、記憶；模組用來登記能力與工具的註冊表 |
-| `internal/content` | 內容工作流程模組：貼文狀態機與平台規則、posts/items/pipelines 的查詢、`/posts*`、`/pipelines*`、`/runs*` 端點、寫稿工具、待審摘要；透過 `api.Module` 與 crew 註冊表掛在核心上 |
-| `internal/content/pipeline` | 簡單排程：收集 → 產生（固定兩個工具的 LLM 迴圈）→ 存成待審 → 通知 |
-| `internal/content/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/content` | 建在 deliverables 上的社群內容模組：`post` kind（平台規則當驗證、透過 publisher connector 發布當動作）、素材、發布器帳號與寫稿工具；透過 `api.Module` 與 crew 註冊表掛在核心上 |
 | `internal/deliverable` | Deliverables 模組：任何 agent 都能產出的有型別項目（kind 負責驗證 payload）、和貼文相同的審核狀態機與稽核紀錄，以及核准後在 grant 下執行 action connector 的 worker |
 | `internal/scheduler` | cron：產生定時任務，觸發模組登記的 cron 資料列與週期工作（pipeline、待審摘要） |
 | `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |

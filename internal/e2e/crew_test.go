@@ -190,8 +190,8 @@ func TestChiefDelegatesResearchThenWriting(t *testing.T) {
 
 	var got struct {
 		store.Task
-		Subtasks []store.Task      `json:"subtasks"`
-		Deliverables    []deliverable.Ref `json:"deliverables"`
+		Subtasks     []store.Task      `json:"subtasks"`
+		Deliverables []deliverable.Ref `json:"deliverables"`
 	}
 	e.do("GET", "/tasks/"+task.ID.String(), nil, &got)
 	if got.Status != store.TaskReview || !strings.Contains(got.Result, "waiting for review") {
