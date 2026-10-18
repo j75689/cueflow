@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { useDialog } from "@/components/dialog";
 import { JsonInput } from "@/components/inputs";
+import { type PostDraft, PostEditor, PostPreviews, accountMode, effectivePublisher } from "@/components/post-editor";
 import { useOrgFollow } from "@/components/org";
 import { AuditTimeline, RejectDialog } from "@/components/post";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
@@ -25,7 +26,7 @@ import {
 import { ApiError, api } from "@/lib/api";
 import { fmtTime, shortId } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
-import type { Connector, Deliverable, DeliverableKind } from "@/lib/types";
+import type { Connector, ConnectorSpec, Deliverable, DeliverableKind, Platform } from "@/lib/types";
 
 const EDITABLE = new Set(["DRAFT", "PENDING_REVIEW"]);
 
@@ -47,18 +48,70 @@ function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// PayloadEditor edits a document as text and any other kind as JSON.
+// A post deliverable's payload has the fields of a post; the post editor edits it as one.
+export function postDraftOf(title: string, payload: Record<string, unknown>): PostDraft {
+  const str = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : "");
+  const list = (k: string) => (Array.isArray(payload[k]) ? (payload[k] as string[]) : []);
+  return {
+    title,
+    content: str("content"),
+    thread_parts: list("thread_parts"),
+    hashtags: list("hashtags"),
+    media_urls: list("media_urls"),
+    image_prompt: str("image_prompt"),
+    platforms: list("platforms"),
+    accounts: list("accounts"),
+    topic: str("topic"),
+    link_url: str("link_url"),
+    scheduled_at: typeof payload.scheduled_at === "string" ? (payload.scheduled_at as string) : null,
+    publisher_connector_id:
+      typeof payload.publisher_connector_id === "string" ? (payload.publisher_connector_id as string) : null,
+  };
+}
+
+function payloadOf(d: PostDraft, previous: Record<string, unknown>): Record<string, unknown> {
+  const { title: _title, ...rest } = d;
+  return { ...previous, ...rest };
+}
+
+// PayloadEditor edits a post with the post editor, a document as text and any other kind as JSON.
 function PayloadEditor({
   kind,
+  title,
+  onTitle,
   value,
   onChange,
   readOnly,
+  platforms,
+  publishers,
+  connectorTypes,
 }: {
   kind: string;
+  title: string;
+  onTitle: (t: string) => void;
   value: Record<string, unknown>;
   onChange: (v: Record<string, unknown>) => void;
   readOnly: boolean;
+  platforms: Platform[];
+  publishers: Connector[];
+  connectorTypes: ConnectorSpec[];
 }) {
+  if (kind === "post") {
+    const draft = postDraftOf(title, value);
+    return (
+      <PostEditor
+        draft={draft}
+        onChange={(d) => {
+          if (d.title !== title) onTitle(d.title);
+          onChange(payloadOf(d, value));
+        }}
+        platforms={platforms}
+        publishers={publishers}
+        connectorTypes={connectorTypes}
+        readOnly={readOnly}
+      />
+    );
+  }
   if (kind === "document") {
     const content = typeof value.content === "string" ? value.content : "";
     const summary = typeof value.summary === "string" ? value.summary : "";
@@ -134,6 +187,8 @@ function ActionPicker({
 function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions: Connector[] }) {
   const router = useRouter();
   const toast = useToast();
+  const { meta } = useMeta();
+  const publishers = useAsync(() => api.listConnectors("publisher"), []);
   const [kind, setKind] = useState(kinds[0]?.id ?? "document");
   const [draft, setDraft] = useState<Draft>({
     title: "",
@@ -183,9 +238,11 @@ function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions:
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Card>
           <div className="space-y-3 p-4 pb-0">
-            <Field label="Title">
-              <Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-            </Field>
+            {kind !== "post" && (
+              <Field label="Title">
+                <Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              </Field>
+            )}
             {kinds.length > 1 && (
               <Field label="Kind">
                 <select
@@ -207,9 +264,14 @@ function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions:
           </div>
           <PayloadEditor
             kind={kind}
+            title={draft.title}
+            onTitle={(title) => setDraft((cur) => ({ ...cur, title }))}
             value={draft.payload}
-            onChange={(payload) => setDraft({ ...draft, payload })}
+            onChange={(payload) => setDraft((cur) => ({ ...cur, payload }))}
             readOnly={false}
+            platforms={meta?.platforms ?? []}
+            publishers={publishers.data ?? []}
+            connectorTypes={meta?.connector_types ?? []}
           />
         </Card>
         <Card>
@@ -235,6 +297,7 @@ function DeliverableView() {
   const dialog = useDialog();
   const { meta } = useMeta();
   const actions = useAsync(() => api.listConnectors("action"), []);
+  const publishers = useAsync(() => api.listConnectors("publisher"), []);
 
   const item = useAsync(() => (id ? api.getDeliverable(id) : Promise.resolve(null)), [id]);
   const audit = useAsync(() => (id ? api.deliverableAudit(id) : Promise.resolve([])), [id]);
@@ -386,9 +449,23 @@ function DeliverableView() {
                 variant="success"
                 loading={busy === "approve"}
                 onClick={async () => {
+                  if (d.kind === "post") {
+                    const pd = postDraftOf(draft.title, draft.payload);
+                    if (
+                      accountMode(effectivePublisher(pd, publishers.data ?? []), meta.connector_types) === "required" &&
+                      pd.accounts.length === 0
+                    ) {
+                      toast.error("Choose at least one account to publish to.");
+                      return;
+                    }
+                  }
                   const saved = dirty ? await save() : d;
                   if (!saved) return;
-                  await act("approve", () => api.approveDeliverable(id), "Approved");
+                  await act(
+                    "approve",
+                    () => api.approveDeliverable(id),
+                    d.kind === "post" ? "Approved — handed to the publisher" : "Approved",
+                  );
                 }}
               >
                 <Icon name="check" /> Approve
@@ -476,25 +553,38 @@ function DeliverableView() {
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Card>
           <div className="p-4 pb-0">
-            <Field label="Title">
-              <Input
-                value={draft.title}
-                readOnly={!editable}
-                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              />
-            </Field>
+            {d.kind !== "post" && (
+              <Field label="Title">
+                <Input
+                  value={draft.title}
+                  readOnly={!editable}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                />
+              </Field>
+            )}
           </div>
           <PayloadEditor
             kind={d.kind}
+            title={draft.title}
+            onTitle={(title) => setDraft((cur) => (cur ? { ...cur, title } : cur))}
             value={draft.payload}
-            onChange={(payload) => setDraft({ ...draft, payload })}
+            onChange={(payload) => setDraft((cur) => (cur ? { ...cur, payload } : cur))}
             readOnly={!editable}
+            platforms={meta.platforms}
+            publishers={publishers.data ?? []}
+            connectorTypes={meta.connector_types}
           />
         </Card>
 
         <div className="space-y-4">
+          {d.kind === "post" && (
+            <Card>
+              <CardHeader title="Preview" />
+              <PostPreviews draft={postDraftOf(draft.title, draft.payload)} platforms={meta.platforms} />
+            </Card>
+          )}
           <Card>
-            <CardHeader title="Delivery" />
+            <CardHeader title={d.kind === "post" ? "Publishing" : "Delivery"} />
             <div className="p-4">
               <ActionPicker
                 value={draft.action_connector_id}

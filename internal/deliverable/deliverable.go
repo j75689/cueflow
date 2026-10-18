@@ -9,6 +9,7 @@
 package deliverable
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
 )
 
@@ -153,6 +155,12 @@ type Kind struct {
 	Schema map[string]any `json:"schema,omitempty"`
 	// Validate rejects a payload that does not fit the kind; nil accepts any JSON object.
 	Validate func(payload json.RawMessage) error `json:"-"`
+	// Act, when set, is what approval leads to for this kind, instead of an action connector: the
+	// worker calls it once per attempt under the item's grant (the content module publishes a
+	// "post" this way). Previous attempts' external ids are on the item.
+	Act func(ctx context.Context, d *Deliverable) (*connector.ActResult, error) `json:"-"`
+	// BuiltIn reports in /meta that the kind acts by itself, so no action connector is needed.
+	BuiltIn bool `json:"built_in,omitempty"`
 }
 
 var kinds struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
@@ -39,6 +40,7 @@ func register() {
 		store.ValidatePlatforms = ValidatePlatforms
 		store.ClockTables = append(store.ClockTables, "pipelines")
 		registerTools()
+		registerPostTools()
 	})
 }
 
@@ -64,6 +66,8 @@ type Module struct {
 	Logger     *slog.Logger
 	// PublicURL is how people reach the dashboard (links in the review digest).
 	PublicURL string
+	// MediaBaseURL turns stored media ("/media/{id}") into URLs publishers can fetch.
+	MediaBaseURL string
 }
 
 func (m *Module) ID() string { return "content" }
@@ -73,6 +77,7 @@ func (m *Module) ID() string { return "content" }
 // out on it. Call it before the scheduler starts.
 func (m *Module) Attach(digestCron string) {
 	register()
+	deliverable.RegisterKind(m.postKind())
 	m.Scheduler.AddSource(&pipelineSource{m: m})
 	if digestCron != "" {
 		m.Scheduler.AddPeriodic("digest", digestCron, m.sendDigest)

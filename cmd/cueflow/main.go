@@ -187,7 +187,7 @@ func serve() error {
 		worker := dispatch.NewWorker(cs, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
 		worker.MediaBaseURL = cfg.MediaBaseURL
 		contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner,
-			Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL}
+			Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL, MediaBaseURL: cfg.MediaBaseURL}
 		contentModule.Attach(cfg.DigestCron)
 		modules = append(modules, contentModule)
 		handlers[content.KindDispatch] = func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) }

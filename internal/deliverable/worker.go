@@ -185,6 +185,25 @@ func (w *Worker) act(ctx context.Context, d *Deliverable) {
 }
 
 func (w *Worker) doAct(ctx context.Context, d *Deliverable) (*connector.ActResult, error) {
+	if k, ok := KindByID(d.Kind); ok && k.Act != nil {
+		_ = w.store.AddAudit(ctx, d.ID, ActionStarted, ActorWorker, "via the "+k.ID+" kind")
+		actx, cancel := context.WithTimeout(ctx, w.timeout)
+		defer cancel()
+		res, err := k.Act(guard.WithPublishGrant(actx, d.ID), d)
+		if err != nil {
+			return nil, err
+		}
+		if res == nil {
+			res = &connector.ActResult{}
+		}
+		if res.ExternalIDs == nil {
+			res.ExternalIDs = map[string]string{}
+		}
+		if res.Details == nil {
+			res.Details = map[string]any{}
+		}
+		return res, nil
+	}
 	actionID, err := w.resolveAction(ctx, d)
 	if err != nil {
 		return nil, err

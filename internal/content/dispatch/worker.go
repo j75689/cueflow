@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +18,6 @@ import (
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
-	"github.com/j75689/cueflow/internal/media"
 )
 
 type Worker struct {
@@ -195,7 +193,7 @@ func (w *Worker) doPublish(ctx context.Context, p *content.Post) (*connector.Pub
 	pctx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
 	pctx = guard.WithPublishGrant(pctx, p.ID)
-	urls, files := w.mediaFor(p)
+	urls, files := content.MediaFor(w.store, w.MediaBaseURL, p.MediaURLs)
 	res, err := pub.Publish(pctx, connector.PublishRequest{
 		PostID:      p.ID,
 		Title:       p.Title,
@@ -234,27 +232,4 @@ func (w *Worker) resolvePublisher(ctx context.Context, p *content.Post) (uuid.UU
 		return uuid.Nil, err
 	}
 	return c.ID, nil
-}
-
-// mediaFor resolves a post's media for publishers: absolute URLs, and loaders for stored images.
-func (w *Worker) mediaFor(p *content.Post) ([]string, []connector.MediaFile) {
-	urls := make([]string, 0, len(p.MediaURLs))
-	files := make([]connector.MediaFile, 0, len(p.MediaURLs))
-	for _, raw := range p.MediaURLs {
-		abs := media.Absolute(raw, w.MediaBaseURL)
-		f := connector.MediaFile{URL: abs}
-		if id, ok := media.IDFromURL(raw); ok && strings.HasPrefix(raw, media.PathPrefix) {
-			f.Stored = true
-			f.Load = func(ctx context.Context) ([]byte, string, error) {
-				m, err := w.store.GetMedia(ctx, id)
-				if err != nil {
-					return nil, "", err
-				}
-				return m.Data, m.MimeType, nil
-			}
-		}
-		urls = append(urls, abs)
-		files = append(files, f)
-	}
-	return urls, files
 }

@@ -147,7 +147,9 @@ Posts and pipelines of the org; connectors are global.
 
 The general form of "an agent produces something, a human approves it, then the system acts". A deliverable
 has a `kind` (registered by modules; `document`, a Markdown text, is built in), a JSON `payload` the kind
-validates, and a state machine like posts' with `DONE` in place of `PUBLISHED`:
+validates, and a state machine like posts' with `DONE` in place of `PUBLISHED`. Kinds built in: `document` (Markdown), and
+`post` from the content module, a social post whose approval publishes it through the publisher connector (agents
+with the `post_deliverables` capability write their drafts as these instead of posts):
 `DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`, `FAILED → QUEUED` on retry. After
 approval the worker hands the item, under a grant, to an **action connector** (kind `action`, e.g. `mcp_action`):
 the item's `action_connector_id`, else the first active one. With no action connector configured an approved

@@ -122,7 +122,7 @@ func setup(t *testing.T) *env {
 	runner := pipeline.NewRunner(ctx, cs, h, broker, logger, "http://localhost:3000")
 	worker := dispatch.NewWorker(cs, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
 	module := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner, Dispatcher: worker,
-		Logger: logger, PublicURL: "http://localhost:3000"}
+		Logger: logger, PublicURL: "http://localhost:3000", MediaBaseURL: "http://localhost:3000"}
 	module.Attach("")
 	ds := deliverable.NewStore(st)
 	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
