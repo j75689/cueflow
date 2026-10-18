@@ -10,6 +10,9 @@ import type {
   RunnerRegistration,
   AuditLog,
   Connector,
+  Deliverable,
+  DeliverableAudit,
+  DeliverableList,
   ConnectorTestResult,
   ConnectorTool,
   Meta,
@@ -196,6 +199,30 @@ export const api = {
   rejectPost: (id: string, reason: string) => request<Post>("POST", `/posts/${id}/reject`, { reason }),
   retryPost: (id: string) => request<Post>("POST", `/posts/${id}/retry`),
   postAudit: (id: string) => request<AuditLog[]>("GET", `/posts/${id}/audit`),
+
+  listDeliverables: (q: { status?: string[]; kind?: string; task_id?: string; q?: string; limit?: number; offset?: number }) =>
+    request<DeliverableList>("GET", "/deliverables", undefined, q),
+  getDeliverable: (id: string) => request<Deliverable>("GET", `/deliverables/${id}`),
+  createDeliverable: (body: {
+    kind: string;
+    title: string;
+    payload: Record<string, unknown>;
+    task_id?: string | null;
+    action_connector_id?: string | null;
+    submit?: boolean;
+  }) => request<Deliverable>("POST", "/deliverables", body),
+  updateDeliverable: (
+    id: string,
+    body: { version: number; title?: string; payload?: Record<string, unknown>; action_connector_id?: string | null },
+  ) => request<Deliverable>("PATCH", `/deliverables/${id}`, body),
+  deleteDeliverable: (id: string) => request<void>("DELETE", `/deliverables/${id}`),
+  submitDeliverable: (id: string) => request<Deliverable>("POST", `/deliverables/${id}/submit`),
+  approveDeliverable: (id: string, body: { note?: string; action_connector_id?: string | null } = {}) =>
+    request<Deliverable>("POST", `/deliverables/${id}/approve`, body),
+  rejectDeliverable: (id: string, reason: string) =>
+    request<Deliverable>("POST", `/deliverables/${id}/reject`, { reason }),
+  retryDeliverable: (id: string) => request<Deliverable>("POST", `/deliverables/${id}/retry`),
+  deliverableAudit: (id: string) => request<DeliverableAudit[]>("GET", `/deliverables/${id}/audit`),
 
   listConnectors: (kind?: string) => request<Connector[]>("GET", "/connectors", undefined, { kind }),
   getConnector: (id: string) => request<Connector>("GET", `/connectors/${id}`),

@@ -96,6 +96,9 @@ export interface Meta {
   version: string;
   /** Feature modules mounted on this server ("content" is the posts/pipelines/publishing workflow). */
   modules?: string[];
+  deliverable_kinds?: DeliverableKind[];
+  deliverable_statuses?: DeliverableStatus[];
+  deliverable_transitions?: Record<string, DeliverableStatus[]>;
   statuses: PostStatus[];
   transitions: Record<string, PostStatus[]>;
   platforms: Platform[];
@@ -157,6 +160,60 @@ export interface Post {
 export interface PostList {
   items: Post[];
   total: number;
+}
+
+export type DeliverableStatus = "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "QUEUED" | "DONE" | "FAILED";
+
+export interface DeliverableKind {
+  id: string;
+  name: string;
+  description: string;
+  schema?: Record<string, unknown>;
+}
+
+export interface Deliverable {
+  id: string;
+  org_id: string;
+  task_id: string | null;
+  kind: string;
+  title: string;
+  payload: Record<string, unknown>;
+  status: DeliverableStatus;
+  review_note: string;
+  error_message: string;
+  action_connector_id: string | null;
+  external_ids: Record<string, string>;
+  result: Record<string, unknown>;
+  attempts: number;
+  version: number;
+  created_by: string;
+  acted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeliverableList {
+  items: Deliverable[];
+  total: number;
+}
+
+export interface DeliverableAudit {
+  id: string;
+  deliverable_id: string;
+  action: string;
+  actor: string;
+  from_status: string | null;
+  to_status: string | null;
+  note: string | null;
+  payload_diff: Record<string, { before: unknown; after: unknown }> | null;
+  created_at: string;
+}
+
+export interface TaskDeliverableRef {
+  id: string;
+  kind: string;
+  title: string;
+  status: DeliverableStatus;
 }
 
 export interface AuditLog {
@@ -264,6 +321,7 @@ export interface PipelineRun {
 
 export interface Stats {
   posts_by_status: Partial<Record<PostStatus, number>>;
+  deliverables_by_status?: Partial<Record<DeliverableStatus, number>>;
   connectors: { total: number; active: number };
   pipelines: { total: number; active: number };
   last_run: PipelineRun | null;
@@ -369,6 +427,7 @@ export interface TaskDetail extends Task {
   subtasks: Task[] | null;
   parent: Task | null;
   posts: TaskPostRef[] | null;
+  deliverables?: TaskDeliverableRef[] | null;
 }
 
 export interface TaskCreate {

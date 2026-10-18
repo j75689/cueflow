@@ -323,7 +323,12 @@ function show(v: unknown): string {
   return JSON.stringify(v, null, 2);
 }
 
-export function AuditTimeline({ logs }: { logs: AuditLog[] }) {
+export type AuditEntry = Pick<
+  AuditLog,
+  "id" | "action" | "actor" | "from_status" | "to_status" | "note" | "payload_diff" | "created_at"
+>;
+
+export function AuditTimeline({ logs }: { logs: AuditEntry[] }) {
   if (!logs.length) return <p className="px-4 py-6 text-sm text-zinc-500">No history yet.</p>;
   return (
     <ol className="relative space-y-4 px-4 py-4">

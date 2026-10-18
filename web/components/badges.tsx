@@ -1,19 +1,22 @@
 "use client";
 
-import type { PostStatus } from "@/lib/types";
+import type { DeliverableStatus, PostStatus } from "@/lib/types";
+
+export type AnyStatus = PostStatus | DeliverableStatus;
 import { Pill, cx } from "./ui";
 
-export const STATUS_LABEL: Record<PostStatus, string> = {
+export const STATUS_LABEL: Record<AnyStatus, string> = {
   DRAFT: "Draft",
   PENDING_REVIEW: "Pending review",
   APPROVED: "Approved",
   REJECTED: "Rejected",
   QUEUED: "Queued",
   PUBLISHED: "Published",
+  DONE: "Done",
   FAILED: "Failed",
 };
 
-export const STATUS_STYLE: Record<PostStatus, { pill: string; dot: string }> = {
+export const STATUS_STYLE: Record<AnyStatus, { pill: string; dot: string }> = {
   DRAFT: { pill: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300", dot: "bg-zinc-400" },
   PENDING_REVIEW: {
     pill: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
@@ -25,11 +28,15 @@ export const STATUS_STYLE: Record<PostStatus, { pill: string; dot: string }> = {
     pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
     dot: "bg-emerald-500",
   },
+  DONE: {
+    pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+  },
   FAILED: { pill: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300", dot: "bg-red-500" },
   REJECTED: { pill: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300", dot: "bg-rose-400" },
 };
 
-export function StatusBadge({ status, className }: { status: PostStatus; className?: string }) {
+export function StatusBadge({ status, className }: { status: AnyStatus; className?: string }) {
   const s = STATUS_STYLE[status] ?? STATUS_STYLE.DRAFT;
   return (
     <Pill className={cx(s.pill, className)}>
