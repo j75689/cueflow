@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -124,6 +125,31 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Broker.Publish("agent.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusCreated, out)
+}
+
+// applyTeam adds a team template's agents to the org; slugs the org already has are skipped.
+func (s *Server) applyTeam(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Team string `json:"team"`
+	}
+	if err := Decode(r, &body); err != nil {
+		s.Fail(w, err)
+		return
+	}
+	org, err := s.ReqOrg(r)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	created, skipped, err := crew.ApplyTeam(r.Context(), s.Store, org.ID, body.Team)
+	for _, a := range created {
+		s.Broker.Publish("agent.updated", map[string]any{"id": a.ID})
+	}
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"created": created, "skipped": skipped})
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {

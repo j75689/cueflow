@@ -5,8 +5,8 @@ import { api, errorMessage, setApiOrg } from "@/lib/api";
 import type { Org } from "@/lib/types";
 import { useDialog } from "./dialog";
 import { Popover } from "./popover";
-import { useServerEvent, useToast } from "./providers";
-import { Button, Checkbox, Field, Icon, Input, Modal, cx } from "./ui";
+import { useMeta, useServerEvent, useToast } from "./providers";
+import { Button, Checkbox, Field, Icon, Input, Modal, Select, cx } from "./ui";
 
 const ORG_KEY = "cueflow.org";
 
@@ -171,13 +171,15 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dialog = useDialog();
   const [name, setName] = useState("");
   const [seed, setSeed] = useState(true);
+  const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
+  const teams = useMeta().meta?.agent_teams ?? [];
 
   const create = async () => {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const o = await api.createOrg({ name: name.trim(), seed_agents: seed });
+      const o = await api.createOrg({ name: name.trim(), seed_agents: seed, team: team || undefined });
       setName("");
       await reload();
       setOrg(o.id);
@@ -203,7 +205,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const remove = async (o: Org) => {
     const ok = await dialog.confirm({
       title: `Delete ${o.name}?`,
-      message: "Only an empty org can be deleted: remove its agents, tasks, schedules and posts first.",
+      message: "Only an empty org can be deleted: remove its agents, tasks, schedules and deliverables first.",
       confirmLabel: "Delete",
       tone: "danger",
     });
@@ -221,7 +223,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
     <Modal open={open} onClose={onClose} title="Orgs">
       <div className="space-y-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Each org has its own agents, board, schedules, review queue and runs. Connectors and usage are shared.
+          Each org has its own agents, board, schedules, deliverables and runs. Connectors and usage are shared.
         </p>
         <ul className="divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
           {orgs.map((o, i) => (
@@ -259,6 +261,18 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
             </div>
           </Field>
           <Checkbox checked={seed} onChange={setSeed} label="Start with a Chief agent" />
+          {teams.length > 0 && (
+            <Field label="Team template" help="A set of specialist agents a module offers; you can also add one later from the Agents page.">
+              <Select aria-label="Team template" value={team} onChange={(e) => setTeam(e.target.value)}>
+                <option value="">None</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.agents.map((a) => a.name).join(", ")})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
         </form>
       </div>
     </Modal>

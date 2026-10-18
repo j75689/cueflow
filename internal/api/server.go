@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/agents", s.listAgents)
 		r.Post("/agents", s.createAgent)
+		r.Post("/agents/template", s.applyTeam)
 		r.Get("/agents/{id}", s.getAgent)
 		r.Patch("/agents/{id}", s.updateAgent)
 		r.Delete("/agents/{id}", s.deleteAgent)
@@ -258,6 +259,7 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		"modules":            s.moduleIDs(),
 		"connector_types":    specs,
 		"agent_capabilities": crew.Capabilities(),
+		"agent_teams":        crew.Teams(),
 		"agent_roles":        store.AgentRoles,
 		"task_statuses":      store.TaskStatuses,
 		"task_priorities":    store.TaskPriorities,

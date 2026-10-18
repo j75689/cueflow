@@ -134,7 +134,8 @@ export const api = {
   health: () => request<{ status: string }>("GET", "/health"),
 
   listOrgs: () => request<Org[]>("GET", "/orgs"),
-  createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) => request<Org>("POST", "/orgs", body),
+  createOrg: (body: { name: string; slug?: string; seed_agents?: boolean; team?: string }) =>
+    request<Org>("POST", "/orgs", body),
   updateOrg: (id: string, body: { name?: string; slug?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
   deleteOrg: (id: string) => request<void>("DELETE", `/orgs/${id}`),
 
@@ -195,6 +196,7 @@ export const api = {
   listAgents: () => request<Agent[]>("GET", "/agents"),
   getAgent: (id: string) => request<Agent>("GET", `/agents/${id}`),
   createAgent: (body: Partial<AgentInput>) => request<Agent>("POST", "/agents", body),
+  applyTeam: (team: string) => request<{ created: Agent[]; skipped: string[] }>("POST", "/agents/template", { team }),
   updateAgent: (id: string, body: Partial<AgentInput>) => request<Agent>("PATCH", `/agents/${id}`, body),
   deleteAgent: (id: string) => request<void>("DELETE", `/agents/${id}`),
   agentMemories: (id: string) => request<AgentMemory[]>("GET", `/agents/${id}/memories`),

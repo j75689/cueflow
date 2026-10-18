@@ -85,6 +85,26 @@ export interface Platform {
   requires_media: boolean;
 }
 
+/** One role of a team template a module offers (see Meta.agent_teams). */
+export interface TeamAgent {
+  name: string;
+  slug: string;
+  avatar: string;
+  role: AgentRole;
+  description: string;
+  instructions: string;
+  capabilities: string[];
+  platforms?: string[];
+  max_turns?: number;
+}
+
+export interface AgentTeam {
+  id: string;
+  name: string;
+  description: string;
+  agents: TeamAgent[];
+}
+
 export interface AgentCapability {
   id: string;
   name: string;
@@ -104,6 +124,7 @@ export interface Meta {
   platforms: Platform[];
   connector_types: ConnectorSpec[];
   agent_capabilities?: AgentCapability[];
+  agent_teams?: AgentTeam[];
   agent_roles?: AgentRole[];
   task_statuses?: TaskStatus[];
   task_priorities?: TaskPriority[];

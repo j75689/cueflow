@@ -1,39 +1,83 @@
 package e2e
 
-import "github.com/j75689/cueflow/internal/store"
+import (
+	"context"
+	"testing"
 
-// testSpecialists is the research/writing/editing crew the crew tests delegate to. New orgs only
-// start with Chief, so the tests add these themselves.
+	"github.com/google/uuid"
+
+	"github.com/j75689/cueflow/internal/content"
+	"github.com/j75689/cueflow/internal/crew"
+	"github.com/j75689/cueflow/internal/store"
+)
+
+// testSpecialists is the research/writing/editing crew the crew tests delegate to: the content
+// module's team template, so the tests run the roles a new install gets. New orgs only seed the
+// Chief; the tests add these themselves (or apply the template through the API).
 func testSpecialists() []*store.Agent {
-	return []*store.Agent{
-		{
-			Name: "Researcher", Slug: "researcher", Avatar: "🔎", Role: "researcher", IsActive: true,
-			Description:  "Gathers and verifies information: web search, reading articles, and querying collected RSS/email material. Delivers key points with sources.",
-			Capabilities: []string{"research", "sources", "memory"},
-			Instructions: `You are a rigorous researcher.
-- Check collected material with search_materials first, then web_search if it is not enough, and read_url to read originals when needed.
-- Only state facts you can source, and link a source for every point. Mark anything uncertain as "unconfirmed".
-- Deliverable: 3-7 key points (one-sentence conclusion + why it matters + source), followed by a short "angles worth posting about" section.`,
-		},
-		{
-			Name: "Writer", Slug: "writer", Avatar: "✍️", Role: "writer", IsActive: true,
-			Description:  "Turns material into platform-specific post drafts (short, opinionated Threads posts; structured Instagram captions with hashtags) and sends them to the review queue.",
-			Capabilities: []string{"post_deliverables", "research", "sources", "memory"},
-			Platforms:    []string{"threads", "instagram"},
-			Instructions: `You are a social media copywriter.
-- Write a separate create_post_draft for each platform. Never paste the same text across platforms.
-- Threads: open with an opinionated hook, keep sentences short, end with a question that invites replies; split into a thread if it runs long.
-- Instagram: hook, tidy paragraphs, a bulleted summary; put hashtags in the hashtags field and include an image_prompt. Instagram needs an image: after creating the draft, call generate_image for it (if no image generator is configured, say so in your result).
-- Use only facts provided by the task or the research, and include source_urls. Report the draft IDs when you finish.`,
-		},
-		{
-			Name: "Editor", Slug: "editor", Avatar: "🧐", Role: "editor", IsActive: true,
-			Description:  "Checks pending drafts for accuracy, tone, length and platform rules, revises them directly and explains the changes. Never approves or publishes.",
-			Capabilities: []string{"post_deliverables", "memory"},
-			Instructions: `You are the quality editor.
-- Use list_posts to find PENDING_REVIEW drafts (or the drafts named in the task) and check each one: are the facts supported, does the tone fit the brand, is it within the length and hashtag limits, are there typos?
-- If a change is needed, use revise_draft and explain why in the note. If a draft is fine, leave it alone.
-- You cannot approve or publish. Finish by reporting the result for each draft and remind the human to decide in Review.`,
-		},
+	team, ok := crew.TeamByID(content.TeamID)
+	if !ok {
+		panic("content team template not registered")
+	}
+	var out []*store.Agent
+	for _, ta := range team.Agents {
+		out = append(out, ta.Agent(uuid.Nil))
+	}
+	return out
+}
+
+// A team template is listed in /meta, applied when an org is created or later through
+// POST /agents/template, and never duplicates a slug the org already has.
+func TestTeamTemplates(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	var meta struct {
+		Teams []crew.Team `json:"agent_teams"`
+	}
+	e.do("GET", "/meta", nil, &meta)
+	if len(meta.Teams) != 1 || meta.Teams[0].ID != content.TeamID || len(meta.Teams[0].Agents) != 3 {
+		t.Fatalf("meta teams: %+v", meta.Teams)
+	}
+
+	// Created with the template: Chief + the three specialists.
+	var org store.Org
+	if code := e.do("POST", "/orgs", map[string]any{"name": "Content", "seed_agents": true, "team": content.TeamID}, &org); code != 201 {
+		t.Fatalf("create org: %d", code)
+	}
+	agents, _ := e.store.ListAgents(ctx, org.ID)
+	if len(agents) != 4 {
+		t.Fatalf("org agents: %d", len(agents))
+	}
+	if code := e.do("POST", "/orgs", map[string]any{"name": "Nope", "team": "no-such-team"}, nil); code != 400 {
+		t.Fatalf("unknown team on create: %d", code)
+	}
+
+	// Applied later to the default org, which has only a hand-made writer: the writer is skipped.
+	def, _ := e.store.DefaultOrg(ctx)
+	if _, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: def.ID, Name: "My writer", Slug: "writer", Capabilities: []string{"research"}}); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Created []store.Agent `json:"created"`
+		Skipped []string      `json:"skipped"`
+	}
+	if code := e.do("POST", "/agents/template", map[string]any{"team": content.TeamID}, &res); code != 200 {
+		t.Fatalf("apply: %d", code)
+	}
+	if len(res.Created) != 2 || len(res.Skipped) != 1 || res.Skipped[0] != "writer" {
+		t.Fatalf("apply result: %+v", res)
+	}
+	for _, a := range res.Created {
+		if a.OrgID != def.ID || !a.IsActive || a.MaxTurns != 12 || a.Language != "en" {
+			t.Fatalf("created agent: %+v", a)
+		}
+	}
+	// Applying again adds nothing.
+	if code := e.do("POST", "/agents/template", map[string]any{"team": content.TeamID}, &res); code != 200 || len(res.Created) != 0 || len(res.Skipped) != 3 {
+		t.Fatalf("second apply: %d %+v", code, res)
+	}
+	if code := e.do("POST", "/agents/template", map[string]any{"team": "no-such-team"}, nil); code != 400 {
+		t.Fatalf("unknown team: %d", code)
 	}
 }

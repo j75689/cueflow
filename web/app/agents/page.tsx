@@ -4,15 +4,17 @@ import Link from "next/link";
 import { useState } from "react";
 import { AgentAvatar, NewTaskModal, ROLE_LABEL, useAgents } from "@/components/agents";
 import { useMeta, useToast } from "@/components/providers";
-import { Button, Card, EmptyState, ErrorBox, Icon, Loading, PageHeader, Pill, Toggle } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorBox, Icon, Loading, Modal, PageHeader, Pill, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
-import type { Agent } from "@/lib/types";
+import type { Agent, AgentTeam } from "@/lib/types";
 
 export default function AgentsPage() {
   const agents = useAgents();
   const { meta } = useMeta();
   const toast = useToast();
   const [assignTo, setAssignTo] = useState<Agent | null>(null);
+  const [teamsOpen, setTeamsOpen] = useState(false);
+  const teams = meta?.agent_teams ?? [];
 
   const capName = (id: string) => meta?.agent_capabilities?.find((c) => c.id === id)?.name ?? id;
 
@@ -31,11 +33,18 @@ export default function AgentsPage() {
         title="Agents"
         subtitle="Your team of AI roles. Each has a persona, a set of capabilities and its own memory. None of them can publish: drafts always wait for your review."
         actions={
-          <Link href="/agents/edit/">
-            <Button variant="primary">
-              <Icon name="plus" className="h-4 w-4" /> New agent
-            </Button>
-          </Link>
+          <div className="flex gap-2">
+            {teams.length > 0 && (
+              <Button variant="secondary" onClick={() => setTeamsOpen(true)}>
+                <Icon name="users" className="h-4 w-4" /> Add a team
+              </Button>
+            )}
+            <Link href="/agents/edit/">
+              <Button variant="primary">
+                <Icon name="plus" className="h-4 w-4" /> New agent
+              </Button>
+            </Link>
+          </div>
         }
       />
       {agents.error && <ErrorBox onRetry={agents.reload}>{agents.error}</ErrorBox>}
@@ -47,9 +56,16 @@ export default function AgentsPage() {
             title="No agents yet"
             hint="Create a manager to receive your instructions, plus specialists (researcher, writer…) it can delegate to."
             action={
-              <Link href="/agents/edit/">
-                <Button variant="primary">Create an agent</Button>
-              </Link>
+              <div className="flex gap-2">
+                {teams.length > 0 && (
+                  <Button variant="secondary" onClick={() => setTeamsOpen(true)}>
+                    Add a team
+                  </Button>
+                )}
+                <Link href="/agents/edit/">
+                  <Button variant="primary">Create an agent</Button>
+                </Link>
+              </div>
             }
           />
         </Card>
@@ -109,6 +125,13 @@ export default function AgentsPage() {
           ))}
         </div>
       )}
+      <TeamsModal
+        open={teamsOpen}
+        onClose={() => setTeamsOpen(false)}
+        teams={teams}
+        agents={agents.data ?? []}
+        onApplied={() => void agents.reload()}
+      />
       <NewTaskModal
         open={assignTo !== null}
         onClose={() => setAssignTo(null)}
@@ -116,5 +139,87 @@ export default function AgentsPage() {
         defaultAgentId={assignTo?.id}
       />
     </div>
+  );
+}
+
+/** TeamsModal lists the team templates modules offer; applying one adds the roles the org is missing. */
+function TeamsModal({
+  open,
+  onClose,
+  teams,
+  agents,
+  onApplied,
+}: {
+  open: boolean;
+  onClose: () => void;
+  teams: AgentTeam[];
+  agents: Agent[];
+  onApplied: () => void;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const have = new Set(agents.map((a) => a.slug));
+
+  const apply = async (t: AgentTeam) => {
+    setBusy(t.id);
+    try {
+      const res = await api.applyTeam(t.id);
+      onApplied();
+      if (res.created.length === 0) toast.success(`Nothing to add: ${t.name} is already on the team`);
+      else toast.success(`Added ${res.created.map((a) => a.name).join(", ")}`);
+      onClose();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add a team">
+      <div className="space-y-4">
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          A template adds the roles your org does not have yet (matched by slug) and leaves existing agents alone. Every
+          agent it creates is editable afterwards.
+        </p>
+        {teams.map((t) => {
+          const missing = t.agents.filter((a) => !have.has(a.slug));
+          return (
+            <div key={t.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-zinc-900 dark:text-zinc-100">{t.name}</div>
+                  <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{t.description}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={busy === t.id}
+                  disabled={missing.length === 0}
+                  onClick={() => void apply(t)}
+                >
+                  {missing.length === 0 ? "Already added" : `Add ${missing.length}`}
+                </Button>
+              </div>
+              <ul className="mt-3 space-y-1.5">
+                {t.agents.map((a) => (
+                  <li key={a.slug} className="flex items-start gap-2 text-sm">
+                    <span className="w-6 shrink-0 text-center">{a.avatar}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className={have.has(a.slug) ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>
+                        {a.name}
+                      </span>
+                      <span className="ml-2 font-mono text-xs text-zinc-500">@{a.slug}</span>
+                      <span className="ml-2 text-xs text-zinc-500">{ROLE_LABEL[a.role] ?? a.role}</span>
+                      <span className="block text-xs text-zinc-500">{a.description}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
