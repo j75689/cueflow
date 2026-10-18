@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -26,11 +27,19 @@ const (
 	KindPipeline jobs.Kind = "pipeline"
 )
 
-func init() {
-	jobs.Register(KindDispatch)
-	jobs.Register(KindPipeline)
-	store.ValidatePlatforms = ValidatePlatforms
-	store.ClockTables = append(store.ClockTables, "pipelines")
+// registerOnce wires the module into the core's registries the first time a Module is attached:
+// job kinds, the platform validator and clock table for the store, the agents' capabilities and
+// tools. A binary that does not mount the module never runs it.
+var registerOnce sync.Once
+
+func register() {
+	registerOnce.Do(func() {
+		jobs.Register(KindDispatch)
+		jobs.Register(KindPipeline)
+		store.ValidatePlatforms = ValidatePlatforms
+		store.ClockTables = append(store.ClockTables, "pipelines")
+		registerTools()
+	})
 }
 
 // PipelineRunner runs simple schedules (package pipeline implements it).
@@ -59,10 +68,11 @@ type Module struct {
 
 func (m *Module) ID() string { return "content" }
 
-// Attach registers the module's clockwork with the scheduler: pipelines fire on their cron
-// expressions and, when digestCron is set, the review digest goes out on it. Call it before
-// the scheduler starts.
+// Attach wires the module into the core (register) and its clockwork into the scheduler:
+// pipelines fire on their cron expressions and, when digestCron is set, the review digest goes
+// out on it. Call it before the scheduler starts.
 func (m *Module) Attach(digestCron string) {
+	register()
 	m.Scheduler.AddSource(&pipelineSource{m: m})
 	if digestCron != "" {
 		m.Scheduler.AddPeriodic("digest", digestCron, m.sendDigest)

@@ -17,9 +17,10 @@ import (
 
 const maxPerRun = 10
 
-// The agents' side: a capability whose tools write deliverables into the review queue and revise
-// the ones still pending. Nothing here acts: the worker does, after a human approved.
-func init() {
+// registerTools adds the deliverables capability to the crew: tools that write deliverables into
+// the review queue and revise the ones still pending. Nothing here acts: the worker does, after a
+// human approved.
+func registerTools() {
 	crew.RegisterCapability(crew.Capability{ID: "deliverables", Name: "Deliverables", Default: true,
 		Description: "Produce documents and other deliverables for human review, and revise them while they are pending.",
 		Prompt: func(*store.Agent) string {

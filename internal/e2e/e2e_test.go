@@ -127,6 +127,7 @@ func setup(t *testing.T) *env {
 	ds := deliverable.NewStore(st)
 	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
 	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
+	dmodule.Attach()
 	team := crew.New(st, h, broker, logger, false)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 

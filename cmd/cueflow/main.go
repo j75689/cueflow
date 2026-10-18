@@ -174,18 +174,41 @@ func serve() error {
 	h := hub.New(st, logger)
 	sched := scheduler.New(st, logger)
 
-	// The content module: simple schedules, the publish worker and everything around posts.
-	runner := pipeline.NewRunner(ctx, cs, h, broker, logger, cfg.PublicURL)
-	worker := dispatch.NewWorker(cs, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
-	worker.MediaBaseURL = cfg.MediaBaseURL
-	contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner,
-		Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL}
-	contentModule.Attach(cfg.DigestCron)
-
-	// The deliverables module: typed items any agent can produce, reviewed by a human, then acted on.
-	ds := deliverable.NewStore(st)
-	deliverer := deliverable.NewWorker(ds, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
-	deliverableModule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
+	// Modules (CUEFLOW_MODULES). Each one brings its routes, workers, cron and agent tools; a module
+	// that is not mounted costs nothing at runtime and its tables stay where they are.
+	var modules []api.Module
+	handlers := jobs.Handlers{}
+	var sweeps []func(context.Context) error
+	var workers []func(context.Context)
+	var queued []*jobs.Queue
+	if cfg.Enabled("content") {
+		// Simple schedules, the publish worker and everything around posts.
+		runner := pipeline.NewRunner(ctx, cs, h, broker, logger, cfg.PublicURL)
+		worker := dispatch.NewWorker(cs, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
+		worker.MediaBaseURL = cfg.MediaBaseURL
+		contentModule := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner,
+			Dispatcher: worker, Logger: logger, PublicURL: cfg.PublicURL}
+		contentModule.Attach(cfg.DigestCron)
+		modules = append(modules, contentModule)
+		handlers[content.KindDispatch] = func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) }
+		handlers[content.KindPipeline] = func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") }
+		sweeps = append(sweeps, worker.Sweep)
+		workers = append(workers, worker.Run)
+		queued = append(queued, &worker.Queue)
+		defer runner.Wait()
+	}
+	if cfg.Enabled("deliverables") {
+		// Typed items any agent can produce, reviewed by a human, then acted on.
+		ds := deliverable.NewStore(st)
+		deliverer := deliverable.NewWorker(ds, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
+		deliverableModule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
+		deliverableModule.Attach()
+		modules = append(modules, deliverableModule)
+		handlers[deliverable.KindDeliver] = func(ctx context.Context, _ uuid.UUID) error { return deliverer.Handle(ctx) }
+		sweeps = append(sweeps, deliverer.Sweep)
+		workers = append(workers, deliverer.Run)
+		queued = append(queued, &deliverer.Queue)
+	}
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
 	team.Concurrency = cfg.AgentConcurrency
@@ -214,7 +237,7 @@ func serve() error {
 	apiSrv := &api.Server{
 		Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team,
 		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
-		Modules: []api.Module{contentModule, deliverableModule},
+		Modules: modules,
 	}
 	if cfg.CFAccessTeamDomain != "" {
 		apiSrv.Access = cfaccess.New(ctx, cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
@@ -226,27 +249,30 @@ func serve() error {
 		if err != nil {
 			return fmt.Errorf("cloud tasks: %w", err)
 		}
-		team.Queue, worker.Queue, deliverer.Queue, sched.Queue = q, q, q, q
+		team.Queue, sched.Queue = q, q
+		for _, wq := range queued {
+			*wq = q
+		}
 	}
 	if cfg.Tick == "external" {
 		// The clock and the queue live outside: Cloud Scheduler calls /internal/tick, Cloud Tasks
 		// calls /internal/work/*. Nothing is polled or scheduled in this process.
 		sched.External = true
 		apiSrv.InternalAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.InternalServiceAccounts))
-		apiSrv.Handlers = jobs.Handlers{
-			jobs.KindCrew:           func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) },
-			jobs.KindSchedule:       sched.HandleSchedule,
-			jobs.KindApproval:       team.RunApproval,
-			content.KindDispatch:    func(ctx context.Context, _ uuid.UUID) error { return worker.Handle(ctx) },
-			content.KindPipeline:    func(ctx context.Context, id uuid.UUID) error { return runner.RunSync(ctx, id, "cron") },
-			deliverable.KindDeliver: func(ctx context.Context, _ uuid.UUID) error { return deliverer.Handle(ctx) },
-		}
+		handlers[jobs.KindCrew] = func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) }
+		handlers[jobs.KindSchedule] = sched.HandleSchedule
+		handlers[jobs.KindApproval] = team.RunApproval
+		apiSrv.Handlers = handlers
 		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
 		if len(cfg.MediaRegisterAccounts) > 0 {
 			apiSrv.MediaRegisterAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.MediaRegisterAccounts))
 		}
 		apiSrv.Tick = func(ctx context.Context) error {
-			return errors.Join(sched.Tick(ctx), team.Sweep(ctx), worker.Sweep(ctx), deliverer.Sweep(ctx))
+			errs := []error{sched.Tick(ctx), team.Sweep(ctx)}
+			for _, sweep := range sweeps {
+				errs = append(errs, sweep(ctx))
+			}
+			return errors.Join(errs...)
 		}
 		logger.Info("external clock: waiting for /internal/tick and /internal/work deliveries", "queue", cfg.Queue)
 	} else {
@@ -255,8 +281,9 @@ func serve() error {
 				return err
 			}
 		}
-		go worker.Run(ctx)
-		go deliverer.Run(ctx)
+		for _, run := range workers {
+			go run(ctx)
+		}
 		go team.Run(ctx)
 	}
 
@@ -267,7 +294,7 @@ func serve() error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", api.Version, "auth", cfg.AdminToken != "", "mcp", cfg.MCPToken != "")
+		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", api.Version, "auth", cfg.AdminToken != "", "mcp", cfg.MCPToken != "", "modules", cfg.Modules)
 		errc <- srv.ListenAndServe()
 	}()
 
@@ -282,7 +309,6 @@ func serve() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-	runner.Wait()
 	team.Wait()
 	return nil
 }

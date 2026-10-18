@@ -34,6 +34,7 @@ func TestCleanMediaURLs(t *testing.T) {
 
 // An agent that drafts posts is told the publishing rules; one without the capability is not.
 func TestDraftingPromptLines(t *testing.T) {
+	register()
 	task := &store.Task{Number: 7}
 	writer := &store.Agent{Name: "Writer", Role: "writer", Capabilities: []string{"drafting"}, Platforms: []string{"threads"}}
 	got := crew.SystemPrompt(writer, task, nil, nil)
