@@ -15,4 +15,4 @@ in CueFlow is a template, you keep them as files and import them where you need 
 
 | File | Team |
 |---|---|
-| [`social-content.json`](social-content.json) | Researcher, Writer and Editor for post drafts (the content module); the Chief a new org starts with delegates to them |
+| [`social-content.json`](social-content.json) | Researcher, Writer and Editor for post drafts (the [content module](../docs/modules.md#content)); the Chief a new org starts with delegates to them |

@@ -12,7 +12,7 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
-const teamExample = "../../docs/examples/teams/social-content.json"
+const teamExample = "../../templates/social-content.json"
 
 // exampleTeam is the shipped example template: the research/writing/editing crew the crew tests
 // delegate to, so the file in docs is the one the tests run.

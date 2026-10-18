@@ -43,7 +43,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成 deliverable 使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
 
-媒體如何儲存、提供與刪除，見 [media.md](media.md)。
+媒體如何儲存、提供與刪除，見 [modules.md](modules.md#圖片與影片)。
 
 ## 雲端模式
 

@@ -44,7 +44,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished deliverable uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
 
-See [media.md](media.md) for how media is stored, served and deleted.
+See [modules.md](modules.md#images-and-videos) for how media is stored, served and deleted.
 
 ## Cloud mode
 

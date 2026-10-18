@@ -86,7 +86,8 @@ Writing one: [docs/connectors.md](docs/connectors.md).
   [docs/configuration.md](docs/configuration.md). Back up `CUEFLOW_SECRET_KEY`; without it stored credentials
   are unreadable.
 - **Runners, external agents, MCP**: [docs/external-agents.md](docs/external-agents.md).
-- **Images and videos**: storage backends, deletion, big files from a renderer: [docs/media.md](docs/media.md).
+- **Modules**: what `deliverables` and `content` add, switching them with `CUEFLOW_MODULES`, and where images and
+  videos are stored: [docs/modules.md](docs/modules.md).
 - **Google Cloud Run**: Supabase, Cloud Storage, Cloud Tasks and Cloud Scheduler, scaling to zero:
   [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
@@ -99,7 +100,7 @@ Writing one: [docs/connectors.md](docs/connectors.md).
 - [Running with Docker Compose](docs/docker.md)
 - [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) · [Publisher MCP contract](docs/publisher-mcp.md)
 - [External agents, runners and MCP](docs/external-agents.md)
-- [Images and videos](docs/media.md)
+- [Modules: deliverables, content, images and videos](docs/modules.md)
 - [Deploying on Google Cloud Run](deploy/cloudrun/README.md) · [A runner in a container](deploy/runner/README.md)
 - Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
