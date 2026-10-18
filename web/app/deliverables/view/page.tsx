@@ -64,10 +64,7 @@ function PayloadEditor({
     const summary = typeof value.summary === "string" ? value.summary : "";
     return (
       <div className="space-y-3 p-4">
-        <Field
-          label="Summary"
-          help="One or two sentences for the reviewer (optional)"
-        >
+        <Field label="Summary" help="One or two sentences for the reviewer (optional)">
           <Input
             value={summary}
             readOnly={readOnly}
@@ -89,11 +86,7 @@ function PayloadEditor({
   return (
     <div className="p-4">
       <Field label="Payload" help="JSON, as the kind expects it">
-        <JsonInput
-          value={value}
-          disabled={readOnly}
-          onChange={(v) => onChange((v as Record<string, unknown>) ?? {})}
-        />
+        <JsonInput value={value} disabled={readOnly} onChange={(v) => onChange((v as Record<string, unknown>) ?? {})} />
       </Field>
     </div>
   );
@@ -126,9 +119,7 @@ function ActionPicker({
         onChange={(e) => onChange(e.target.value || null)}
         className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
       >
-        <option value="">
-          {active.length ? `Default (${active[0].name})` : "None"}
-        </option>
+        <option value="">{active.length ? `Default (${active[0].name})` : "None"}</option>
         {active.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -140,13 +131,7 @@ function ActionPicker({
 }
 
 // NewDeliverable is the page without an id: write a document and submit it.
-function NewDeliverable({
-  kinds,
-  actions,
-}: {
-  kinds: DeliverableKind[];
-  actions: Connector[];
-}) {
+function NewDeliverable({ kinds, actions }: { kinds: DeliverableKind[]; actions: Connector[] }) {
   const router = useRouter();
   const toast = useToast();
   const [kind, setKind] = useState(kinds[0]?.id ?? "document");
@@ -177,10 +162,7 @@ function NewDeliverable({
   return (
     <div>
       <div className="mb-2">
-        <Link
-          href="/deliverables/"
-          className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-        >
+        <Link href="/deliverables/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
           ← Deliverables
         </Link>
       </div>
@@ -189,19 +171,10 @@ function NewDeliverable({
         subtitle="Written by you; it goes through the same review as what agents produce."
         actions={
           <>
-            <Button
-              onClick={() => void create(false)}
-              loading={busy === "draft"}
-              disabled={!!busy}
-            >
+            <Button onClick={() => void create(false)} loading={busy === "draft"} disabled={!!busy}>
               Save draft
             </Button>
-            <Button
-              variant="primary"
-              onClick={() => void create(true)}
-              loading={busy === "submit"}
-              disabled={!!busy}
-            >
+            <Button variant="primary" onClick={() => void create(true)} loading={busy === "submit"} disabled={!!busy}>
               Submit for review
             </Button>
           </>
@@ -211,10 +184,7 @@ function NewDeliverable({
         <Card>
           <div className="space-y-3 p-4 pb-0">
             <Field label="Title">
-              <Input
-                value={draft.title}
-                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              />
+              <Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
             </Field>
             {kinds.length > 1 && (
               <Field label="Kind">
@@ -250,9 +220,7 @@ function NewDeliverable({
               actions={actions}
               readOnly={false}
             />
-            {chosen?.description && (
-              <p className="mt-3 text-xs text-zinc-500">{chosen.description}</p>
-            )}
+            {chosen?.description && <p className="mt-3 text-xs text-zinc-500">{chosen.description}</p>}
           </div>
         </Card>
       </div>
@@ -268,14 +236,8 @@ function DeliverableView() {
   const { meta } = useMeta();
   const actions = useAsync(() => api.listConnectors("action"), []);
 
-  const item = useAsync(
-    () => (id ? api.getDeliverable(id) : Promise.resolve(null)),
-    [id],
-  );
-  const audit = useAsync(
-    () => (id ? api.deliverableAudit(id) : Promise.resolve([])),
-    [id],
-  );
+  const item = useAsync(() => (id ? api.getDeliverable(id) : Promise.resolve(null)), [id]);
+  const audit = useAsync(() => (id ? api.deliverableAudit(id) : Promise.resolve([])), [id]);
   useOrgFollow(item.data?.org_id);
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -283,10 +245,7 @@ function DeliverableView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  const base = useMemo(
-    () => (item.data ? toDraft(item.data) : null),
-    [item.data],
-  );
+  const base = useMemo(() => (item.data ? toDraft(item.data) : null), [item.data]);
   useEffect(() => {
     if (base) {
       setDraft(base);
@@ -316,8 +275,7 @@ function DeliverableView() {
 
   const kinds = meta?.deliverable_kinds ?? [];
   if (!id) return <NewDeliverable kinds={kinds} actions={actions.data ?? []} />;
-  if (item.error && !item.data)
-    return <ErrorBox onRetry={item.reload}>{item.error}</ErrorBox>;
+  if (item.error && !item.data) return <ErrorBox onRetry={item.reload}>{item.error}</ErrorBox>;
   if (!item.data || !draft || !meta) return <Loading />;
 
   const d = item.data;
@@ -334,8 +292,7 @@ function DeliverableView() {
       };
       if (draft.title !== base.title) body.title = draft.title;
       if (!same(draft.payload, base.payload)) body.payload = draft.payload;
-      if (draft.action_connector_id !== base.action_connector_id)
-        body.action_connector_id = draft.action_connector_id;
+      if (draft.action_connector_id !== base.action_connector_id) body.action_connector_id = draft.action_connector_id;
       const updated = await api.updateDeliverable(id, body);
       item.setData(updated);
       toast.success("Saved");
@@ -343,9 +300,7 @@ function DeliverableView() {
     } catch (e) {
       if (e instanceof ApiError && e.code === "version_conflict") {
         setStale(true);
-        toast.error(
-          "Someone else changed this item. Reload to see the latest version.",
-        );
+        toast.error("Someone else changed this item. Reload to see the latest version.");
       } else toast.error(e);
       return null;
     } finally {
@@ -353,11 +308,7 @@ function DeliverableView() {
     }
   };
 
-  const act = async (
-    name: string,
-    fn: () => Promise<Deliverable | void>,
-    msg: string,
-  ) => {
+  const act = async (name: string, fn: () => Promise<Deliverable | void>, msg: string) => {
     setBusy(name);
     try {
       const res = await fn();
@@ -378,10 +329,7 @@ function DeliverableView() {
   return (
     <div>
       <div className="mb-2">
-        <Link
-          href="/deliverables/"
-          className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-        >
+        <Link href="/deliverables/" className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
           ← Deliverables
         </Link>
       </div>
@@ -397,9 +345,7 @@ function DeliverableView() {
             <Pill>{kind?.name ?? d.kind}</Pill>
             <span className="font-mono text-xs">#{shortId(d.id)}</span>
             <span>Created {fmtTime(d.created_at)}</span>
-            <span>
-              {d.created_by === "system_agent" ? "by an agent" : "by a person"}
-            </span>
+            <span>{d.created_by === "system_agent" ? "by an agent" : "by a person"}</span>
             {d.task_id && (
               <Link
                 className="text-indigo-600 hover:underline dark:text-indigo-400"
@@ -414,11 +360,7 @@ function DeliverableView() {
         actions={
           <>
             {editable && (
-              <Button
-                onClick={() => void save()}
-                disabled={!dirty}
-                loading={busy === "save"}
-              >
+              <Button onClick={() => void save()} disabled={!dirty} loading={busy === "save"}>
                 Save
               </Button>
             )}
@@ -428,22 +370,14 @@ function DeliverableView() {
                 loading={busy === "submit"}
                 onClick={async () => {
                   if (dirty && !(await save())) return;
-                  await act(
-                    "submit",
-                    () => api.submitDeliverable(id),
-                    "Submitted for review",
-                  );
+                  await act("submit", () => api.submitDeliverable(id), "Submitted for review");
                 }}
               >
                 Submit for review
               </Button>
             )}
             {allowed.has("REJECTED") && (
-              <Button
-                variant="danger"
-                onClick={() => setRejectOpen(true)}
-                disabled={!!busy}
-              >
+              <Button variant="danger" onClick={() => setRejectOpen(true)} disabled={!!busy}>
                 Reject
               </Button>
             )}
@@ -454,11 +388,7 @@ function DeliverableView() {
                 onClick={async () => {
                   const saved = dirty ? await save() : d;
                   if (!saved) return;
-                  await act(
-                    "approve",
-                    () => api.approveDeliverable(id),
-                    "Approved",
-                  );
+                  await act("approve", () => api.approveDeliverable(id), "Approved");
                 }}
               >
                 <Icon name="check" /> Approve
@@ -468,9 +398,7 @@ function DeliverableView() {
               <Button
                 variant="primary"
                 loading={busy === "retry"}
-                onClick={() =>
-                  act("retry", () => api.retryDeliverable(id), "Re-queued")
-                }
+                onClick={() => act("retry", () => api.retryDeliverable(id), "Re-queued")}
               >
                 <Icon name="refresh" /> Retry
               </Button>
@@ -483,8 +411,7 @@ function DeliverableView() {
                   if (
                     !(await dialog.confirm({
                       title: "Remove this deliverable?",
-                      message:
-                        "The item and its history are removed permanently.",
+                      message: "The item and its history are removed permanently.",
                       confirmLabel: "Remove",
                       tone: "danger",
                     }))
@@ -519,9 +446,7 @@ function DeliverableView() {
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/60 dark:bg-red-950/40">
             <div className="text-sm font-semibold text-red-800 dark:text-red-300">
               Action failed
-              {d.attempts
-                ? ` after ${d.attempts} attempt${d.attempts > 1 ? "s" : ""}`
-                : ""}
+              {d.attempts ? ` after ${d.attempts} attempt${d.attempts > 1 ? "s" : ""}` : ""}
             </div>
             <pre className="mt-1 font-mono text-xs break-words whitespace-pre-wrap text-red-700 dark:text-red-300">
               {d.error_message || "No error message returned."}
@@ -537,20 +462,14 @@ function DeliverableView() {
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
             Done {fmtTime(d.acted_at)}
             {external.length > 0 ? (
-              <span className="ml-2 font-mono text-xs">
-                {external.map(([k, v]) => `${k}: ${v}`).join(" · ")}
-              </span>
+              <span className="ml-2 font-mono text-xs">{external.map(([k, v]) => `${k}: ${v}`).join(" · ")}</span>
             ) : (
-              <span className="ml-2 text-xs">
-                (approved; no action connector was configured)
-              </span>
+              <span className="ml-2 text-xs">(approved; no action connector was configured)</span>
             )}
           </div>
         )}
         {!editable && d.status !== "FAILED" && (
-          <p className="text-xs text-zinc-500">
-            Content is read-only once an item leaves review.
-          </p>
+          <p className="text-xs text-zinc-500">Content is read-only once an item leaves review.</p>
         )}
       </div>
 
@@ -585,9 +504,7 @@ function DeliverableView() {
               />
               {resultEntries.length > 0 && (
                 <div className="mt-3">
-                  <div className="mb-1 text-xs font-medium text-zinc-500">
-                    What the action reported
-                  </div>
+                  <div className="mb-1 text-xs font-medium text-zinc-500">What the action reported</div>
                   <pre className="overflow-x-auto rounded bg-zinc-50 px-2 py-1 font-mono text-xs whitespace-pre-wrap dark:bg-zinc-800/60">
                     {JSON.stringify(d.result, null, 2)}
                   </pre>
@@ -598,9 +515,7 @@ function DeliverableView() {
           {kind?.description && (
             <Card>
               <CardHeader title={kind.name} />
-              <p className="px-4 pb-4 text-sm text-zinc-600 dark:text-zinc-400">
-                {kind.description}
-              </p>
+              <p className="px-4 pb-4 text-sm text-zinc-600 dark:text-zinc-400">{kind.description}</p>
             </Card>
           )}
           <Card>
@@ -623,11 +538,7 @@ function DeliverableView() {
         title="Reject deliverable"
         onClose={() => setRejectOpen(false)}
         onConfirm={async (reason) => {
-          await act(
-            "reject",
-            () => api.rejectDeliverable(id, reason),
-            "Rejected",
-          );
+          await act("reject", () => api.rejectDeliverable(id, reason), "Rejected");
         }}
       />
     </div>

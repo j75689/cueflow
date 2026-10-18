@@ -9,16 +9,7 @@ export type PostStatus =
   | "PUBLISHED"
   | "FAILED";
 
-export type ConnectorKind =
-  | "publisher"
-  | "source"
-  | "search"
-  | "llm"
-  | "notifier"
-  | "runtime"
-  | "image"
-  | "tools"
-  | "action";
+export type ConnectorKind = "publisher" | "source" | "search" | "llm" | "notifier" | "runtime" | "image" | "tools" | "action";
 
 export type FieldType =
   | "string"
@@ -171,14 +162,7 @@ export interface PostList {
   total: number;
 }
 
-export type DeliverableStatus =
-  | "DRAFT"
-  | "PENDING_REVIEW"
-  | "APPROVED"
-  | "REJECTED"
-  | "QUEUED"
-  | "DONE"
-  | "FAILED";
+export type DeliverableStatus = "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "QUEUED" | "DONE" | "FAILED";
 
 export interface DeliverableKind {
   id: string;
@@ -345,8 +329,7 @@ export interface Stats {
 
 /* ------------------------------ Agents & tasks ----------------------------- */
 
-export type AgentRole =
-  "manager" | "researcher" | "writer" | "editor" | "custom";
+export type AgentRole = "manager" | "researcher" | "writer" | "editor" | "custom";
 
 export interface Agent {
   id: string;
@@ -374,10 +357,7 @@ export interface Agent {
   updated_at: string;
 }
 
-export type AgentInput = Omit<
-  Agent,
-  "id" | "org_id" | "stats" | "created_at" | "updated_at"
->;
+export type AgentInput = Omit<Agent, "id" | "org_id" | "stats" | "created_at" | "updated_at">;
 
 export interface AgentMemory {
   id: string;
@@ -477,14 +457,7 @@ export type TaskPatch = Partial<
   >
 >;
 
-export type TaskMessageKind =
-  | "message"
-  | "tool_call"
-  | "tool_result"
-  | "status"
-  | "question"
-  | "result"
-  | "approval";
+export type TaskMessageKind = "message" | "tool_call" | "tool_result" | "status" | "question" | "result" | "approval";
 
 export type ToolPermissionValue = "allow" | "ask" | "deny";
 
@@ -681,14 +654,7 @@ export interface RunnerRegistration {
 export interface RunnerJob {
   id: string;
   task_id: string;
-  status:
-    | "queued"
-    | "running"
-    | "canceling"
-    | "done"
-    | "failed"
-    | "canceled"
-    | "expired";
+  status: "queued" | "running" | "canceling" | "done" | "failed" | "canceled" | "expired";
   labels: string[];
   runner_id: string | null;
   runner_name: string;

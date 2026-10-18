@@ -80,10 +80,7 @@ export function setApiOrg(id: string) {
 // Fired when the server answers 401 so the token prompt can open.
 export const UNAUTHORIZED_EVENT = "cueflow:unauthorized";
 
-type Query = Record<
-  string,
-  string | number | boolean | string[] | null | undefined
->;
+type Query = Record<string, string | number | boolean | string[] | null | undefined>;
 
 function buildQuery(q?: Query): string {
   if (!q) return "";
@@ -97,12 +94,7 @@ function buildQuery(q?: Query): string {
   return s ? `?${s}` : "";
 }
 
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  query?: Query,
-): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -111,21 +103,14 @@ async function request<T>(
 
   let res: Response;
   try {
-    const q =
-      currentOrg && !path.startsWith("/orgs")
-        ? { org: currentOrg, ...query }
-        : query;
+    const q = currentOrg && !path.startsWith("/orgs") ? { org: currentOrg, ...query } : query;
     res = await fetch(`${BASE}${path}${buildQuery(q)}`, {
       method,
       headers,
       body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     });
   } catch (e) {
-    throw new ApiError(
-      0,
-      "network",
-      e instanceof Error ? e.message : "network error",
-    );
+    throw new ApiError(0, "network", e instanceof Error ? e.message : "network error");
   }
 
   if (res.status === 401) {
@@ -143,14 +128,8 @@ async function request<T>(
     }
   }
   if (!res.ok) {
-    const err = (
-      data as { error?: { code?: string; message?: string } } | undefined
-    )?.error;
-    throw new ApiError(
-      res.status,
-      err?.code ?? "http_error",
-      err?.message ?? `${res.status} ${res.statusText}`,
-    );
+    const err = (data as { error?: { code?: string; message?: string } } | undefined)?.error;
+    throw new ApiError(res.status, err?.code ?? "http_error", err?.message ?? `${res.status} ${res.statusText}`);
   }
   return data as T;
 }
@@ -197,10 +176,8 @@ export const api = {
   health: () => request<{ status: string }>("GET", "/health"),
 
   listOrgs: () => request<Org[]>("GET", "/orgs"),
-  createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) =>
-    request<Org>("POST", "/orgs", body),
-  updateOrg: (id: string, body: { name?: string; slug?: string }) =>
-    request<Org>("PATCH", `/orgs/${id}`, body),
+  createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) => request<Org>("POST", "/orgs", body),
+  updateOrg: (id: string, body: { name?: string; slug?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
   deleteOrg: (id: string) => request<void>("DELETE", `/orgs/${id}`),
 
   listPosts: (q: {
@@ -210,35 +187,22 @@ export const api = {
     run_id?: string;
     limit?: number;
     offset?: number;
-  }) => request<PostList>("GET", "/posts", undefined, q),
+  }) =>
+    request<PostList>("GET", "/posts", undefined, q),
   getPost: (id: string) => request<Post>("GET", `/posts/${id}`),
   createPost: (body: PostCreate) => request<Post>("POST", "/posts", body),
-  updatePost: (id: string, body: PostPatch) =>
-    request<Post>("PATCH", `/posts/${id}`, body),
+  updatePost: (id: string, body: PostPatch) => request<Post>("PATCH", `/posts/${id}`, body),
   deletePost: (id: string) => request<void>("DELETE", `/posts/${id}`),
   submitPost: (id: string) => request<Post>("POST", `/posts/${id}/submit`),
-  approvePost: (
-    id: string,
-    body: {
-      scheduled_at?: string | null;
-      publisher_connector_id?: string | null;
-    } = {},
-  ) => request<Post>("POST", `/posts/${id}/approve`, body),
-  rejectPost: (id: string, reason: string) =>
-    request<Post>("POST", `/posts/${id}/reject`, { reason }),
+  approvePost: (id: string, body: { scheduled_at?: string | null; publisher_connector_id?: string | null } = {}) =>
+    request<Post>("POST", `/posts/${id}/approve`, body),
+  rejectPost: (id: string, reason: string) => request<Post>("POST", `/posts/${id}/reject`, { reason }),
   retryPost: (id: string) => request<Post>("POST", `/posts/${id}/retry`),
   postAudit: (id: string) => request<AuditLog[]>("GET", `/posts/${id}/audit`),
 
-  listDeliverables: (q: {
-    status?: string[];
-    kind?: string;
-    task_id?: string;
-    q?: string;
-    limit?: number;
-    offset?: number;
-  }) => request<DeliverableList>("GET", "/deliverables", undefined, q),
-  getDeliverable: (id: string) =>
-    request<Deliverable>("GET", `/deliverables/${id}`),
+  listDeliverables: (q: { status?: string[]; kind?: string; task_id?: string; q?: string; limit?: number; offset?: number }) =>
+    request<DeliverableList>("GET", "/deliverables", undefined, q),
+  getDeliverable: (id: string) => request<Deliverable>("GET", `/deliverables/${id}`),
   createDeliverable: (body: {
     kind: string;
     title: string;
@@ -249,107 +213,53 @@ export const api = {
   }) => request<Deliverable>("POST", "/deliverables", body),
   updateDeliverable: (
     id: string,
-    body: {
-      version: number;
-      title?: string;
-      payload?: Record<string, unknown>;
-      action_connector_id?: string | null;
-    },
+    body: { version: number; title?: string; payload?: Record<string, unknown>; action_connector_id?: string | null },
   ) => request<Deliverable>("PATCH", `/deliverables/${id}`, body),
-  deleteDeliverable: (id: string) =>
-    request<void>("DELETE", `/deliverables/${id}`),
-  submitDeliverable: (id: string) =>
-    request<Deliverable>("POST", `/deliverables/${id}/submit`),
-  approveDeliverable: (
-    id: string,
-    body: { note?: string; action_connector_id?: string | null } = {},
-  ) => request<Deliverable>("POST", `/deliverables/${id}/approve`, body),
+  deleteDeliverable: (id: string) => request<void>("DELETE", `/deliverables/${id}`),
+  submitDeliverable: (id: string) => request<Deliverable>("POST", `/deliverables/${id}/submit`),
+  approveDeliverable: (id: string, body: { note?: string; action_connector_id?: string | null } = {}) =>
+    request<Deliverable>("POST", `/deliverables/${id}/approve`, body),
   rejectDeliverable: (id: string, reason: string) =>
     request<Deliverable>("POST", `/deliverables/${id}/reject`, { reason }),
-  retryDeliverable: (id: string) =>
-    request<Deliverable>("POST", `/deliverables/${id}/retry`),
-  deliverableAudit: (id: string) =>
-    request<DeliverableAudit[]>("GET", `/deliverables/${id}/audit`),
+  retryDeliverable: (id: string) => request<Deliverable>("POST", `/deliverables/${id}/retry`),
+  deliverableAudit: (id: string) => request<DeliverableAudit[]>("GET", `/deliverables/${id}/audit`),
 
-  listConnectors: (kind?: string) =>
-    request<Connector[]>("GET", "/connectors", undefined, { kind }),
+  listConnectors: (kind?: string) => request<Connector[]>("GET", "/connectors", undefined, { kind }),
   getConnector: (id: string) => request<Connector>("GET", `/connectors/${id}`),
-  createConnector: (body: {
-    name: string;
-    type: string;
-    is_active?: boolean;
-    config: Record<string, unknown>;
-  }) => request<Connector>("POST", "/connectors", body),
-  updateConnector: (
-    id: string,
-    body: {
-      name?: string;
-      is_active?: boolean;
-      config?: Record<string, unknown>;
-    },
-  ) => request<Connector>("PATCH", `/connectors/${id}`, body),
+  createConnector: (body: { name: string; type: string; is_active?: boolean; config: Record<string, unknown> }) =>
+    request<Connector>("POST", "/connectors", body),
+  updateConnector: (id: string, body: { name?: string; is_active?: boolean; config?: Record<string, unknown> }) =>
+    request<Connector>("PATCH", `/connectors/${id}`, body),
   deleteConnector: (id: string) => request<void>("DELETE", `/connectors/${id}`),
-  testConnector: (id: string) =>
-    request<ConnectorTestResult>("POST", `/connectors/${id}/test`),
-  connectorTools: (id: string) =>
-    request<ConnectorTool[]>("GET", `/connectors/${id}/tools`),
-  connectorAccounts: (id: string) =>
-    request<ConnectorAccount[]>("GET", `/connectors/${id}/accounts`),
-  toolPermissions: (id: string) =>
-    request<{ tools: ToolPermission[] }>(
-      "GET",
-      `/connectors/${id}/tool-permissions`,
-    ),
-  setToolPermissions: (
-    id: string,
-    permissions: Record<string, ToolPermissionValue>,
-  ) =>
-    request<{ permissions: Record<string, ToolPermissionValue> }>(
-      "PUT",
-      `/connectors/${id}/tool-permissions`,
-      {
-        permissions,
-      },
-    ),
-  taskApprovals: (id: string) =>
-    request<ToolApproval[]>("GET", `/tasks/${id}/approvals`),
-  decideApproval: (
-    taskId: string,
-    approvalId: string,
-    decision: "approve" | "reject",
-    note?: string,
-  ) =>
-    request<ToolApproval>("POST", `/tasks/${taskId}/approvals/${approvalId}`, {
-      decision,
-      note,
+  testConnector: (id: string) => request<ConnectorTestResult>("POST", `/connectors/${id}/test`),
+  connectorTools: (id: string) => request<ConnectorTool[]>("GET", `/connectors/${id}/tools`),
+  connectorAccounts: (id: string) => request<ConnectorAccount[]>("GET", `/connectors/${id}/accounts`),
+  toolPermissions: (id: string) => request<{ tools: ToolPermission[] }>("GET", `/connectors/${id}/tool-permissions`),
+  setToolPermissions: (id: string, permissions: Record<string, ToolPermissionValue>) =>
+    request<{ permissions: Record<string, ToolPermissionValue> }>("PUT", `/connectors/${id}/tool-permissions`, {
+      permissions,
     }),
+  taskApprovals: (id: string) => request<ToolApproval[]>("GET", `/tasks/${id}/approvals`),
+  decideApproval: (taskId: string, approvalId: string, decision: "approve" | "reject", note?: string) =>
+    request<ToolApproval>("POST", `/tasks/${taskId}/approvals/${approvalId}`, { decision, note }),
 
   uploadMedia: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
     return request<MediaItem>("POST", "/media", fd);
   },
-  generateMedia: (body: {
-    prompt: string;
-    aspect?: string;
-    connector_id?: string | null;
-  }) => request<MediaItem>("POST", "/media/generate", body),
-  fetchConnector: (id: string) =>
-    request<{ new_items: number }>("POST", `/connectors/${id}/fetch`),
+  generateMedia: (body: { prompt: string; aspect?: string; connector_id?: string | null }) =>
+    request<MediaItem>("POST", "/media/generate", body),
+  fetchConnector: (id: string) => request<{ new_items: number }>("POST", `/connectors/${id}/fetch`),
   connectorItems: (id: string, limit = 50) =>
-    request<SourceItem[]>("GET", `/connectors/${id}/items`, undefined, {
-      limit,
-    }),
+    request<SourceItem[]>("GET", `/connectors/${id}/items`, undefined, { limit }),
 
   listPipelines: () => request<Pipeline[]>("GET", "/pipelines"),
   getPipeline: (id: string) => request<Pipeline>("GET", `/pipelines/${id}`),
-  createPipeline: (body: PipelineInput) =>
-    request<Pipeline>("POST", "/pipelines", body),
-  updatePipeline: (id: string, body: Partial<PipelineInput>) =>
-    request<Pipeline>("PATCH", `/pipelines/${id}`, body),
+  createPipeline: (body: PipelineInput) => request<Pipeline>("POST", "/pipelines", body),
+  updatePipeline: (id: string, body: Partial<PipelineInput>) => request<Pipeline>("PATCH", `/pipelines/${id}`, body),
   deletePipeline: (id: string) => request<void>("DELETE", `/pipelines/${id}`),
-  runPipeline: (id: string) =>
-    request<{ run_id: string }>("POST", `/pipelines/${id}/run`),
+  runPipeline: (id: string) => request<{ run_id: string }>("POST", `/pipelines/${id}/run`),
 
   listRuns: (q: { pipeline_id?: string; limit?: number } = {}) =>
     request<PipelineRun[]>("GET", "/runs", undefined, q),
@@ -357,61 +267,36 @@ export const api = {
 
   listAgents: () => request<Agent[]>("GET", "/agents"),
   getAgent: (id: string) => request<Agent>("GET", `/agents/${id}`),
-  createAgent: (body: Partial<AgentInput>) =>
-    request<Agent>("POST", "/agents", body),
-  updateAgent: (id: string, body: Partial<AgentInput>) =>
-    request<Agent>("PATCH", `/agents/${id}`, body),
+  createAgent: (body: Partial<AgentInput>) => request<Agent>("POST", "/agents", body),
+  updateAgent: (id: string, body: Partial<AgentInput>) => request<Agent>("PATCH", `/agents/${id}`, body),
   deleteAgent: (id: string) => request<void>("DELETE", `/agents/${id}`),
-  agentMemories: (id: string) =>
-    request<AgentMemory[]>("GET", `/agents/${id}/memories`),
+  agentMemories: (id: string) => request<AgentMemory[]>("GET", `/agents/${id}/memories`),
   addAgentMemory: (id: string, content: string) =>
     request<AgentMemory>("POST", `/agents/${id}/memories`, { content }),
   deleteAgentMemory: (id: string, memoryId: string) =>
     request<void>("DELETE", `/agents/${id}/memories/${memoryId}`),
 
-  agentTokens: (id: string) =>
-    request<AgentToken[]>("GET", `/agents/${id}/tokens`),
-  createAgentToken: (id: string, name: string) =>
-    request<NewAgentToken>("POST", `/agents/${id}/tokens`, { name }),
-  revokeAgentToken: (id: string, tokenId: string) =>
-    request<void>("DELETE", `/agents/${id}/tokens/${tokenId}`),
+  agentTokens: (id: string) => request<AgentToken[]>("GET", `/agents/${id}/tokens`),
+  createAgentToken: (id: string, name: string) => request<NewAgentToken>("POST", `/agents/${id}/tokens`, { name }),
+  revokeAgentToken: (id: string, tokenId: string) => request<void>("DELETE", `/agents/${id}/tokens/${tokenId}`),
 
   listRunners: () => request<Runner[]>("GET", "/runners"),
   createRunnerRegistration: (body: { labels: string[]; org_ids?: string[] }) =>
     request<RunnerRegistration>("POST", "/runners/registrations", body),
   updateRunner: (
     id: string,
-    body: Partial<
-      Pick<
-        Runner,
-        "name" | "labels" | "org_ids" | "is_active" | "max_concurrency"
-      >
-    >,
+    body: Partial<Pick<Runner, "name" | "labels" | "org_ids" | "is_active" | "max_concurrency">>,
   ) => request<Runner>("PATCH", `/runners/${id}`, body),
   deleteRunner: (id: string) => request<void>("DELETE", `/runners/${id}`),
-  taskRunnerJobs: (id: string) =>
-    request<RunnerJob[]>("GET", `/tasks/${id}/runner-jobs`),
+  taskRunnerJobs: (id: string) => request<RunnerJob[]>("GET", `/tasks/${id}/runner-jobs`),
 
-  listTasks: (
-    q: {
-      status?: string[];
-      assignee?: string;
-      parent_id?: string;
-      q?: string;
-      all?: boolean;
-    } = {},
-  ) =>
-    request<{ items: Task[] }>("GET", "/tasks", undefined, {
-      ...q,
-      all: q.all ? "1" : undefined,
-    }),
+  listTasks: (q: { status?: string[]; assignee?: string; parent_id?: string; q?: string; all?: boolean } = {}) =>
+    request<{ items: Task[] }>("GET", "/tasks", undefined, { ...q, all: q.all ? "1" : undefined }),
   getTask: (id: string) => request<TaskDetail>("GET", `/tasks/${id}`),
   createTask: (body: TaskCreate) => request<Task>("POST", "/tasks", body),
-  updateTask: (id: string, body: TaskPatch) =>
-    request<Task>("PATCH", `/tasks/${id}`, body),
+  updateTask: (id: string, body: TaskPatch) => request<Task>("PATCH", `/tasks/${id}`, body),
   deleteTask: (id: string) => request<void>("DELETE", `/tasks/${id}`),
-  taskMessages: (id: string) =>
-    request<TaskMessage[]>("GET", `/tasks/${id}/messages`),
+  taskMessages: (id: string) => request<TaskMessage[]>("GET", `/tasks/${id}/messages`),
   postTaskMessage: (id: string, content: string) =>
     request<TaskMessage>("POST", `/tasks/${id}/messages`, { content }),
   runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
@@ -420,19 +305,13 @@ export const api = {
 
   // usage
   usage: (q: { days: number; tz?: string }) =>
-    request<Usage>("GET", "/usage", undefined, {
-      days: String(q.days),
-      tz: q.tz,
-    }),
+    request<Usage>("GET", "/usage", undefined, { days: String(q.days), tz: q.tz }),
 
   listSchedules: () => request<Schedule[]>("GET", "/schedules"),
-  createSchedule: (body: ScheduleInput) =>
-    request<Schedule>("POST", "/schedules", body),
-  updateSchedule: (id: string, body: Partial<ScheduleInput>) =>
-    request<Schedule>("PATCH", `/schedules/${id}`, body),
+  createSchedule: (body: ScheduleInput) => request<Schedule>("POST", "/schedules", body),
+  updateSchedule: (id: string, body: Partial<ScheduleInput>) => request<Schedule>("PATCH", `/schedules/${id}`, body),
   deleteSchedule: (id: string) => request<void>("DELETE", `/schedules/${id}`),
-  runSchedule: (id: string) =>
-    request<{ task_id: string }>("POST", `/schedules/${id}/run`),
+  runSchedule: (id: string) => request<{ task_id: string }>("POST", `/schedules/${id}/run`),
 };
 
 export function errorMessage(e: unknown): string {
