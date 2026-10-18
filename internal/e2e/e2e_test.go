@@ -31,6 +31,7 @@ import (
 	"github.com/j75689/cueflow/internal/content/pipeline"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/db"
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/llm"
@@ -78,17 +79,19 @@ const feed = `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed<
 </channel></rss>`
 
 type env struct {
-	t      *testing.T
-	pool   *pgxpool.Pool
-	store  *store.Store
-	cs     *content.Store
-	runner *pipeline.Runner
-	worker *dispatch.Worker
-	crew   *crew.Crew
-	sched  *scheduler.Scheduler
-	api    *httptest.Server
-	server *api.Server
-	mock   *publishermock.Server
+	t         *testing.T
+	pool      *pgxpool.Pool
+	store     *store.Store
+	cs        *content.Store
+	ds        *deliverable.Store
+	deliverer *deliverable.Worker
+	runner    *pipeline.Runner
+	worker    *dispatch.Worker
+	crew      *crew.Crew
+	sched     *scheduler.Scheduler
+	api       *httptest.Server
+	server    *api.Server
+	mock      *publishermock.Server
 }
 
 func setup(t *testing.T) *env {
@@ -121,6 +124,9 @@ func setup(t *testing.T) *env {
 	module := &content.Module{Store: cs, Hub: h, Broker: broker, Scheduler: sched, Runner: runner, Dispatcher: worker,
 		Logger: logger, PublicURL: "http://localhost:3000"}
 	module.Attach("")
+	ds := deliverable.NewStore(st)
+	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
+	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
 	team := crew.New(st, h, broker, logger, false)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 
@@ -129,11 +135,11 @@ func setup(t *testing.T) *env {
 	t.Cleanup(mockSrv.Close)
 
 	server := &api.Server{Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team, Logger: logger,
-		MCPToken: testMCPToken, Modules: []api.Module{module}}
+		MCPToken: testMCPToken, Modules: []api.Module{module, dmodule}}
 	apiSrv := httptest.NewServer(server.Handler())
 	t.Cleanup(apiSrv.Close)
 
-	e := &env{t: t, pool: pool, store: st, cs: cs, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
+	e := &env{t: t, pool: pool, store: st, cs: cs, ds: ds, deliverer: deliverer, runner: runner, worker: worker, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
 	t.Setenv("PUBLISHER_URL", mockSrv.URL)
 	return e
 }

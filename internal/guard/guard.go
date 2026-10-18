@@ -1,7 +1,7 @@
-// Package guard enforces FR-4.2: the agent may never trigger a publish. Publishing requires a
-// grant that only the dispatch worker attaches, after it has claimed a post that a human approved.
-// Agent runs are additionally marked so a publish attempt from inside an agent context fails even
-// if a grant leaked into it.
+// Package guard enforces FR-4.2: the agent may never trigger a publish, or any other action a
+// human has to approve. Acting requires a grant that only a worker attaches, after it has claimed
+// an item (a post, a deliverable) that a human approved. Agent runs are additionally marked so an
+// attempt from inside an agent context fails even if a grant leaked into it.
 package guard
 
 import (

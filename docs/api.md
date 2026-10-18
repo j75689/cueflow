@@ -71,7 +71,7 @@ and are absent when it is not mounted.
 ```json
 {
   "type": "mcp_publisher",
-  "kind": "publisher",            // publisher | source | search | llm | notifier | runtime
+  "kind": "publisher",            // publisher | source | search | llm | notifier | runtime | image | tools | action
   "name": "MCP publisher",
   "description": "Publishes approved posts through an MCP server that follows the publisher contract",
   "fields": [
@@ -142,6 +142,37 @@ Posts and pipelines of the org; connectors are global.
 `payload_diff` for `EDITED`: `{"content":{"before":"...","after":"..."}, ...}`.
 
 ---
+
+## Deliverables
+
+The general form of "an agent produces something, a human approves it, then the system acts". A deliverable
+has a `kind` (registered by modules; `document`, a Markdown text, is built in), a JSON `payload` the kind
+validates, and a state machine like posts' with `DONE` in place of `PUBLISHED`:
+`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`, `FAILED → QUEUED` on retry. After
+approval the worker hands the item, under a grant, to an **action connector** (kind `action`, e.g. `mcp_action`):
+the item's `action_connector_id`, else the first active one. With no action connector configured an approved
+item is `DONE` at once: the review itself was the point. `/meta` lists `deliverable_kinds`, `deliverable_statuses`
+and `deliverable_transitions`; `/stats` adds `deliverables_by_status`; `GET /tasks/{id}` adds `deliverables`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/deliverables?status=&kind=&task_id=&q=&limit=&offset=` | | `{"items":[Deliverable],"total":n}` |
+| POST | `/deliverables` | `{"kind","title","payload":{...},"task_id"?,"action_connector_id"?,"submit"?}` | `201`; `submit` goes straight to `PENDING_REVIEW` |
+| GET | `/deliverables/{id}` | | |
+| PATCH | `/deliverables/{id}` | `{"version","title"?,"payload"?,"action_connector_id"?}` | Only `DRAFT` / `PENDING_REVIEW`; `409` on a stale version; the diff is audited |
+| DELETE | `/deliverables/{id}` | | `DRAFT` and `REJECTED` only |
+| POST | `/deliverables/{id}/submit` `/approve` `/reject` `/retry` | approve: `{"note"?,"action_connector_id"?}`, reject: `{"reason"?}` | Same rules as posts |
+| GET | `/deliverables/{id}/audit` | | `[{action, actor, from_status, to_status, note, payload_diff, created_at}]` |
+
+```json
+{"id":"uuid","org_id":"uuid","task_id":"uuid|null","kind":"document","title":"Launch plan",
+ "payload":{"content":"# Plan ..."},"status":"DONE","review_note":"","error_message":"",
+ "action_connector_id":"uuid|null","external_ids":{"page":"wiki-1"},"result":{"url":"https://..."},
+ "attempts":1,"version":4,"created_by":"system_agent","acted_at":"...","created_at":"...","updated_at":"..."}
+```
+
+Agents with the `deliverables` capability get `create_deliverable`, `list_deliverables` and `revise_deliverable`;
+nothing they can call acts on an item.
 
 ## Connectors (plugins)
 
@@ -454,6 +485,7 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 | `comment_task` | Operator message in the thread, same rules as `POST /tasks/{id}/messages` (`@slug` hand-off, resumes the agent) |
 | `run_task` / `stop_task` | Same as `POST /tasks/{id}/run` and `/cancel` |
 | `list_drafts` | Posts by status (default `PENDING_REVIEW`), read-only |
+| `list_deliverables` | Deliverables by status and kind (default `PENDING_REVIEW`), read-only |
 
 Every tool except `list_orgs` takes an optional `org` slug (default org when blank); task numbers and agent
 slugs are resolved within it. Tasks created here have `created_by: "human"`. No tool approves, schedules or publishes posts. Mistakes

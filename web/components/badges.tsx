@@ -82,6 +82,7 @@ export function HealthDot({ status }: { status: "ok" | "error" | null }) {
 
 export const KIND_LABEL: Record<string, string> = {
   publisher: "Publishers",
+  action: "Actions",
   source: "Sources",
   search: "Search",
   llm: "LLM providers",
@@ -91,4 +92,4 @@ export const KIND_LABEL: Record<string, string> = {
   tools: "MCP tool servers",
 };
 
-export const KIND_ORDER = ["llm", "runtime", "image", "tools", "source", "search", "publisher", "notifier"];
+export const KIND_ORDER = ["llm", "runtime", "image", "tools", "source", "search", "publisher", "action", "notifier"];

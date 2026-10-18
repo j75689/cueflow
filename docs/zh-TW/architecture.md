@@ -89,6 +89,7 @@ flowchart TB
 | `internal/content` | 內容工作流程模組：貼文狀態機與平台規則、posts/items/pipelines 的查詢、`/posts*`、`/pipelines*`、`/runs*` 端點、寫稿工具、待審摘要；透過 `api.Module` 與 crew 註冊表掛在核心上 |
 | `internal/content/pipeline` | 簡單排程：收集 → 產生（固定兩個工具的 LLM 迴圈）→ 存成待審 → 通知 |
 | `internal/content/dispatch` | 發布 worker：`APPROVED → QUEUED → PUBLISHED / FAILED` |
+| `internal/deliverable` | Deliverables 模組：任何 agent 都能產出的有型別項目（kind 負責驗證 payload）、和貼文相同的審核狀態機與稽核紀錄，以及核准後在 grant 下執行 action connector 的 worker |
 | `internal/scheduler` | cron：產生定時任務，觸發模組登記的 cron 資料列與週期工作（pipeline、待審摘要） |
 | `internal/events` | 供 SSE 即時推播的 pub/sub，透過 PostgreSQL `LISTEN/NOTIFY` 擴散 |
 | `internal/jobs` | 背景工作請求（「跑這個任務」、「觸發這個排程」，加上模組登記的種類）：本機在程序內處理，雲端模式交給 Cloud Tasks（`internal/jobs/cloudtasks`） |

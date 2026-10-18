@@ -9,6 +9,7 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 | 搜尋 | `searxng`（自託管）· `tavily` |
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |
 | 通知 | `smtp`（審核提醒與摘要信） |
+| 動作 | `mcp_action`：把核准的 deliverable 交給你自己 MCP 伺服器上的一個工具（預設 `deliver`，參數 `{id, kind, title, payload, previous}`）；只有 worker 會呼叫 |
 | Agent 工具 | `mcp_server`：任何 MCP server（HTTP 或 stdio），每個工具可設為允許、詢問（每次呼叫由你核准）或禁止 |
 | 圖片生成 | `openai_image`（OpenAI / Azure / 相容服務）· `gemini_image`（AI Studio key）· `vertex_image`（Vertex AI，ADC）· `comfyui`（自架） |
 | Runtime | `acp_agent`（在 CueFlow 主機上跑外部 agent）· `runner_pool`（在 [Runner](external-agents.md#在自己的機器上跑-agentrunner) 上跑外部 agent）· `external`（自主驅動的 agent） |
