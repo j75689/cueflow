@@ -52,13 +52,14 @@ export function Shell({ children }: { children: ReactNode }) {
           key={n.href}
           href={n.href}
           className={cx(
-            "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+            "relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium transition-colors",
             active
-              ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
-              : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100",
+              ? "bg-accent-soft text-accent before:absolute before:inset-y-1.5 before:-left-2 before:w-[3px] before:rounded-r before:bg-accent-solid"
+              : "text-fg-2 hover:bg-subtle hover:text-fg",
           )}
+          aria-current={active ? "page" : undefined}
         >
-          <Icon name={n.icon} className="h-4 w-4" />
+          <Icon name={n.icon} className={cx("h-4 w-4", active ? "text-accent" : "text-fg-3")} />
           {n.label}
         </Link>
       );
@@ -68,15 +69,15 @@ export function Shell({ children }: { children: ReactNode }) {
     <>
       <OrgSwitcher />
       <nav className="flex flex-col gap-0.5 p-2">{links(ORG_NAV)}</nav>
-      <nav className="flex flex-col gap-0.5 border-t border-zinc-200 p-2 dark:border-zinc-800" aria-label="Shared">
-        <span className="px-2.5 pt-1 pb-1 text-[11px] font-medium tracking-wide text-zinc-400 uppercase">Shared</span>
+      <nav className="flex flex-col gap-0.5 border-t border-line p-2" aria-label="Shared">
+        <span className="px-2.5 pt-1.5 pb-1 text-[10.5px] font-semibold tracking-wider text-fg-3 uppercase">Shared</span>
         {links(GLOBAL_NAV)}
       </nav>
     </>
   );
 
   const footer = (
-    <div className="mt-auto space-y-2 border-t border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+    <div className="mt-auto space-y-2 border-t border-line p-3 text-xs text-fg-3">
       <div className="flex items-center gap-2">
         <span className={cx("h-2 w-2 rounded-full", connected ? "bg-emerald-500" : "bg-zinc-400")} />
         {connected ? "Live updates" : "Reconnecting…"}
@@ -84,7 +85,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="flex items-center justify-between">
         <span>v{meta?.version ?? "…"}</span>
         <button
-          className="inline-flex items-center gap-1 hover:text-zinc-800 dark:hover:text-zinc-200"
+          className="inline-flex items-center gap-1 hover:text-fg"
           onClick={() => {
             setToken("");
             window.location.reload();
@@ -99,19 +100,19 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const brand = (
     <Link href="/" className="flex items-center gap-2 px-4 py-4">
-      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 text-white">
+      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-card inset-ring inset-ring-white/20">
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">
           <path d="M6 8h7M6 12h12M6 16h5" />
         </svg>
       </span>
-      <span className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">CueFlow</span>
+      <span className="text-[15px] font-semibold tracking-tight text-fg">CueFlow</span>
     </Link>
   );
 
   return (
     <div className="flex min-h-screen">
       {/* desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-zinc-200 bg-white md:flex dark:border-zinc-800 dark:bg-zinc-900">
+      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-line bg-surface md:flex">
         {brand}
         {nav}
         {footer}
@@ -122,7 +123,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-zinc-950/40" />
           <aside
-            className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-line bg-surface"
             onClick={(e) => e.stopPropagation()}
           >
             {brand}
@@ -133,19 +134,19 @@ export function Shell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-zinc-200 bg-white/90 px-4 py-2.5 backdrop-blur md:hidden dark:border-zinc-800 dark:bg-zinc-900/90">
+        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-line bg-surface/90 px-4 py-2.5 backdrop-blur md:hidden">
           <button
             onClick={() => setOpen(true)}
-            className="rounded p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded p-1.5 text-fg-2 hover:bg-subtle"
             aria-label="Open navigation"
           >
             <Icon name="menu" className="h-5 w-5" />
           </button>
           <span className="text-sm font-semibold">CueFlow</span>
-          {org && <span className="truncate text-sm text-zinc-500">· {org.name}</span>}
+          {org && <span className="truncate text-sm text-fg-3">· {org.name}</span>}
         </header>
         {/* Re-mount the page when the org changes so it refetches for the new org. */}
-        <main key={org?.id ?? ""} className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 sm:px-6 lg:px-8">
+        <main key={org?.id ?? ""} className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8">
           {ready ? children : <Loading />}
         </main>
       </div>

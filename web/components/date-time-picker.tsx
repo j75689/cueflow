@@ -194,13 +194,13 @@ export function DateTimePicker({
           inputBase,
           "flex h-9 items-center gap-2 text-left disabled:cursor-not-allowed",
           current && !disabled && "pr-8",
-          open && "border-indigo-500 ring-2 ring-indigo-500/20",
+          open && "border-indigo-500 ring-2 ring-accent-solid/20",
         )}
       >
-        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-4 w-4 shrink-0 text-zinc-400">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-4 w-4 shrink-0 text-fg-4">
           <path fillRule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75Z" clipRule="evenodd" />
         </svg>
-        <span className={cx("min-w-0 flex-1 truncate tabular-nums", !display && "text-zinc-400 dark:text-zinc-600")}>
+        <span className={cx("min-w-0 flex-1 truncate tabular-nums", !display && "text-fg-4")}>
           {display || placeholder || (dateOnly ? "Pick a date" : "Pick a date and time")}
         </span>
       </button>
@@ -209,7 +209,7 @@ export function DateTimePicker({
           type="button"
           aria-label="Clear"
           onClick={() => onChange("")}
-          className="absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          className="absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-fg-4 hover:bg-subtle hover:text-fg-2"
         >
           <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-3.5 w-3.5">
             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -231,23 +231,23 @@ export function DateTimePicker({
                 type="button"
                 aria-label="Previous month"
                 onClick={() => setFocus(addMonths(focus, -1))}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-fg-3 hover:bg-subtle hover:text-fg"
               >
                 ‹
               </button>
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100" aria-live="polite">
+              <div className="text-sm font-semibold text-fg" aria-live="polite">
                 {MONTHS[focus.getMonth()]} {focus.getFullYear()}
               </div>
               <button
                 type="button"
                 aria-label="Next month"
                 onClick={() => setFocus(addMonths(focus, 1))}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-fg-3 hover:bg-subtle hover:text-fg"
               >
                 ›
               </button>
             </div>
-            <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] font-medium text-zinc-400" aria-hidden>
+            <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] font-medium text-fg-4" aria-hidden>
               {WEEKDAYS.map((w) => (
                 <div key={w} className="py-1">
                   {w}
@@ -272,11 +272,11 @@ export function DateTimePicker({
                     className={cx(
                       "h-8 rounded-md text-sm tabular-nums transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                       isSel
-                        ? "bg-indigo-600 font-semibold text-white hover:bg-indigo-500 dark:bg-indigo-500"
+                        ? "bg-accent-solid font-semibold text-white hover:bg-indigo-500"
                         : inMonth
-                          ? "text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                          : "text-zinc-300 hover:bg-zinc-100 dark:text-zinc-600 dark:hover:bg-zinc-800",
-                      isToday && !isSel && "font-semibold text-indigo-600 ring-1 ring-indigo-200 ring-inset dark:text-indigo-400 dark:ring-indigo-500/40",
+                          ? "text-fg hover:bg-subtle"
+                          : "text-fg-4 hover:bg-subtle",
+                      isToday && !isSel && "font-semibold text-accent ring-1 ring-accent-line ring-inset",
                     )}
                   >
                     {d.getDate()}
@@ -285,8 +285,8 @@ export function DateTimePicker({
               })}
             </div>
             {!dateOnly && (
-              <div className="mt-3 flex items-center gap-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <span className="mr-1 text-xs font-medium text-zinc-500">Time</span>
+              <div className="mt-3 flex items-center gap-1.5 border-t border-line pt-3">
+                <span className="mr-1 text-xs font-medium text-fg-3">Time</span>
                 <Select
                   aria-label="Hour"
                   className="h-8 w-[4.5rem] py-1"
@@ -301,7 +301,7 @@ export function DateTimePicker({
                     </option>
                   ))}
                 </Select>
-                <span className="text-zinc-400">:</span>
+                <span className="text-fg-4">:</span>
                 <Select
                   aria-label="Minute"
                   className="h-8 w-[4.5rem] py-1"
@@ -328,7 +328,7 @@ export function DateTimePicker({
                     }
                   }}
                   placeholder="HH:MM"
-                  className="ml-auto h-8 w-[4.5rem] rounded-md border border-zinc-200 bg-zinc-50 px-2 text-center text-sm tabular-nums text-zinc-900 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  className="ml-auto h-8 w-[4.5rem] rounded-md border border-line bg-canvas px-2 text-center text-sm tabular-nums text-fg focus:border-indigo-500 focus:outline-none"
                 />
               </div>
             )}
@@ -336,7 +336,7 @@ export function DateTimePicker({
               <button
                 type="button"
                 onClick={() => commit(null)}
-                className="rounded-md px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="rounded-md px-2 py-1 text-xs font-medium text-fg-3 hover:bg-subtle hover:text-fg"
               >
                 Clear
               </button>
@@ -347,14 +347,14 @@ export function DateTimePicker({
                   const base = draft ?? new Date(n.getFullYear(), n.getMonth(), n.getDate(), 9, 0);
                   pickDay(new Date(n.getFullYear(), n.getMonth(), n.getDate(), base.getHours(), base.getMinutes()));
                 }}
-                className="rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-500/10"
+                className="rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-accent-soft"
               >
                 Today
               </button>
               <button
                 type="button"
                 onClick={() => commit(draft)}
-                className="ml-auto rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                className="ml-auto rounded-md bg-accent-solid px-3 py-1 text-xs font-medium text-white hover:bg-accent-solid-hover"
               >
                 Done
               </button>

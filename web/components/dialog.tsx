@@ -114,7 +114,7 @@ function DialogView({ req, onDone }: { req: Request; onDone: () => void }) {
   const message = opts.message ? (
     <div
       id={msgId}
-      className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400"
+      className="text-sm leading-relaxed text-fg-2"
     >
       {opts.message}
     </div>
@@ -189,7 +189,7 @@ function DialogView({ req, onDone }: { req: Request; onDone: () => void }) {
             )}
           </Field>
           {req.opts.multiline && (
-            <p className="text-[11px] text-zinc-400">
+            <p className="text-[11px] text-fg-4">
               ⌘/Ctrl + Enter to submit
             </p>
           )}

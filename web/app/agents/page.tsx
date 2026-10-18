@@ -109,31 +109,31 @@ export default function AgentsPage() {
                   <div className="min-w-0 flex-1">
                     <Link
                       href={`/agents/edit/?id=${a.id}`}
-                      className="block truncate text-base font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
+                      className="block truncate text-base font-semibold text-fg hover:underline"
                     >
                       {a.name}
                     </Link>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-fg-3">
                       <span className="font-mono">@{a.slug}</span> · {ROLE_LABEL[a.role] ?? a.role}
                     </p>
                   </div>
                   <Toggle checked={a.is_active} onChange={(v) => void toggle(a, v)} />
                 </div>
-                <p className="mt-3 line-clamp-3 min-h-[3.75rem] text-sm text-zinc-600 dark:text-zinc-400">
-                  {a.description || <span className="italic text-zinc-400">No description</span>}
+                <p className="mt-3 line-clamp-3 min-h-[3.75rem] text-sm text-fg-2">
+                  {a.description || <span className="italic text-fg-4">No description</span>}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-1">
                   {a.capabilities.map((c) => (
-                    <Pill key={c} className="bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">
+                    <Pill key={c} className="bg-accent-soft text-accent">
                       {capName(c)}
                     </Pill>
                   ))}
                 </div>
-                <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-zinc-500">
+                <div className="mt-auto flex items-center justify-between gap-2 pt-4 text-xs text-fg-3">
                   <span>
                     {a.stats?.open_tasks ?? 0} open
                     {(a.stats?.running ?? 0) > 0 && (
-                      <span className="ml-2 inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+                      <span className="ml-2 inline-flex items-center gap-1 text-accent">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />
                         {a.stats!.running} running
                       </span>
@@ -234,7 +234,7 @@ function ImportTeamModal({
   return (
     <Modal open={open} onClose={close} title="Import a team">
       <div className="space-y-4">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-fg-2">
           A team template is a JSON file (name, roles, capabilities, instructions), like a dashboard you import. Roles
           whose slug this org already has are skipped; everything it creates is editable afterwards. An example lives
           in the repository under <span className="font-mono text-xs">templates/</span>.
@@ -245,9 +245,9 @@ function ImportTeamModal({
             accept="application/json,.json"
             onChange={(e) => pick(e.target.files?.[0])}
             className={cx(
-              "block w-full text-sm text-zinc-600 dark:text-zinc-400",
-              "file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium",
-              "file:text-zinc-900 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-100 dark:hover:file:bg-zinc-700",
+              "block w-full text-sm text-fg-2",
+              "file:mr-3 file:rounded-md file:border-0 file:bg-subtle file:px-3 file:py-1.5 file:text-sm file:font-medium",
+              "file:text-fg file:bg-subtle hover:file:bg-muted",
             )}
           />
         </Field>
@@ -262,9 +262,9 @@ function ImportTeamModal({
         </Field>
         {problem && <p className="text-sm text-red-600 dark:text-red-400">{problem}</p>}
         {team && (
-          <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-            <div className="font-medium text-zinc-900 dark:text-zinc-100">{team.name}</div>
-            {team.description && <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{team.description}</p>}
+          <div className="rounded-lg border border-line p-3">
+            <div className="font-medium text-fg">{team.name}</div>
+            {team.description && <p className="mt-0.5 text-sm text-fg-2">{team.description}</p>}
             <ul className="mt-3 space-y-1.5">
               {team.agents.map((a, i) => {
                 const present = !!a.slug && have.has(a.slug.toLowerCase());
@@ -272,13 +272,13 @@ function ImportTeamModal({
                   <li key={`${a.slug}-${i}`} className="flex items-start gap-2 text-sm">
                     <span className="w-6 shrink-0 text-center">{a.avatar ?? "🤖"}</span>
                     <span className="min-w-0 flex-1">
-                      <span className={present ? "text-zinc-400 line-through" : "text-zinc-900 dark:text-zinc-100"}>
+                      <span className={present ? "text-fg-4 line-through" : "text-fg"}>
                         {a.name}
                       </span>
-                      <span className="ml-2 font-mono text-xs text-zinc-500">@{a.slug}</span>
-                      {a.role && <span className="ml-2 text-xs text-zinc-500">{ROLE_LABEL[a.role] ?? a.role}</span>}
-                      {present && <span className="ml-2 text-xs text-zinc-500">already here</span>}
-                      {a.description && <span className="block text-xs text-zinc-500">{a.description}</span>}
+                      <span className="ml-2 font-mono text-xs text-fg-3">@{a.slug}</span>
+                      {a.role && <span className="ml-2 text-xs text-fg-3">{ROLE_LABEL[a.role] ?? a.role}</span>}
+                      {present && <span className="ml-2 text-xs text-fg-3">already here</span>}
+                      {a.description && <span className="block text-xs text-fg-3">{a.description}</span>}
                     </span>
                   </li>
                 );

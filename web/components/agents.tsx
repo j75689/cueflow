@@ -21,14 +21,14 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const TASK_STATUS_STYLE: Record<TaskStatus, { pill: string; dot: string }> = {
-  BACKLOG: { pill: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300", dot: "bg-zinc-400" },
-  TODO: { pill: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300", dot: "bg-sky-500" },
-  IN_PROGRESS: { pill: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300", dot: "bg-indigo-500" },
-  BLOCKED: { pill: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300", dot: "bg-violet-500" },
-  WAITING_HUMAN: { pill: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300", dot: "bg-amber-500" },
-  REVIEW: { pill: "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300", dot: "bg-teal-500" },
-  DONE: { pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300", dot: "bg-emerald-500" },
-  CANCELED: { pill: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500", dot: "bg-zinc-400" },
+  BACKLOG: { pill: "bg-subtle text-fg-2", dot: "bg-fg-4" },
+  TODO: { pill: "bg-sky-500/10 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300", dot: "bg-sky-500" },
+  IN_PROGRESS: { pill: "bg-indigo-500/10 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300", dot: "bg-indigo-500" },
+  BLOCKED: { pill: "bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300", dot: "bg-violet-500" },
+  WAITING_HUMAN: { pill: "bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300", dot: "bg-amber-500" },
+  REVIEW: { pill: "bg-teal-500/10 text-teal-700 dark:bg-teal-400/10 dark:text-teal-300", dot: "bg-teal-500" },
+  DONE: { pill: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300", dot: "bg-emerald-500" },
+  CANCELED: { pill: "bg-subtle text-fg-3", dot: "bg-fg-4" },
 };
 
 export const ALL_TASK_STATUSES: TaskStatus[] = [
@@ -57,7 +57,7 @@ export function TaskStatusBadge({ status, running }: { status: TaskStatus; runni
 export const PRIORITIES: TaskPriority[] = ["low", "normal", "high", "urgent"];
 
 const PRIORITY_DOT: Record<TaskPriority, string> = {
-  low: "bg-zinc-300 dark:bg-zinc-600",
+  low: "bg-line-strong",
   normal: "bg-sky-400",
   high: "bg-orange-500",
   urgent: "bg-red-600",
@@ -65,7 +65,7 @@ const PRIORITY_DOT: Record<TaskPriority, string> = {
 
 export function PriorityDot({ priority, withLabel }: { priority: TaskPriority; withLabel?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500" title={`Priority: ${priority}`}>
+    <span className="inline-flex items-center gap-1 text-[11px] text-fg-3" title={`Priority: ${priority}`}>
       <span className={cx("h-2 w-2 rounded-full", PRIORITY_DOT[priority] ?? PRIORITY_DOT.normal)} />
       {withLabel && priority}
     </span>
@@ -96,7 +96,7 @@ export function AgentAvatar({
     return (
       <span
         className={cx(
-          "inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-300 text-zinc-400 dark:border-zinc-600",
+          "inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-fg-4",
           dims,
           className,
         )}
@@ -110,7 +110,8 @@ export function AgentAvatar({
   return (
     <span
       className={cx(
-        "inline-flex shrink-0 items-center justify-center rounded-full bg-indigo-50 font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/20",
+        "inline-flex shrink-0 items-center justify-center rounded-full font-semibold ring-1",
+        isEmoji ? "bg-subtle ring-line" : "bg-accent-soft text-accent ring-accent-line",
         dims,
         className,
       )}
@@ -263,7 +264,7 @@ export function NewTaskModal({
           </Field>
         </div>
         {assignee && !defaultStatus && (
-          <p className="text-xs text-zinc-500">The agent picks this up right away.</p>
+          <p className="text-xs text-fg-3">The agent picks this up right away.</p>
         )}
       </form>
     </Modal>

@@ -53,7 +53,7 @@ function ToastHost({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: number)
             t.kind === "error" &&
               "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
             t.kind === "info" &&
-              "border-zinc-200 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+              "border-line bg-surface text-fg",
           )}
         >
           {t.text}
@@ -312,7 +312,7 @@ export function Providers({ children }: { children: ReactNode }) {
               }}
               className="space-y-3"
             >
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              <p className="text-sm text-fg-2">
                 This CueFlow server is protected by <code className="font-mono text-xs">CUEFLOW_ADMIN_TOKEN</code>.
                 Paste it below; it is stored only in this browser.
               </p>

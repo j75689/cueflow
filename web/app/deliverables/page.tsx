@@ -111,7 +111,7 @@ export default function DeliverablesPage() {
         subtitle="Documents and other items agents produce wait here for a human decision; approved items are handed to the action connector."
         actions={
           <>
-            <div className="inline-flex rounded-md border border-zinc-300 p-0.5 dark:border-zinc-700">
+            <div className="inline-flex rounded-md border border-line-strong p-0.5">
               {(["inbox", "all"] as Scope[]).map((v) => (
                 <button
                   key={v}
@@ -119,8 +119,8 @@ export default function DeliverablesPage() {
                   className={cx(
                     "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium",
                     scope === v
-                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                      : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
+                      ? "bg-inverse text-on-inverse"
+                      : "text-fg-2 hover:text-fg",
                   )}
                 >
                   {v === "inbox" ? "Pending" : "All"}
@@ -140,13 +140,13 @@ export default function DeliverablesPage() {
         {STRIP.map((s) => (
           <div
             key={s}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900"
+            className="rounded-lg border border-line bg-surface px-3 py-2"
           >
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-fg-3">
               <span className={cx("h-1.5 w-1.5 rounded-full", STATUS_STYLE[s].dot)} />
               {STATUS_LABEL[s]}
             </div>
-            <div className="mt-0.5 text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+            <div className="mt-0.5 text-lg font-semibold tabular-nums text-fg">
               {stats.data ? (counts[s] ?? 0) : "–"}
             </div>
           </div>
@@ -177,7 +177,7 @@ export default function DeliverablesPage() {
       {items.data && (
         <div className="space-y-2.5">
           {items.data.items.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700">
+            <div className="rounded-lg border border-dashed border-line-strong">
               <EmptyState
                 title={scope === "inbox" ? "Nothing to review" : "No deliverables yet"}
                 hint="Agents with the Deliverables capability file documents here; you can also write one yourself."
@@ -192,18 +192,18 @@ export default function DeliverablesPage() {
             items.data.items.map((d) => (
               <article
                 key={d.id}
-                className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+                className="rounded-xl border border-line bg-surface p-4 shadow-card transition-colors hover:border-line-strong"
               >
                 <div className="flex flex-wrap items-start gap-2">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 basis-full sm:basis-0">
                     <Link
                       href={`/deliverables/view/?id=${d.id}`}
-                      className="line-clamp-1 text-sm font-semibold text-zinc-900 hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
+                      className="line-clamp-1 text-sm font-semibold text-fg hover:text-accent"
                     >
-                      {d.title || <span className="text-zinc-400">Untitled</span>}
+                      {d.title || <span className="text-fg-4">Untitled</span>}
                     </Link>
-                    <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">{excerpt(d)}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                    <p className="mt-1 line-clamp-2 text-sm text-fg-2">{excerpt(d)}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">
                       <Pill>{kindName[d.kind] ?? d.kind}</Pill>
                       <span className="font-mono">#{shortId(d.id)}</span>
                       <span>{d.created_by === "system_agent" ? "by an agent" : "by a person"}</span>
@@ -229,7 +229,7 @@ export default function DeliverablesPage() {
             ))
           )}
           {items.data.total > items.data.items.length && (
-            <p className="text-center text-xs text-zinc-500">
+            <p className="text-center text-xs text-fg-3">
               Showing {items.data.items.length} of {items.data.total}
             </p>
           )}

@@ -102,12 +102,12 @@ export default function CommandPage() {
               }}
               rows={4}
               placeholder="Tell your agents what to do…"
-              className="w-full resize-y border-0 bg-transparent p-0 text-[15px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-0 dark:text-zinc-100"
+              className="w-full resize-y border-0 bg-transparent p-0 text-[15px] leading-relaxed text-fg placeholder:text-fg-4 focus:outline-none focus:ring-0"
             />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/40">
-          <span className="text-xs text-zinc-500">To</span>
+        <div className="flex flex-wrap items-center gap-2 border-t border-line bg-sunken px-4 py-2.5">
+          <span className="text-xs text-fg-3">To</span>
           <AgentSelect
             agents={active}
             value={agentId}
@@ -127,7 +127,7 @@ export default function CommandPage() {
               </option>
             ))}
           </Select>
-          <span className="ml-auto hidden text-[11px] text-zinc-400 sm:inline">⌘/Ctrl + Enter</span>
+          <span className="ml-auto hidden text-[11px] text-fg-4 sm:inline">⌘/Ctrl + Enter</span>
           <Button variant="primary" loading={busy} disabled={!prompt.trim() || !agentId} onClick={submit}>
             <Icon name="send" className="h-4 w-4" /> Send
           </Button>
@@ -154,7 +154,7 @@ export default function CommandPage() {
               setPrompt(ex);
               ref.current?.focus();
             }}
-            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-indigo-500/50 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-200"
+            className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-fg-2 transition-colors hover:border-accent-line hover:bg-accent-soft hover:text-accent"
           >
             {ex}
           </button>
@@ -165,7 +165,7 @@ export default function CommandPage() {
         <CardHeader
           title="Recent conversations"
           actions={
-            <Link href="/board/" className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+            <Link href="/board/" className="text-xs font-medium text-accent hover:underline">
               Open board →
             </Link>
           }
@@ -179,23 +179,23 @@ export default function CommandPage() {
         ) : conversations.length === 0 ? (
           <EmptyState title="No conversations yet" hint="Send your first instruction above." />
         ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line">
             {conversations.map((t) => (
               <li key={t.id}>
                 <Link
                   href={`/tasks/view/?id=${t.id}`}
                   className={cx(
-                    "flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/40",
+                    "flex items-center gap-3 px-4 py-2.5 hover:bg-subtle",
                     t.status === "WAITING_HUMAN" && "bg-amber-50/60 dark:bg-amber-950/20",
                   )}
                 >
                   <AgentAvatar agent={t.assignee} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-zinc-900 dark:text-zinc-100">
-                      <span className="mr-1.5 text-zinc-400">#{t.number}</span>
+                    <p className="truncate text-sm text-fg">
+                      <span className="mr-1.5 text-fg-4">#{t.number}</span>
                       {t.title}
                     </p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-fg-3">
                       {t.assignee?.name ?? "Unassigned"} · {fmtRelative(t.updated_at)}
                     </p>
                   </div>

@@ -113,19 +113,19 @@ export function ThreadsPreview({ parts, platform }: { parts: string[]; platform?
           <div key={i} className="flex gap-3">
             <div className="flex flex-col items-center">
               <Avatar />
-              {i < parts.length - 1 && <span className="my-1 w-0.5 flex-1 bg-zinc-200 dark:bg-zinc-700" />}
+              {i < parts.length - 1 && <span className="my-1 w-0.5 flex-1 bg-muted" />}
             </div>
             <div className="min-w-0 flex-1 pb-4">
               <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-zinc-900 dark:text-zinc-100">cueflow</span>
-                <span className="text-zinc-400">
+                <span className="font-semibold text-fg">cueflow</span>
+                <span className="text-fg-4">
                   {i + 1}/{parts.length}
                 </span>
-                <span className={cx("ml-auto tabular-nums", n > max ? "text-red-600" : "text-zinc-400")}>
+                <span className={cx("ml-auto tabular-nums", n > max ? "text-red-600" : "text-fg-4")}>
                   {n}/{max}
                 </span>
               </div>
-              <p className="mt-0.5 text-sm break-words whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+              <p className="mt-0.5 text-sm break-words whitespace-pre-wrap text-fg">
                 {p || " "}
               </p>
             </div>
@@ -151,14 +151,14 @@ export function InstagramPreview({
   const n = charCount(full);
   const max = platform?.max_chars ?? 2200;
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+    <div className="overflow-hidden rounded-lg border border-line">
       <div className="flex items-center gap-2 px-3 py-2">
         <Avatar />
         <span className="text-xs font-semibold">cueflow</span>
       </div>
       <div
         className={cx(
-          "flex items-center justify-center bg-zinc-100 dark:bg-zinc-800",
+          "flex items-center justify-center bg-subtle",
           media[0] && isVideoURL(media[0]) ? "aspect-[9/16]" : "aspect-square",
         )}
       >
@@ -168,22 +168,22 @@ export function InstagramPreview({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={media[0]} alt="" className="h-full w-full object-cover" />
         ) : (
-          <span className="px-6 text-center text-xs text-zinc-400">
+          <span className="px-6 text-center text-xs text-fg-4">
             No media yet{platform?.requires_media ? " — Instagram requires an image" : ""}
           </span>
         )}
       </div>
       <div className="px-3 py-2.5">
-        <p className="text-sm break-words whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+        <p className="text-sm break-words whitespace-pre-wrap text-fg">
           <span className="mr-1 font-semibold">cueflow</span>
           {caption}
         </p>
         {hashtags.length > 0 && (
-          <p className="mt-2 text-sm break-words text-indigo-700 dark:text-indigo-400">
+          <p className="mt-2 text-sm break-words text-accent">
             {hashtags.map((h) => `#${h}`).join(" ")}
           </p>
         )}
-        <p className={cx("mt-2 text-right text-[11px] tabular-nums", n > max ? "text-red-600" : "text-zinc-400")}>
+        <p className={cx("mt-2 text-right text-[11px] tabular-nums", n > max ? "text-red-600" : "text-fg-4")}>
           {n}/{max}
         </p>
       </div>
@@ -223,38 +223,38 @@ export type AuditEntry = Pick<
 >;
 
 export function AuditTimeline({ logs }: { logs: AuditEntry[] }) {
-  if (!logs.length) return <p className="px-4 py-6 text-sm text-zinc-500">No history yet.</p>;
+  if (!logs.length) return <p className="px-4 py-6 text-sm text-fg-3">No history yet.</p>;
   return (
     <ol className="relative space-y-4 px-4 py-4">
       {logs.map((l, i) => (
         <li key={l.id} className="relative flex gap-3">
           <div className="flex flex-col items-center">
             <span className={cx("mt-1 h-2.5 w-2.5 rounded-full", ACTION_COLOR[l.action] ?? "bg-zinc-400")} />
-            {i < logs.length - 1 && <span className="mt-1 w-px flex-1 bg-zinc-200 dark:bg-zinc-800" />}
+            {i < logs.length - 1 && <span className="mt-1 w-px flex-1 bg-muted" />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">{l.action}</span>
-              <span className="text-zinc-500">by {l.actor}</span>
+              <span className="font-semibold text-fg">{l.action}</span>
+              <span className="text-fg-3">by {l.actor}</span>
               {l.from_status && l.to_status && l.from_status !== l.to_status && (
-                <span className="font-mono text-[11px] text-zinc-400">
+                <span className="font-mono text-[11px] text-fg-4">
                   {l.from_status} → {l.to_status}
                 </span>
               )}
-              <span className="ml-auto text-zinc-400" title={fmtTime(l.created_at)}>
+              <span className="ml-auto text-fg-4" title={fmtTime(l.created_at)}>
                 {fmtRelative(l.created_at)}
               </span>
             </div>
-            {l.note && <p className="mt-1 text-xs whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">{l.note}</p>}
+            {l.note && <p className="mt-1 text-xs whitespace-pre-wrap text-fg-2">{l.note}</p>}
             {l.payload_diff && Object.keys(l.payload_diff).length > 0 && (
               <details className="mt-1.5">
-                <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                <summary className="cursor-pointer text-xs text-fg-3 hover:text-fg-2">
                   Changed: {Object.keys(l.payload_diff).join(", ")}
                 </summary>
                 <div className="mt-1.5 space-y-2">
                   {Object.entries(l.payload_diff).map(([field, d]) => (
                     <div key={field} className="text-xs">
-                      <div className="mb-0.5 font-mono text-[11px] text-zinc-500">{field}</div>
+                      <div className="mb-0.5 font-mono text-[11px] text-fg-3">{field}</div>
                       <pre className="overflow-x-auto rounded bg-red-50 px-2 py-1 whitespace-pre-wrap text-red-800 line-through decoration-red-300 dark:bg-red-950/40 dark:text-red-300">
                         {show(d?.before)}
                       </pre>

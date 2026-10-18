@@ -3,6 +3,6 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
 }
 
 export const inputBase =
-  "w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 " +
-  "focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-zinc-100 disabled:text-zinc-500 " +
-  "dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:disabled:bg-zinc-900";
+  "w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-fg shadow-card placeholder:text-fg-4 " +
+  "transition-[border-color,box-shadow] hover:border-fg-4 focus:border-accent-solid focus:outline-none " +
+  "focus:ring-3 focus:ring-accent-solid/20 disabled:bg-subtle disabled:text-fg-3 disabled:shadow-none";

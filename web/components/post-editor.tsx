@@ -183,7 +183,7 @@ export function PostEditor({
                 <span
                   className={cx(
                     "tabular-nums",
-                    contentCount > contentLimit && !usingThread ? "text-red-600" : "text-zinc-400",
+                    contentCount > contentLimit && !usingThread ? "text-red-600" : "text-fg-4",
                   )}
                 >
                   {contentCount}/{contentLimit}
@@ -206,9 +206,9 @@ export function PostEditor({
 
           <div>
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              <span className="text-xs font-medium text-fg-2">
                 Thread parts{" "}
-                <span className="font-normal text-zinc-500">
+                <span className="font-normal text-fg-3">
                   ({draft.thread_parts.length || "none"} · limit {partLimit} per part)
                 </span>
               </span>
@@ -240,11 +240,11 @@ export function PostEditor({
                 return (
                   <div key={i} className="flex gap-2">
                     <div className="flex w-7 shrink-0 flex-col items-center gap-0.5 pt-1.5">
-                      <span className="text-xs font-semibold text-zinc-500 tabular-nums">{i + 1}</span>
+                      <span className="text-xs font-semibold text-fg-3 tabular-nums">{i + 1}</span>
                       {!readOnly && (
                         <>
                           <button
-                            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30 dark:hover:bg-zinc-800"
+                            className="rounded p-0.5 text-fg-4 hover:bg-subtle hover:text-fg-2 disabled:opacity-30"
                             disabled={i === 0}
                             onClick={() => movePart(i, -1)}
                             aria-label="Move up"
@@ -252,7 +252,7 @@ export function PostEditor({
                             <Icon name="up" className="h-3.5 w-3.5" />
                           </button>
                           <button
-                            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30 dark:hover:bg-zinc-800"
+                            className="rounded p-0.5 text-fg-4 hover:bg-subtle hover:text-fg-2 disabled:opacity-30"
                             disabled={i === draft.thread_parts.length - 1}
                             onClick={() => movePart(i, 1)}
                             aria-label="Move down"
@@ -278,7 +278,7 @@ export function PostEditor({
                       <div className="mt-0.5 flex justify-between text-[11px]">
                         {!readOnly ? (
                           <button
-                            className="text-zinc-400 hover:text-red-600"
+                            className="text-fg-4 hover:text-red-600"
                             onClick={() =>
                               set(
                                 "thread_parts",
@@ -291,7 +291,7 @@ export function PostEditor({
                         ) : (
                           <span />
                         )}
-                        <span className={cx("tabular-nums", n > partLimit ? "text-red-600" : "text-zinc-400")}>
+                        <span className={cx("tabular-nums", n > partLimit ? "text-red-600" : "text-fg-4")}>
                           {n}/{partLimit}
                         </span>
                       </div>
@@ -367,14 +367,14 @@ export function PostEditor({
                           muted
                           playsInline
                           preload="metadata"
-                          className="h-20 w-[45px] rounded-md border border-zinc-200 bg-black object-cover dark:border-zinc-800"
+                          className="h-20 w-[45px] rounded-md border border-line bg-black object-cover"
                         />
                       ) : (
                         /* eslint-disable-next-line @next/next/no-img-element */
                         <img
                           src={u}
                           alt=""
-                          className="h-20 w-20 rounded-md border border-zinc-200 bg-zinc-100 object-cover dark:border-zinc-800 dark:bg-zinc-800"
+                          className="h-20 w-20 rounded-md border border-line bg-subtle object-cover"
                           onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0.3")}
                         />
                       )}
@@ -531,7 +531,7 @@ function MediaActions({ draft, onAdd }: { draft: PostDraft; onAdd: (url: string)
               ))}
             </Select>
           </Field>
-          {generating && <p className="text-xs text-zinc-500">Generating… this can take up to a minute.</p>}
+          {generating && <p className="text-xs text-fg-3">Generating… this can take up to a minute.</p>}
         </div>
       </Modal>
     </div>
@@ -581,7 +581,7 @@ export function AccountPicker({
       }
     >
       {accounts.loading && !accounts.data ? (
-        <p className="pt-1 text-xs text-zinc-500">Loading accounts…</p>
+        <p className="pt-1 text-xs text-fg-3">Loading accounts…</p>
       ) : accounts.error ? (
         <div className="flex items-center gap-2 pt-1 text-xs text-red-600 dark:text-red-400">
           <span className="min-w-0 truncate">Could not load accounts: {accounts.error}</span>
@@ -590,12 +590,12 @@ export function AccountPicker({
           </Button>
         </div>
       ) : list.length === 0 ? (
-        <p className="pt-1 text-xs text-zinc-500">No accounts are connected in {connector.name} yet.</p>
+        <p className="pt-1 text-xs text-fg-3">No accounts are connected in {connector.name} yet.</p>
       ) : (
         <div className="space-y-2 pt-1">
           {groups.map((g) => (
             <div key={g} className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <span className="w-20 shrink-0 text-xs text-zinc-500">{platformName(g)}</span>
+              <span className="w-20 shrink-0 text-xs text-fg-3">{platformName(g)}</span>
               {list
                 .filter((a) => a.platform === g)
                 .map((a) => (
@@ -627,13 +627,13 @@ export function PostPreviews({ draft, platforms }: { draft: PostDraft; platforms
   );
   const [tab, setTab] = useState<string | null>(null);
   const active = selected.find((p) => p.id === tab) ?? selected[0];
-  if (!active) return <p className="px-4 py-6 text-sm text-zinc-500">Select a platform to preview.</p>;
+  if (!active) return <p className="px-4 py-6 text-sm text-fg-3">Select a platform to preview.</p>;
 
   const parts = active.supports_thread && draft.thread_parts.length ? draft.thread_parts : [draft.content];
   return (
     <div>
       {selected.length > 1 && (
-        <div className="flex gap-1 border-b border-zinc-200 px-3 pt-2 dark:border-zinc-800">
+        <div className="flex gap-1 border-b border-line px-3 pt-2">
           {selected.map((p) => (
             <button
               key={p.id}
@@ -641,8 +641,8 @@ export function PostPreviews({ draft, platforms }: { draft: PostDraft; platforms
               className={cx(
                 "-mb-px border-b-2 px-2.5 py-1.5 text-xs font-medium",
                 p.id === active.id
-                  ? "border-indigo-500 text-indigo-700 dark:text-indigo-300"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200",
+                  ? "border-indigo-500 text-accent"
+                  : "border-transparent text-fg-3 hover:text-fg",
               )}
             >
               {p.name}

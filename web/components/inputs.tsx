@@ -31,14 +31,14 @@ export function TagInput({
   return (
     <div
       className={cx(
-        "flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-2 py-1.5 dark:border-zinc-700 dark:bg-zinc-950",
+        "flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-line-strong bg-surface px-2 py-1.5",
         disabled && "opacity-60",
       )}
     >
       {value.map((t) => (
         <span
           key={t}
-          className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          className="inline-flex items-center gap-1 rounded bg-subtle px-1.5 py-0.5 text-xs text-fg-2"
         >
           {prefix}
           {t}
@@ -46,7 +46,7 @@ export function TagInput({
             <button
               type="button"
               aria-label={`Remove ${t}`}
-              className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100"
+              className="text-fg-4 hover:text-fg"
               onClick={() => onChange(value.filter((x) => x !== t))}
             >
               <Icon name="x" className="h-3 w-3" />
@@ -68,7 +68,7 @@ export function TagInput({
         }}
         onBlur={() => draft && add(draft)}
         placeholder={value.length ? "" : placeholder}
-        className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+        className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-fg-4"
       />
     </div>
   );

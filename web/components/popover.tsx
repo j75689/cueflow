@@ -95,8 +95,7 @@ export function Popover({
         zIndex: 60,
       }}
       className={cx(
-        "overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg ring-1 ring-black/5",
-        "dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/5",
+        "overflow-hidden rounded-lg border border-line-strong bg-surface shadow-pop",
         className,
       )}
     >

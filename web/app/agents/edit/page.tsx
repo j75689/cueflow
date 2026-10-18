@@ -279,9 +279,9 @@ function AgentEditor() {
                       type="button"
                       onClick={() => set("avatar", em)}
                       className={cx(
-                        "flex h-8 w-8 items-center justify-center rounded-md text-lg hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                        "flex h-8 w-8 items-center justify-center rounded-md text-lg hover:bg-subtle",
                         form.avatar === em &&
-                          "bg-indigo-50 ring-1 ring-indigo-300 dark:bg-indigo-500/10 dark:ring-indigo-500/40",
+                          "bg-accent-soft ring-1 ring-accent-line",
                       )}
                     >
                       {em}
@@ -337,7 +337,7 @@ function AgentEditor() {
             />
             <div className="grid gap-3 p-4 sm:grid-cols-2">
               {caps.length === 0 && (
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-fg-3">
                   Capabilities load from the server…
                 </p>
               )}
@@ -349,8 +349,8 @@ function AgentEditor() {
                     className={cx(
                       "flex cursor-pointer gap-3 rounded-md border p-3 transition-colors",
                       on
-                        ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-500/40 dark:bg-indigo-500/5"
-                        : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/40",
+                        ? "border-accent-line bg-accent-soft"
+                        : "border-line hover:bg-subtle",
                     )}
                   >
                     <input
@@ -362,20 +362,20 @@ function AgentEditor() {
                           toggleIn(form.capabilities, c.id, e.target.checked),
                         )
                       }
-                      className="mt-0.5 h-4 w-4 accent-indigo-600"
+                      className="mt-0.5 h-4 w-4 accent-accent-solid"
                     />
                     <span className="min-w-0">
-                      <span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      <span className="block text-sm font-medium text-fg">
                         {c.name}
                       </span>
-                      <span className="block text-xs text-zinc-500">
+                      <span className="block text-xs text-fg-3">
                         {c.description}
                       </span>
                       <span className="mt-1 flex flex-wrap gap-1">
                         {c.tools.map((tl) => (
                           <code
                             key={tl}
-                            className="rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                            className="rounded bg-subtle px-1 py-0.5 text-[10px] text-fg-2"
                           >
                             {tl}
                           </code>
@@ -469,7 +469,7 @@ function AgentEditor() {
               >
                 <div className="flex flex-col items-start gap-1.5">
                   {byKind("source").length === 0 && (
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-fg-3">
                       No source connectors yet.
                     </p>
                   )}
@@ -494,7 +494,7 @@ function AgentEditor() {
               >
                 <div className="flex flex-col items-start gap-1.5">
                   {byKind("tools").length === 0 && (
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-fg-3">
                       No MCP servers yet. Add one under Connectors.
                     </p>
                   )}
@@ -669,18 +669,18 @@ function TokenPanel({ agentId }: { agentId: string }) {
         {tokens.loading && !tokens.data ? (
           <Loading />
         ) : (tokens.data ?? []).length === 0 ? (
-          <p className="text-xs text-zinc-500">No tokens yet.</p>
+          <p className="text-xs text-fg-3">No tokens yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line">
             {(tokens.data ?? []).map((t) => (
               <li key={t.id} className="flex items-center gap-2 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                <span className="shrink-0 text-[11px] text-zinc-400">
+                <span className="shrink-0 text-[11px] text-fg-4">
                   {t.last_used_at ? `used ${fmtRelative(t.last_used_at)}` : "never used"}
                 </span>
                 <button
                   onClick={() => void revoke(t)}
-                  className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
+                  className="shrink-0 rounded p-0.5 text-fg-4 hover:bg-subtle hover:text-red-600"
                   aria-label="Revoke token"
                 >
                   <Icon name="x" className="h-3.5 w-3.5" />
@@ -757,20 +757,20 @@ function MemoryPanel({ agentId }: { agentId: string }) {
         {memories.loading && !memories.data ? (
           <Loading />
         ) : list.length === 0 ? (
-          <p className="text-xs text-zinc-500">No memories yet.</p>
+          <p className="text-xs text-fg-3">No memories yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line">
             {list.map((m) => (
               <li key={m.id} className="group flex items-start gap-2 py-2">
-                <p className="min-w-0 flex-1 text-sm whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+                <p className="min-w-0 flex-1 text-sm whitespace-pre-wrap text-fg-2">
                   {m.content}
                 </p>
-                <span className="shrink-0 text-[11px] text-zinc-400">
+                <span className="shrink-0 text-[11px] text-fg-4">
                   {fmtRelative(m.created_at)}
                 </span>
                 <button
                   onClick={() => void remove(m.id)}
-                  className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
+                  className="shrink-0 rounded p-0.5 text-fg-4 hover:bg-subtle hover:text-red-600"
                   aria-label="Delete memory"
                 >
                   <Icon name="x" className="h-3.5 w-3.5" />

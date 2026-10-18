@@ -5,8 +5,85 @@
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/*
+ * Semantic colors. Components use these (bg-surface, text-fg-2, border-line...) instead of raw zinc/indigo
+ * shades, so light and dark are designed together here and a page never needs a dark: pair for them.
+ *   canvas   page background          surface  cards, panels, inputs     sunken  wells inside a page (board columns)
+ *   subtle   hover, chips, tracks     muted    stronger chip / count     line    borders, dividers
+ *   fg       primary text             fg-2     secondary text            fg-3    meta text (still 4.5:1)
+ *   fg-4     placeholder, disabled    accent   links, active nav, focus  accent-solid  primary buttons
+ *   inverse  selected segment / tag (dark on light, light on dark), with on-inverse text
+ */
+@theme inline {
+  --color-canvas: var(--cf-canvas);
+  --color-surface: var(--cf-surface);
+  --color-sunken: var(--cf-sunken);
+  --color-subtle: var(--cf-subtle);
+  --color-muted: var(--cf-muted);
+  --color-line: var(--cf-line);
+  --color-line-strong: var(--cf-line-strong);
+  --color-fg: var(--cf-fg);
+  --color-fg-2: var(--cf-fg-2);
+  --color-fg-3: var(--cf-fg-3);
+  --color-fg-4: var(--cf-fg-4);
+  --color-accent: var(--cf-accent);
+  --color-accent-solid: var(--cf-accent-solid);
+  --color-accent-solid-hover: var(--cf-accent-solid-hover);
+  --color-accent-soft: var(--cf-accent-soft);
+  --color-accent-line: var(--cf-accent-line);
+  --color-inverse: var(--cf-inverse);
+  --color-on-inverse: var(--cf-on-inverse);
+  --shadow-card: var(--cf-shadow-card);
+  --shadow-pop: var(--cf-shadow-pop);
+}
+
 :root {
   color-scheme: light dark;
+  --cf-canvas: #f6f6f8;
+  --cf-surface: #ffffff;
+  --cf-sunken: #eeeef1;
+  --cf-subtle: #f1f1f4;
+  --cf-muted: #e4e4e8;
+  --cf-line: #e4e4e7;
+  --cf-line-strong: #d4d4d8;
+  --cf-fg: #18181b;
+  --cf-fg-2: #3f3f46;
+  --cf-fg-3: #63636b;
+  --cf-fg-4: #a1a1aa;
+  --cf-accent: #4f46e5;
+  --cf-accent-solid: #4f46e5;
+  --cf-accent-solid-hover: #4338ca;
+  --cf-accent-soft: #eef0ff;
+  --cf-accent-line: #c7cbfb;
+  --cf-inverse: #18181b;
+  --cf-on-inverse: #ffffff;
+  --cf-shadow-card: 0 1px 2px rgb(24 24 27 / 0.05), 0 1px 1px rgb(24 24 27 / 0.03);
+  --cf-shadow-pop: 0 12px 32px -8px rgb(24 24 27 / 0.18), 0 2px 6px rgb(24 24 27 / 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cf-canvas: #0a0a0c;
+    --cf-surface: #131316;
+    --cf-sunken: #0f0f12;
+    --cf-subtle: #1c1c21;
+    --cf-muted: #27272d;
+    --cf-line: #26262b;
+    --cf-line-strong: #36363d;
+    --cf-fg: #f4f4f5;
+    --cf-fg-2: #d4d4d8;
+    --cf-fg-3: #a1a1aa;
+    --cf-fg-4: #6b6b74;
+    --cf-accent: #a5b4fc;
+    --cf-accent-solid: #6366f1;
+    --cf-accent-solid-hover: #818cf8;
+    --cf-accent-soft: rgb(99 102 241 / 0.14);
+    --cf-accent-line: rgb(129 140 248 / 0.4);
+    --cf-inverse: #f4f4f5;
+    --cf-on-inverse: #18181b;
+    --cf-shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4);
+    --cf-shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);
+  }
 }
 
 html,
@@ -15,13 +92,32 @@ body {
 }
 
 body {
-  background: var(--color-zinc-50);
-  color: var(--color-zinc-900);
+  background: var(--cf-canvas);
+  color: var(--cf-fg);
+  font-feature-settings: "cv11", "ss01";
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    background: var(--color-zinc-950);
-    color: var(--color-zinc-100);
+::selection {
+  background: var(--cf-accent-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--cf-accent-solid);
+  outline-offset: 2px;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

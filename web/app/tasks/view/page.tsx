@@ -129,10 +129,10 @@ function TaskView() {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-fg-3">
         <Link
           href="/board/"
-          className="hover:text-zinc-800 dark:hover:text-zinc-200"
+          className="hover:text-fg"
         >
           Board
         </Link>
@@ -141,7 +141,7 @@ function TaskView() {
           <>
             <Link
               href={`/tasks/view/?id=${t.parent.id}`}
-              className="hover:text-zinc-800 dark:hover:text-zinc-200"
+              className="hover:text-fg"
             >
               #{t.parent.number}
             </Link>
@@ -199,27 +199,27 @@ function TaskView() {
             {runs.loading && !runs.data ? (
               <Loading />
             ) : (runs.data ?? []).length === 0 ? (
-              <p className="px-4 py-3 text-xs text-zinc-500">No runs yet.</p>
+              <p className="px-4 py-3 text-xs text-fg-3">No runs yet.</p>
             ) : (
-              <ul className="divide-y divide-zinc-100 text-xs dark:divide-zinc-800">
+              <ul className="divide-y divide-line text-xs">
                 {(runs.data ?? []).slice(0, 10).map((r) => (
                   <li key={r.id} className="space-y-1 px-4 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <RunStatusBadge status={r.status} />
                       <span
-                        className="text-zinc-500"
+                        className="text-fg-3"
                         title={fmtTime(r.started_at)}
                       >
                         {fmtRelative(r.started_at)}
                       </span>
                     </div>
-                    <p className="text-zinc-600 dark:text-zinc-400">
+                    <p className="text-fg-2">
                       {r.turns} turns · {r.tool_calls} tools ·{" "}
                       {(r.input_tokens + r.output_tokens).toLocaleString()}{" "}
                       tokens
                     </p>
                     {(r.model || r.runtime === "acp") && (
-                      <p className="flex min-w-0 items-center gap-1.5 text-zinc-500">
+                      <p className="flex min-w-0 items-center gap-1.5 text-fg-3">
                         {r.runtime === "acp" && <Pill>ACP</Pill>}
                         {r.model && (
                           <span className="truncate font-mono text-[11px]">
@@ -261,7 +261,7 @@ function TitleEditor({
       <h1
         onClick={() => setEditing(true)}
         title="Click to edit"
-        className="cursor-text text-xl font-semibold tracking-tight text-zinc-900 hover:bg-zinc-100/60 dark:text-zinc-50 dark:hover:bg-zinc-800/40"
+        className="cursor-text text-xl font-semibold tracking-tight text-fg hover:bg-subtle"
       >
         {value || "Untitled task"}
       </h1>
@@ -337,15 +337,15 @@ function DescriptionEditor({
   return (
     <div className="group relative">
       {value ? (
-        <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+        <p className="text-sm leading-relaxed whitespace-pre-wrap text-fg-2">
           {value}
         </p>
       ) : (
-        <p className="text-sm text-zinc-400 italic">No description.</p>
+        <p className="text-sm text-fg-4 italic">No description.</p>
       )}
       <button
         onClick={() => setEditing(true)}
-        className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+        className="mt-1 inline-flex items-center gap-1 text-xs text-fg-3 hover:text-fg"
       >
         <Icon name="edit" className="h-3 w-3" /> Edit description
       </button>
@@ -360,7 +360,7 @@ function ResultCard({ text, agentName }: { text: string; agentName?: string }) {
         <Icon name="check" className="h-3.5 w-3.5" /> Result
         {agentName ? ` from ${agentName}` : ""}
       </p>
-      <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+      <p className="text-sm leading-relaxed whitespace-pre-wrap text-fg">
         {text}
       </p>
     </div>
@@ -438,7 +438,7 @@ function Thread({
         {loading && <Loading />}
         {error && <ErrorBox onRetry={onRetry}>{error}</ErrorBox>}
         {!loading && messages.length === 0 && (
-          <p className="py-6 text-center text-sm text-zinc-500">
+          <p className="py-6 text-center text-sm text-fg-3">
             {task.assignee
               ? task.status === "BACKLOG"
                 ? `In backlog. Move it to To do (or press Run now) and ${task.assignee.name} will start.`
@@ -462,9 +462,9 @@ function Thread({
           ),
         )}
         {task.running && (
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <div className="flex items-center gap-2 text-sm text-fg-3">
             <AgentAvatar agent={task.assignee} size="sm" />
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 dark:bg-zinc-800">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-subtle px-3 py-1.5">
               <TypingDots /> {task.assignee?.name ?? "Agent"} is working…
             </span>
           </div>
@@ -555,13 +555,13 @@ function ApprovalCard({
     <div className="flex items-start gap-2">
       <AgentAvatar agent={m.agent} size="sm" className="mt-0.5" />
       <div className="min-w-0 max-w-[85%] flex-1">
-        <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+        <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-fg-2">
           {m.agent?.name ?? "Agent"}
           <span className="text-amber-700 dark:text-amber-400">
             asks to run a tool
           </span>
           <span
-            className="text-[11px] text-zinc-400"
+            className="text-[11px] text-fg-4"
             title={fmtTime(m.created_at)}
           >
             {fmtRelative(m.created_at)}
@@ -574,14 +574,14 @@ function ApprovalCard({
               ? "border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/40"
               : status === "approved"
                 ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30"
-                : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900",
+                : "border-line bg-sunken",
           )}
         >
-          <p className="text-zinc-900 dark:text-zinc-100">
+          <p className="text-fg">
             <span className="font-mono font-semibold">{tool}</span>
-            {server && <span className="text-zinc-500"> on {server}</span>}
+            {server && <span className="text-fg-3"> on {server}</span>}
           </p>
-          <pre className="mt-1.5 max-h-48 overflow-auto rounded-md bg-white/70 p-2 font-mono text-[11px] leading-relaxed text-zinc-700 dark:bg-black/30 dark:text-zinc-300">
+          <pre className="mt-1.5 max-h-48 overflow-auto rounded-md bg-canvas p-2 font-mono text-[11px] leading-relaxed text-fg-2">
             {args}
           </pre>
           {status === "pending" && (
@@ -620,14 +620,14 @@ function ApprovalCard({
                 {showResult ? "▾" : "▸"}
               </button>
               {showResult && (
-                <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-white/70 p-2 font-mono text-[11px] whitespace-pre-wrap text-zinc-700 dark:bg-black/30 dark:text-zinc-300">
+                <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-canvas p-2 font-mono text-[11px] whitespace-pre-wrap text-fg-2">
                   {approval?.result}
                 </pre>
               )}
             </div>
           )}
           {status === "rejected" && (
-            <p className="mt-2 text-xs text-zinc-500">
+            <p className="mt-2 text-xs text-fg-3">
               Rejected{approval?.note ? `: ${approval.note}` : ""}
             </p>
           )}
@@ -640,7 +640,7 @@ function ApprovalCard({
 function MessageRow({ m }: { m: TaskMessage }) {
   const [open, setOpen] = useState(false);
   const time = (
-    <span className="text-[11px] text-zinc-400" title={fmtTime(m.created_at)}>
+    <span className="text-[11px] text-fg-4" title={fmtTime(m.created_at)}>
       {fmtRelative(m.created_at)}
     </span>
   );
@@ -649,24 +649,24 @@ function MessageRow({ m }: { m: TaskMessage }) {
     // Long system notes (e.g. an approved tool's output) show their first line, expandable.
     const [first, ...rest] = m.content.split("\n");
     return (
-      <div className="py-0.5 text-[11px] text-zinc-500">
+      <div className="py-0.5 text-[11px] text-fg-3">
         <div className="flex items-center gap-3">
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+          <span className="h-px flex-1 bg-muted" />
           <span className="max-w-[80%] text-center">
             {first} · {fmtRelative(m.created_at)}
             {rest.length > 0 && (
               <button
-                className="ml-1 text-zinc-600 hover:underline dark:text-zinc-400"
+                className="ml-1 text-fg-2 hover:underline"
                 onClick={() => setOpen((v) => !v)}
               >
                 {open ? "hide" : "details"}
               </button>
             )}
           </span>
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+          <span className="h-px flex-1 bg-muted" />
         </div>
         {open && rest.length > 0 && (
-          <pre className="mx-auto mt-1 max-h-60 max-w-[80%] overflow-auto rounded-md bg-zinc-100 p-2 font-mono whitespace-pre-wrap dark:bg-zinc-900">
+          <pre className="mx-auto mt-1 max-h-60 max-w-[80%] overflow-auto rounded-md bg-subtle p-2 font-mono whitespace-pre-wrap">
             {rest.join("\n")}
           </pre>
         )}
@@ -690,8 +690,8 @@ function MessageRow({ m }: { m: TaskMessage }) {
         <button
           onClick={() => setOpen(!open)}
           className={cx(
-            "flex w-full items-center gap-2 rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-zinc-100 dark:hover:bg-zinc-800/60",
-            isErr ? "text-red-600 dark:text-red-400" : "text-zinc-500",
+            "flex w-full items-center gap-2 rounded px-2 py-1 text-left font-mono text-[11px] hover:bg-subtle",
+            isErr ? "text-red-600 dark:text-red-400" : "text-fg-3",
           )}
         >
           <span className="shrink-0">
@@ -706,7 +706,7 @@ function MessageRow({ m }: { m: TaskMessage }) {
           </span>
         </button>
         {open && (
-          <pre className="mt-1 max-h-64 overflow-auto rounded bg-zinc-50 p-2 text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+          <pre className="mt-1 max-h-64 overflow-auto rounded bg-canvas p-2 text-[11px] leading-relaxed whitespace-pre-wrap text-fg-2">
             {detail}
           </pre>
         )}
@@ -717,7 +717,7 @@ function MessageRow({ m }: { m: TaskMessage }) {
   if (m.author_type === "human") {
     return (
       <div className="flex flex-col items-end gap-0.5">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-indigo-600 px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white dark:bg-indigo-500">
+        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent-solid px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap text-white">
           {m.content}
         </div>
         {time}
@@ -731,12 +731,12 @@ function MessageRow({ m }: { m: TaskMessage }) {
       ? "border border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/40"
       : m.kind === "result"
         ? "border border-teal-200 bg-teal-50 dark:border-teal-900/60 dark:bg-teal-950/30"
-        : "bg-zinc-100 dark:bg-zinc-800";
+        : "bg-subtle";
   return (
     <div className="flex items-start gap-2">
       <AgentAvatar agent={m.agent} size="sm" className="mt-0.5" />
       <div className="min-w-0 max-w-[85%]">
-        <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+        <p className="mb-0.5 flex items-center gap-2 text-xs font-medium text-fg-2">
           {m.agent?.name ?? "Agent"}
           {m.kind === "question" && (
             <span className="text-amber-700 dark:text-amber-400">asks you</span>
@@ -748,7 +748,7 @@ function MessageRow({ m }: { m: TaskMessage }) {
         </p>
         <div
           className={cx(
-            "rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-zinc-900 dark:text-zinc-100",
+            "rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-fg",
             tone,
           )}
         >
@@ -835,9 +835,9 @@ function Composer({
     task.assignee && task.status !== "BACKLOG" && task.status !== "CANCELED";
 
   return (
-    <div className="relative border-t border-zinc-200 p-3 dark:border-zinc-800">
+    <div className="relative border-t border-line p-3">
       {mention && candidates.length > 0 && (
-        <ul className="absolute bottom-full left-3 z-10 mb-1 w-64 overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <ul className="absolute bottom-full left-3 z-10 mb-1 w-64 overflow-hidden rounded-md border border-line bg-surface shadow-lg">
           {candidates.map((a, i) => (
             <li key={a.id}>
               <button
@@ -848,15 +848,15 @@ function Composer({
                 className={cx(
                   "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
                   i === sel
-                    ? "bg-indigo-50 dark:bg-indigo-500/10"
-                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800",
+                    ? "bg-accent-soft"
+                    : "hover:bg-subtle",
                 )}
               >
                 <AgentAvatar agent={a} size="xs" />
-                <span className="text-zinc-900 dark:text-zinc-100">
+                <span className="text-fg">
                   {a.name}
                 </span>
-                <span className="ml-auto font-mono text-xs text-zinc-500">
+                <span className="ml-auto font-mono text-xs text-fg-3">
                   @{a.slug}
                 </span>
               </button>
@@ -924,7 +924,7 @@ function Composer({
           <Icon name="send" className="h-4 w-4" />
         </Button>
       </div>
-      <p className="mt-1.5 text-[11px] text-zinc-500">
+      <p className="mt-1.5 text-[11px] text-fg-3">
         {willWake
           ? `${task.assignee!.name} will respond to your message.`
           : "Comments on unassigned or backlog tasks don't start an agent."}
@@ -1059,37 +1059,37 @@ function Sidebar({
               onChange={(v) => void onPatch({ due_at: fromLocalInput(v) })}
             />
           </Field>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
-            <dt className="text-zinc-500">Created</dt>
-            <dd className="text-zinc-700 dark:text-zinc-300">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-line pt-3 text-xs">
+            <dt className="text-fg-3">Created</dt>
+            <dd className="text-fg-2">
               {fmtTime(t.created_at)} by{" "}
               {t.created_by === "agent" ? "an agent" : "you"}
             </dd>
             {t.started_at && (
               <>
-                <dt className="text-zinc-500">Started</dt>
-                <dd className="text-zinc-700 dark:text-zinc-300">
+                <dt className="text-fg-3">Started</dt>
+                <dd className="text-fg-2">
                   {fmtTime(t.started_at)}
                 </dd>
               </>
             )}
             {t.completed_at && (
               <>
-                <dt className="text-zinc-500">Completed</dt>
-                <dd className="text-zinc-700 dark:text-zinc-300">
+                <dt className="text-fg-3">Completed</dt>
+                <dd className="text-fg-2">
                   {fmtTime(t.completed_at)}
                 </dd>
               </>
             )}
-            <dt className="text-zinc-500">Attempts</dt>
-            <dd className="text-zinc-700 dark:text-zinc-300">{t.attempts}</dd>
+            <dt className="text-fg-3">Attempts</dt>
+            <dd className="text-fg-2">{t.attempts}</dd>
             {t.schedule_id && (
               <>
-                <dt className="text-zinc-500">From</dt>
+                <dt className="text-fg-3">From</dt>
                 <dd>
                   <Link
                     href="/schedules/"
-                    className="text-indigo-600 hover:underline dark:text-indigo-400"
+                    className="text-accent hover:underline"
                   >
                     schedule
                   </Link>
@@ -1118,9 +1118,9 @@ function Sidebar({
           <CardHeader title="Parent task" />
           <Link
             href={`/tasks/view/?id=${t.parent.id}`}
-            className="flex items-center gap-2 px-4 py-3 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+            className="flex items-center gap-2 px-4 py-3 text-sm hover:bg-subtle"
           >
-            <span className="font-mono text-xs text-zinc-400">
+            <span className="font-mono text-xs text-fg-4">
               #{t.parent.number}
             </span>
             <span className="min-w-0 flex-1 truncate">{t.parent.title}</span>
@@ -1142,20 +1142,20 @@ function Sidebar({
           }
         />
         {(t.subtasks ?? []).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-zinc-500">
+          <p className="px-4 py-3 text-xs text-fg-3">
             No subtasks. Manager agents create them when they delegate.
           </p>
         ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line">
             {t.subtasks!.map((s) => (
               <li key={s.id}>
                 <Link
                   href={`/tasks/view/?id=${s.id}`}
-                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-subtle"
                 >
                   <AgentAvatar agent={s.assignee} size="xs" />
                   <span className="min-w-0 flex-1 truncate">
-                    <span className="mr-1 font-mono text-xs text-zinc-400">
+                    <span className="mr-1 font-mono text-xs text-fg-4">
                       #{s.number}
                     </span>
                     {s.title}
@@ -1174,17 +1174,17 @@ function Sidebar({
           subtitle="Documents and other items produced for this task (they wait in Deliverables)"
         />
         {(t.deliverables ?? []).length === 0 ? (
-          <p className="px-4 py-3 text-xs text-zinc-500">No deliverables yet.</p>
+          <p className="px-4 py-3 text-xs text-fg-3">No deliverables yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <ul className="divide-y divide-line">
             {t.deliverables!.map((d) => (
               <li key={d.id}>
                 <Link
                   href={`/deliverables/view/?id=${d.id}`}
-                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+                  className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-subtle"
                 >
                   <span className="min-w-0 flex-1 truncate">{d.title || "(untitled)"}</span>
-                  <span className="shrink-0 text-[11px] text-zinc-500">{d.kind}</span>
+                  <span className="shrink-0 text-[11px] text-fg-3">{d.kind}</span>
                   <StatusBadge status={d.status} />
                 </Link>
               </li>

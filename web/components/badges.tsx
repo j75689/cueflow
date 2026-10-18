@@ -17,23 +17,23 @@ export const STATUS_LABEL: Record<AnyStatus, string> = {
 };
 
 export const STATUS_STYLE: Record<AnyStatus, { pill: string; dot: string }> = {
-  DRAFT: { pill: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300", dot: "bg-zinc-400" },
+  DRAFT: { pill: "bg-subtle text-fg-2", dot: "bg-zinc-400" },
   PENDING_REVIEW: {
-    pill: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+    pill: "bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300",
     dot: "bg-amber-500",
   },
-  APPROVED: { pill: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300", dot: "bg-sky-500" },
-  QUEUED: { pill: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300", dot: "bg-indigo-500" },
+  APPROVED: { pill: "bg-sky-500/10 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300", dot: "bg-sky-500" },
+  QUEUED: { pill: "bg-indigo-500/10 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300", dot: "bg-indigo-500" },
   PUBLISHED: {
-    pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+    pill: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300",
     dot: "bg-emerald-500",
   },
   DONE: {
-    pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+    pill: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300",
     dot: "bg-emerald-500",
   },
-  FAILED: { pill: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300", dot: "bg-red-500" },
-  REJECTED: { pill: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300", dot: "bg-rose-400" },
+  FAILED: { pill: "bg-red-500/10 text-red-700 dark:bg-red-400/10 dark:text-red-300", dot: "bg-red-500" },
+  REJECTED: { pill: "bg-rose-500/10 text-rose-700 dark:bg-rose-400/10 dark:text-rose-300", dot: "bg-rose-400" },
 };
 
 export function StatusBadge({ status, className }: { status: AnyStatus; className?: string }) {
@@ -47,11 +47,11 @@ export function StatusBadge({ status, className }: { status: AnyStatus; classNam
 }
 
 const PLATFORM_STYLE: Record<string, string> = {
-  threads: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
-  instagram: "bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-300",
-  youtube: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
-  x: "bg-zinc-200 text-zinc-900 dark:bg-zinc-700 dark:text-zinc-100",
-  linkedin: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+  threads: "bg-inverse text-on-inverse",
+  instagram: "bg-pink-500/10 text-pink-700 dark:bg-pink-400/10 dark:text-pink-300",
+  youtube: "bg-red-500/10 text-red-700 dark:bg-red-400/10 dark:text-red-300",
+  x: "bg-muted text-fg",
+  linkedin: "bg-blue-500/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300",
 };
 
 export function PlatformBadge({ id, name }: { id: string; name?: string }) {
@@ -61,11 +61,11 @@ export function PlatformBadge({ id, name }: { id: string; name?: string }) {
 export function RunStatusBadge({ status }: { status: string }) {
   const cls =
     status === "SUCCEEDED"
-      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+      ? "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300"
       : status === "FAILED"
-        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+        ? "bg-red-500/10 text-red-700 dark:bg-red-400/10 dark:text-red-300"
         : status === "RUNNING"
-          ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
+          ? "bg-indigo-500/10 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300"
           : undefined;
   return (
     <Pill className={cls}>
@@ -81,7 +81,7 @@ export function HealthDot({ status }: { status: "ok" | "error" | null }) {
       title={status ?? "not checked"}
       className={cx(
         "inline-block h-2 w-2 shrink-0 rounded-full",
-        status === "ok" ? "bg-emerald-500" : status === "error" ? "bg-red-500" : "bg-zinc-300 dark:bg-zinc-600",
+        status === "ok" ? "bg-emerald-500" : status === "error" ? "bg-red-500" : "bg-line-strong",
       )}
     />
   );
