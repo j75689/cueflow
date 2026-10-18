@@ -1,13 +1,29 @@
-# CueFlow
+<h1 align="center">CueFlow</h1>
 
-**Open-source, self-hosted Agent Ops Console.** Give a team of AI agents tasks on a kanban board. They work
-the tasks with their own tools, ask you when they need a decision, and anything risky waits for your approval.
-An agent can run on a built-in LLM loop or hand the work to an external agent (Claude Code, Codex, Gemini CLI...)
-on a machine you own; any [MCP](https://modelcontextprotocol.io) server can be its tools, each tool set to allow,
-ask or deny; tasks can recur on a schedule. Run it at home (a NAS, a home lab or a laptop with Docker, no public
-IP, domain or webhook needed) or on Google Cloud Run, where it scales to zero between jobs.
+<p align="center">
+  Open-source, self-hosted agent ops console.<br>
+  Give a team of AI agents tasks on a kanban board. They work with their own tools, ask you when they need a
+  decision, and nothing they produce acts on the world until you approve it.
+</p>
 
-Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](docs/)
+<p align="center">
+  <a href="https://github.com/j75689/cueflow/actions/workflows/ci.yml"><img src="https://github.com/j75689/cueflow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License" /></a>
+  <a href="go.mod"><img src="https://img.shields.io/badge/go-1.27-00add8" alt="Go 1.27" /></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#how-it-works">How It Works</a> ·
+  <a href="#interfaces">Interfaces</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/lang-English-0b7285" alt="English" /></a>
+  <a href="README.zh-TW.md"><img src="https://img.shields.io/badge/lang-繁體中文-555" alt="繁體中文" /></a>
+</p>
 
 ```
  You · Schedule · MCP client ─▶ Task ─▶ Agent ─▶ tools (built-in · MCP servers · its own CLI on a runner)
@@ -15,44 +31,19 @@ Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · All docs: [docs/](doc
                        needs a decision / risky tool call ─▶ you approve in the thread ─▶ it continues
 ```
 
-Everything an agent produces is a **deliverable** that waits for a human: a document, or, with the built-in content
-module, a social post that agents draft from collected material (RSS, mailboxes, web search) and that, once approved,
-is published through any MCP server following the four-tool [publisher contract](docs/publisher-mcp.md). Agents
-never act on their own output: no agent tool can, and publishers and action connectors refuse unless the worker
-attached a grant for that exact, human-approved item.
+---
 
-## How it works
+## Quick Start
 
-- **Command**: tell the team what you want, e.g. "Every morning at 8, summarize AI news and draft a
-  Threads post". The manager agent (🧭 Chief) plans, delegates subtasks, sets up schedules and reports back.
-- **Board**: every request is a task card, Backlog → To do → In progress → Waiting → Review → Done. Each task
-  has a thread with the agent's progress, tool calls, questions and result; reply to continue, or `@writer` to
-  hand it to another agent.
-- **Agents**: roles with their own persona, capabilities, LLM, sources and memory. A new install has only the
-  Chief; add a writer, a researcher, an editor... and edit any of them.
-- **Schedules**: recurring tasks for an agent (agents can create them too).
-- **External agents and runners**: an agent can run its tasks in Claude Code, Codex, Gemini CLI, OpenCode or
-  Goose over ACP, on the server or on a machine you own, and other agents can drive the board through
-  CueFlow's own MCP endpoint. See [docs/external-agents.md](docs/external-agents.md).
+First decide where CueFlow itself runs. Everything after that is the same.
 
-Capabilities and tools, the task state machine, delegation and guardrails: [docs/agentic-flow.md](docs/agentic-flow.md).
+| If you want… | Run CueFlow on | Guide |
+|---|---|---|
+| **To try it, or run it at home** (a NAS, a home lab, a laptop) | **Docker Compose**: outbound connections only, no public IP, domain or webhook | below |
+| **Always on, paying only for the minutes it works** | **Google Cloud Run** with Cloud Tasks and Cloud Scheduler, scaling to zero | [deploy/cloudrun](deploy/cloudrun/README.md) |
+| **To hack on it** | **From source**: Go, Node and a PostgreSQL in Docker | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-## Highlights
-
-- **Human-in-the-loop by construction.** Deliverables follow a strict state machine
-  (`DRAFT → PENDING_REVIEW → APPROVED | REJECTED → QUEUED → DONE | FAILED`) and every change is in an
-  audit log, including diffs of reviewer edits.
-- **Everything is a connector plugin.** Publishers, sources, search engines, LLMs, notifiers and image
-  generators implement small Go interfaces and self-register with a config schema; the UI renders their forms.
-- **Private by default.** At home it only makes outbound connections and binds to `127.0.0.1:3000`; in the
-  cloud the dashboard sits behind Cloudflare Access and machine-to-machine calls carry Google-signed identities.
-  Connector secrets are encrypted at rest (AES-256-GCM).
-- **Crash-safe actions.** The worker uses leases; one that dies mid-action leaves the item `FAILED`
-  with a "check before retrying" note instead of silently acting twice.
-- **Single binary, runs anywhere.** Go API + scheduler + worker with the Next.js dashboard embedded. Docker
-  Compose on your own hardware, or Cloud Run with Cloud Tasks and Cloud Scheduler, so nothing runs between jobs.
-
-## Quick start (Docker)
+### Docker Compose
 
 ```bash
 git clone https://github.com/j75689/cueflow && cd cueflow/deploy
@@ -61,55 +52,102 @@ cp .env.example .env
 docker compose up -d
 ```
 
-CueFlow is at <http://localhost:3000>. Then:
+CueFlow is at <http://localhost:3000> (every port is bound to `127.0.0.1`). Then:
 
-1. **Connectors**: an LLM (e.g. *Anthropic Claude*, or *OpenAI-compatible* pointing at Ollama); a source such
-   as an RSS feed; a publisher: *MCP publisher* pointing at a server that follows the
-   [publisher contract](docs/publisher-mcp.md), or the bundled mock (`docker compose --profile mock up -d`,
-   endpoint `http://mock-publisher:4010/mcp`, token `dev-token`) to try the flow without posting anywhere.
-2. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
-3. **Deliverables**: edit, pick the accounts, approve or reject. Approved posts reach the publisher within seconds.
+1. **Connectors**: add an LLM (e.g. *Anthropic Claude*, or *OpenAI-compatible* pointing at Ollama), and whatever
+   the agents need: MCP servers as tools, web search, RSS feeds or mailboxes.
+2. **Agents**: a new install has only the 🧭 Chief. Add roles by hand, or import a team template from
+   [`templates/`](templates/) (Agents → *Import team*).
+3. **Command**: tell the team what you want, or set up a **Schedule** for recurring work.
+4. **Deliverables**: read, edit, approve or reject what the agents produced.
 
-Image variants, web search, the mock publisher, remote access: [docs/docker.md](docs/docker.md).
+> [!TIP]
+> To try the social posting flow without posting anywhere, start the bundled mock publisher
+> (`docker compose --profile mock up -d`) and add an *MCP publisher* connector with endpoint
+> `http://mock-publisher:4010/mcp` and token `dev-token`.
 
-## Connectors
+Image variants (with Node and the ACP adapters for external agents), web search, remote access:
+[docs/docker.md](docs/docker.md). Back up `CUEFLOW_SECRET_KEY`: without it stored credentials are unreadable.
 
-Publishers (any MCP server that follows the [publisher contract](docs/publisher-mcp.md)), sources
-(RSS, IMAP), search (SearXNG, Tavily), LLMs (OpenAI-compatible, Claude on the API, Bedrock or Vertex AI, Gemini
-on Vertex AI), SMTP notifications, image generation (OpenAI, Gemini, Vertex, ComfyUI) and any MCP server as
-agent tools. Full list and authentication options: [docs/builtin-connectors.md](docs/builtin-connectors.md).
-Writing one: [docs/connectors.md](docs/connectors.md).
+---
 
-## Going further
+## How It Works
 
-- **Configuration**: every environment variable, and how to rotate the secret key:
-  [docs/configuration.md](docs/configuration.md). Back up `CUEFLOW_SECRET_KEY`; without it stored credentials
-  are unreadable.
-- **Runners, external agents, MCP**: [docs/external-agents.md](docs/external-agents.md).
-- **Modules**: what `deliverables` and `content` add, switching them with `CUEFLOW_MODULES`, and where images and
-  videos are stored: [docs/modules.md](docs/modules.md).
-- **Google Cloud Run**: Supabase, Cloud Storage, Cloud Tasks and Cloud Scheduler, scaling to zero:
-  [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+A request goes through the same steps whether you typed it, a schedule fired it, or another agent sent it over MCP:
+
+1. **Ask.** Tell the team what you want on the Command page, e.g. "Every morning at 8, summarize AI news and draft a
+   Threads post". Every request becomes a task card: Backlog → To do → In progress → Waiting → Review → Done.
+2. **Plan.** The Chief plans, splits the work into subtasks for the right agents, and sets up schedules when the
+   work recurs. Each agent has its own persona, capabilities, LLM, sources and memory.
+3. **Work.** An agent works with its tools: built-in ones, any [MCP](https://modelcontextprotocol.io) server (each
+   tool set to allow, ask or deny), or it hands the whole task to Claude Code, Codex, Gemini CLI, OpenCode or Goose
+   over ACP, on the server or on a machine you own.
+4. **Ask you.** Questions and risky tool calls wait in the task's thread. Reply to continue, or `@writer` to hand
+   the task to another agent; every thought and tool call is visible there.
+5. **Review.** What the agents produce is a **deliverable**: a document or, with the content module, a social post.
+   It waits for you to edit, approve or reject it.
+6. **Act.** Only an approved item is acted on: filed through an action connector, or published through any MCP server
+   that follows the four-tool [publisher contract](docs/publisher-mcp.md). No agent tool can act, and connectors
+   refuse unless the worker attached a grant for that exact, approved item.
+
+Capabilities and tools, the task state machine, delegation and guardrails: [docs/agentic-flow.md](docs/agentic-flow.md).
+
+---
+
+## Interfaces
+
+- **Dashboard**: Command, Board, Agents, Deliverables, Schedules, Connectors, Runners and Usage, embedded in the
+  server binary.
+- **MCP endpoint**: other agents (Claude Code, Codex...) can list, create, comment on, run and stop tasks and read
+  deliverables through CueFlow's own MCP server. Approving stays in the dashboard.
+- **REST API**: everything the dashboard does, with a bearer token. [docs/api.md](docs/api.md)
+- **Runners**: `cueflow runner` on a machine you own picks up tasks for external agents; it only makes outbound
+  connections. [docs/external-agents.md](docs/external-agents.md)
+
+---
+
+## Features
+
+| | |
+|---|---|
+| **Human in the loop by construction** | Deliverables follow a strict state machine (`DRAFT → PENDING_REVIEW → APPROVED \| REJECTED → QUEUED → DONE \| FAILED`); every change is in an audit log, with diffs of reviewer edits |
+| **Agent teams as files** | Export an org's agents as a JSON team template and import it elsewhere, like a Grafana dashboard |
+| **External agents** | Claude Code, Codex, Gemini CLI, OpenCode and Goose over ACP, on the server or on your own machines |
+| **Tool policy** | Any MCP server as agent tools; each tool allowed, asked about or denied |
+| **Schedules** | Recurring tasks for an agent; agents can create them too |
+| **Connector plugins** | LLMs, MCP servers, search, sources, notifiers, image generators, publishers and actions implement small Go interfaces; the UI renders their forms. [List](docs/builtin-connectors.md) · [Writing one](docs/connectors.md) |
+| **Modules** | Deliverables and social content are modules you switch with `CUEFLOW_MODULES`. [docs/modules.md](docs/modules.md) |
+| **Private by default** | At home it binds to `127.0.0.1` and only connects outward; in the cloud the dashboard sits behind Cloudflare Access. Secrets are encrypted at rest (AES-256-GCM) |
+| **Crash-safe actions** | The worker uses leases: one that dies mid-action leaves the item `FAILED` with a "check before retrying" note instead of acting twice |
+| **Single binary** | Go API, scheduler and worker with the Next.js dashboard embedded |
+
+---
 
 ## Documentation
 
-- [Architecture](docs/architecture.md), with the package layout in §2.1
-- [Agentic flow](docs/agentic-flow.md)
-- [REST API](docs/api.md)
-- [Configuration](docs/configuration.md)
-- [Running with Docker Compose](docs/docker.md)
-- [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) · [Publisher MCP contract](docs/publisher-mcp.md)
+- [Architecture](docs/architecture.md), with the package layout in §2.1 · [Agentic flow](docs/agentic-flow.md)
+- [REST API](docs/api.md) · [Configuration](docs/configuration.md), every environment variable and key rotation
+- [Running with Docker Compose](docs/docker.md) · [Deploying on Google Cloud Run](deploy/cloudrun/README.md) ·
+  [A runner in a container](deploy/runner/README.md)
+- [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) ·
+  [Publisher MCP contract](docs/publisher-mcp.md)
 - [External agents, runners and MCP](docs/external-agents.md)
-- [Modules: deliverables, content, images and videos](docs/modules.md)
-- [Deploying on Google Cloud Run](deploy/cloudrun/README.md) · [A runner in a container](deploy/runner/README.md)
+- [Modules: deliverables, content, images and videos](docs/modules.md) · [Team templates](templates/README.md)
 - Traditional Chinese: [README.zh-TW.md](README.zh-TW.md) · [docs/zh-TW/](docs/zh-TW/)
 
-## Development and contributing
+---
+
+## Contributing
 
 Go 1.27+, Node 22+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
-The full setup, the rules that are not negotiable and the commit convention are in
-[CONTRIBUTING.md](CONTRIBUTING.md). Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+The full setup, the rules that are not negotiable and the commit convention are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Found a vulnerability? Report it privately, never in a public issue or PR:
+[Report a vulnerability](https://github.com/j75689/cueflow/security/advisories/new). Scope and what to include:
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0
+[Apache License 2.0](LICENSE).
