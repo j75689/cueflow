@@ -8,18 +8,27 @@ import { OrgSwitcher, useOrg } from "./org";
 import { useMeta, useServerEvents } from "./providers";
 import { Icon, Loading, cx } from "./ui";
 
+interface NavItem {
+  href: string;
+  label: string;
+  icon: string;
+  match: (p: string) => boolean;
+  /** Shown only when this feature module is mounted on the server (see useModule). */
+  module?: string;
+}
+
 // Pages that belong to the current org.
-const ORG_NAV = [
+const ORG_NAV: NavItem[] = [
   { href: "/command/", label: "Command", icon: "sparkle", match: (p: string) => p.startsWith("/command") },
   { href: "/board/", label: "Board", icon: "kanban", match: (p: string) => p.startsWith("/board") || p.startsWith("/tasks") },
   { href: "/agents/", label: "Agents", icon: "users", match: (p: string) => p.startsWith("/agents") },
-  { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts") },
+  { href: "/", label: "Review", icon: "inbox", match: (p: string) => p === "/" || p.startsWith("/posts"), module: "content" },
   { href: "/schedules/", label: "Schedules", icon: "clock", match: (p: string) => p.startsWith("/schedules") },
-  { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs") },
+  { href: "/runs/", label: "Runs", icon: "history", match: (p: string) => p.startsWith("/runs"), module: "content" },
 ];
 
 // Pages shared by every org.
-const GLOBAL_NAV = [
+const GLOBAL_NAV: NavItem[] = [
   { href: "/usage/", label: "Usage", icon: "chart", match: (p: string) => p.startsWith("/usage") },
   { href: "/connectors/", label: "Connectors", icon: "plug", match: (p: string) => p.startsWith("/connectors") },
   { href: "/runners/", label: "Runners", icon: "server", match: (p: string) => p.startsWith("/runners") },
@@ -34,8 +43,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => setOpen(false), [pathname]);
 
-  const links = (items: typeof ORG_NAV) =>
-    items.map((n) => {
+  const modules = meta?.modules;
+  const mounted = (n: NavItem) => !n.module || !modules || modules.includes(n.module);
+  const links = (items: NavItem[]) =>
+    items.filter(mounted).map((n) => {
       const active = n.match(pathname);
       return (
         <Link

@@ -94,6 +94,8 @@ export interface AgentCapability {
 
 export interface Meta {
   version: string;
+  /** Feature modules mounted on this server ("content" is the posts/pipelines/publishing workflow). */
+  modules?: string[];
   statuses: PostStatus[];
   transitions: Record<string, PostStatus[]>;
   platforms: Platform[];
