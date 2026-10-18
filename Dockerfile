@@ -10,7 +10,7 @@
 #   docker build --target runner -t cueflow:runner .
 
 # 1. Dashboard (Next.js static export)
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cueflow ./cmd/cuef
 
 # 3. agents: Node.js plus the ACP adapters for Claude Code and Codex, for the
 #    "External agent (ACP)" runtime. Other presets (Gemini CLI, OpenCode...) run via npx or PATH.
-FROM node:22-bookworm-slim AS agents
+FROM node:26-bookworm-slim AS agents
 ARG CLAUDE_ACP_VERSION=0.85.1
 ARG CODEX_ACP_VERSION=2.1.1
 # ca-certificates: the Go binary verifies TLS with the system trust store (node images ship without it).
