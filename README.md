@@ -62,16 +62,7 @@ Image variants (with Node and the ACP adapters for external agents), web search,
 
 ### Google Cloud Run
 
-Always on, scaling to zero between jobs: Cloud Run for the server, Supabase for PostgreSQL, a Cloud Storage bucket
-for media, Cloud Tasks for background work and Cloud Scheduler as the one-minute clock. The guide walks through it:
-
-1. Publish the image (`image.yml` pushes `ghcr.io/<owner>/cueflow:main`).
-2. Create the Supabase database.
-3. Set up Google Cloud once: APIs, service account, bucket, queue, permissions.
-4. Store the secrets, deploy the service and the Scheduler tick.
-5. Optional: Cloudflare Access in front of the dashboard, backups.
-
-Full commands: [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+To run it always on and scaling to zero between jobs, see [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
 ---
 

@@ -55,15 +55,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 
 ### Google Cloud Run
 
-一直在線、沒工作時縮到零：伺服器跑在 Cloud Run，PostgreSQL 用 Supabase，媒體放 Cloud Storage bucket，背景工作走 Cloud Tasks，Cloud Scheduler 當每分鐘一次的時鐘。步驟：
-
-1. 發布映像（`image.yml` 會推 `ghcr.io/<owner>/cueflow:main`）。
-2. 建立 Supabase 資料庫。
-3. 一次性設定 Google Cloud：API、service account、bucket、佇列、權限。
-4. 存好機密，部署服務與 Scheduler tick。
-5. 選用：儀表板前面加 Cloudflare Access、備份。
-
-完整指令：[deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
+想一直在線、沒工作時縮到零，見 [deploy/cloudrun/README.md](deploy/cloudrun/README.md)（英文）。
 
 ---
 
