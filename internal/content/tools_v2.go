@@ -19,17 +19,16 @@ import (
 	"github.com/j75689/cueflow/internal/textutil"
 )
 
-// The post flow on deliverables: the capability post_deliverables offers the same three tools as
-// drafting (create_post_draft, list_posts, revise_draft), with the same arguments, so an agent's
-// instructions need no change when it is moved over; the drafts land in deliverables (kind post)
-// instead of the posts table. An agent should have one of the two capabilities, not both.
+// Drafting: create_post_draft, list_posts and revise_draft write and read post deliverables. The
+// capability keeps the id post_deliverables it had while the posts table was still in use, so the
+// agents that were moved over keep working.
 
 // PostDeliverablesCapability is the capability id.
 const PostDeliverablesCapability = "post_deliverables"
 
 func registerPostTools() {
-	crew.RegisterCapability(crew.Capability{ID: PostDeliverablesCapability, Name: "Drafting (deliverables)",
-		Description: "Write social post drafts as deliverables (the review queue under Deliverables) and revise them while pending. Same tools as Drafting; use one or the other.",
+	crew.RegisterCapability(crew.Capability{ID: PostDeliverablesCapability, Name: "Drafting", Default: true,
+		Description: "Write social post drafts into the human review queue (Deliverables) and revise them while they are pending.",
 		Prompt: func(a *store.Agent) string {
 			p := contentPrompt
 			if len(a.Platforms) > 0 {
@@ -146,8 +145,7 @@ func toolCreatePostDeliverable(ctx context.Context, r *crew.Run, raw json.RawMes
 	return msg, nil
 }
 
-// toolListPostDeliverables lists post deliverables and, so an agent moved over still sees what it
-// wrote before the move, the posts table's rows, newest first.
+// toolListPostDeliverables lists post deliverables, newest first.
 func toolListPostDeliverables(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
 	var a struct {
 		Status string
@@ -193,26 +191,9 @@ func toolListPostDeliverables(ctx context.Context, r *crew.Run, raw json.RawMess
 		}
 		st := string(it.Status)
 		if it.Status == deliverable.StatusDone {
-			st = string(StatusPublished)
+			st = "PUBLISHED"
 		}
 		out = append(out, row{it.ID, st, p.Platforms, it.Title, textutil.Clip(p.Content, 240), p.Warnings, it.UpdatedAt})
-	}
-	pf := PostFilter{OrgID: &r.Task.OrgID, Limit: limit}
-	if status != "" {
-		if st := Status(status); st.Valid() {
-			pf.Statuses = []Status{st}
-		} else {
-			pf.Limit = 0 // a status only deliverables have (DONE): nothing from the posts table
-		}
-	}
-	if pf.Limit > 0 {
-		posts, _, err := NewStore(r.Store).ListPosts(ctx, pf)
-		if err != nil {
-			return "", err
-		}
-		for _, p := range posts {
-			out = append(out, row{p.ID, string(p.Status), p.Platforms, p.Title, textutil.Clip(p.Content, 240), p.Warnings, p.UpdatedAt})
-		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].updated.After(out[j].updated) })
 	if len(out) > limit {

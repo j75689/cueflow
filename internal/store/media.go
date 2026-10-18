@@ -218,13 +218,13 @@ func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
 	return moved, nil
 }
 
-// ErrMediaInUse means a post that is still going to be reviewed or published uses the media.
-var ErrMediaInUse = errors.New("media is used by a post that is not finished")
+// ErrMediaInUse means a deliverable that is still going to be reviewed or acted on uses the media.
+var ErrMediaInUse = errors.New("media is used by a deliverable that is not finished")
 
 // inUseSQL is true when some unfinished post (anything but PUBLISHED or REJECTED: a FAILED post can
 // be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
-const inUseSQL = `SELECT EXISTS (SELECT 1 FROM posts p, unnest(p.media_urls) AS u
-	WHERE p.status NOT IN ('PUBLISHED','REJECTED') AND u LIKE '%/media/' || $1::text || '%')`
+const inUseSQL = `SELECT EXISTS (SELECT 1 FROM deliverables d
+	WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || $1::text || '%')`
 
 // AdoptMedia takes over a file a trusted writer left in the bucket's staging area: it checks what
 // the file is (validate gets its first bytes and size, and returns the MIME type), moves it into the
@@ -291,8 +291,8 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun bool) (int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT m.id FROM media m
 		WHERE m.created_at < NOW() - make_interval(secs => $1)
-		  AND NOT EXISTS (SELECT 1 FROM posts p, unnest(p.media_urls) AS u
-			WHERE p.status NOT IN ('PUBLISHED','REJECTED') AND u LIKE '%/media/' || m.id::text || '%')
+		  AND NOT EXISTS (SELECT 1 FROM deliverables d
+			WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || m.id::text || '%')
 		ORDER BY m.created_at`, olderThan.Seconds())
 	if err != nil {
 		return 0, err
