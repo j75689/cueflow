@@ -53,7 +53,7 @@ server; `platforms` comes from the `content` module and the `deliverable_*` keys
 ```json
 {
   "version": "0.1.0",
-  "modules": ["content"],
+  "modules": ["content", "deliverables"],
   "connector_types": [ConnectorSpec, ...],
   "agent_capabilities": [AgentCapability, ...],
   "platforms": [

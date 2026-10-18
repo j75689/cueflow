@@ -11,8 +11,8 @@ import (
 )
 
 // Module is a feature set mounted on the server. The core serves orgs, tasks, agents, schedules,
-// connectors, runners and media; the content workflow (posts and their review, simple schedules,
-// publishing) is a module. A module may also implement the optional interfaces below.
+// connectors, runners and media; deliverables (typed items, their review and the worker that acts
+// on them) and content (the post kind, sources, publishing) are modules. A module may also implement the optional interfaces below.
 type Module interface {
 	ID() string
 	// Routes registers the module's endpoints on r, which is /api/v1 behind the same auth as the core's.

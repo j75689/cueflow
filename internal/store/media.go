@@ -221,7 +221,7 @@ func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
 // ErrMediaInUse means a deliverable that is still going to be reviewed or acted on uses the media.
 var ErrMediaInUse = errors.New("media is used by a deliverable that is not finished")
 
-// inUseSQL is true when some unfinished post (anything but PUBLISHED or REJECTED: a FAILED post can
+// inUseSQL is true when some unfinished deliverable (anything but DONE or REJECTED: a FAILED one can
 // be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
 const inUseSQL = `SELECT EXISTS (SELECT 1 FROM deliverables d
 	WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || $1::text || '%')`

@@ -12,11 +12,18 @@ tables stay, and the dashboard hides its pages. `GET /api/v1/meta` lists what is
 | Module | Adds | Code |
 |---|---|---|
 | `deliverables` | Typed items agents produce for a human to review, then something acts on them | `internal/deliverable` |
-| `content` | Social posts as deliverables, source connectors, publishers, images and videos | `internal/content` |
+| `content` | Social posts as deliverables, source connectors, publishers | `internal/content` |
 
-Writing a module: implement `api.Module` (`internal/api/module.go`), plus any of the optional hooks
-(`MetaProvider`, `StatsProvider`, `TaskDetailer`, `MCPProvider`), register capabilities and tools with
-`crew.RegisterCapability` / `crew.RegisterTool` in `Attach()`, and mount it in `cmd/cueflow/main.go`.
+Writing a module: implement `api.Module` (`internal/api/module.go`: `ID` and `Routes`), plus any of the optional
+hooks: `MetaProvider` (keys on `/meta`), `StatsProvider` (`/stats`), `TaskDetailer` (`GET /tasks/{id}` and the MCP
+`get_task`), `MCPProvider` (operator MCP tools). Then mount it in `cmd/cueflow/main.go` behind `cfg.Enabled(...)`:
+call its own setup there (the built-in modules have an `Attach()` that registers capabilities and tools with
+`crew.RegisterCapability` / `crew.RegisterTool` and job kinds with `jobs.Register`), append it to `modules`, and
+add its job handlers, sweeps and workers to the lists next to it. Add its id to `KnownModules` in
+`internal/config/config.go`.
+
+Media (`/api/v1/media`, `/media/{file}`, image generation) is served by the core whatever is mounted; today only the
+content module's posts use it, so it is described under [content](#images-and-videos).
 
 ## deliverables
 

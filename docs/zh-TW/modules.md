@@ -7,9 +7,11 @@ CueFlow 的核心不綁任何一種工作：org、agent、task、看板、排程
 | 模組 | 內容 | 程式碼 |
 |---|---|---|
 | `deliverables` | agent 產出的型別化項目，人審核後再交給某個動作執行 | `internal/deliverable` |
-| `content` | 以 deliverable 形式存在的社群貼文、資料來源 connector、發布器、圖片與影片 | `internal/content` |
+| `content` | 以 deliverable 形式存在的社群貼文、資料來源 connector、發布器 | `internal/content` |
 
-自己寫一個模組：實作 `api.Module`（`internal/api/module.go`），需要的話加上選用的 hook（`MetaProvider`、`StatsProvider`、`TaskDetailer`、`MCPProvider`），在 `Attach()` 用 `crew.RegisterCapability` / `crew.RegisterTool` 註冊能力與工具，再到 `cmd/cueflow/main.go` 掛上去。
+自己寫一個模組：實作 `api.Module`（`internal/api/module.go`：`ID` 與 `Routes`），需要的話加上選用的 hook：`MetaProvider`（`/meta` 的欄位）、`StatsProvider`（`/stats`）、`TaskDetailer`（`GET /tasks/{id}` 與 MCP 的 `get_task`）、`MCPProvider`（operator MCP 工具）。接著在 `cmd/cueflow/main.go` 用 `cfg.Enabled(...)` 包起來掛上：在那裡呼叫它自己的初始化（內建模組的 `Attach()` 會用 `crew.RegisterCapability` / `crew.RegisterTool` 註冊能力與工具、用 `jobs.Register` 註冊 job kind），加進 `modules`，並把它的 job handler、sweep 與 worker 加到旁邊的清單。最後把 id 加進 `internal/config/config.go` 的 `KnownModules`。
+
+媒體（`/api/v1/media`、`/media/{file}`、圖片生成）不管掛了哪些模組都由核心提供；目前只有 content 模組的貼文用到，所以寫在 [content](#圖片與影片) 底下。
 
 ## deliverables
 
