@@ -47,7 +47,7 @@ export default function UsagePage() {
     <div className="space-y-6">
       <PageHeader
         title="Usage"
-        subtitle={`Token usage across agent tasks and simple schedules${tz ? ` · days in ${tz}` : ""}`}
+        subtitle={`Token usage across agent tasks${tz ? ` · days in ${tz}` : ""}`}
         actions={
           <div role="group" aria-label="Period" className="inline-flex rounded-lg border border-line bg-surface p-0.5">
             {PERIODS.map((p) => (
@@ -78,7 +78,7 @@ export default function UsagePage() {
         <Card>
           <EmptyState
             title="No runs in this period"
-            hint="Token usage appears here once agents work tasks or simple schedules run."
+            hint="Token usage appears here once agents work tasks."
           />
         </Card>
       ) : (
@@ -207,7 +207,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
             <ShareTable
               rows={u.by_source.map((s) => ({
                 key: s.source,
-                label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules" : s.source}</span>,
+                label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules (retired)" : s.source}</span>,
                 runs: s.runs,
                 input: s.input_tokens,
                 output: s.output_tokens,

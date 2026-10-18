@@ -64,7 +64,6 @@ export default function SchedulesPage() {
   const schedules = useAsync(() => api.listSchedules(), []);
   useServerEvent("schedule.updated", () => void schedules.reload());
   const [editing, setEditing] = useState<Schedule | "new" | null>(null);
-  const [choosing, setChoosing] = useState(false);
 
   const toggle = async (s: Schedule, v: boolean) => {
     try {
@@ -110,7 +109,7 @@ export default function SchedulesPage() {
         title="Schedules"
         subtitle="Work that runs on a timer: each activation opens a task for an agent, who researches and decides."
         actions={
-          <Button variant="primary" onClick={() => setChoosing(true)}>
+          <Button variant="primary" onClick={() => setEditing("new")}>
             <Icon name="plus" className="h-4 w-4" /> New schedule
           </Button>
         }
@@ -214,30 +213,6 @@ export default function SchedulesPage() {
         </div>
       )}
 
-      <Modal
-        open={choosing}
-        onClose={() => setChoosing(false)}
-        title="New schedule"
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            className="rounded-lg border border-line p-4 text-left hover:border-accent-line hover:bg-accent-soft"
-            onClick={() => {
-              setChoosing(false);
-              setEditing("new");
-            }}
-          >
-            <p className="text-sm font-semibold text-fg">
-              Agent task
-            </p>
-            <p className="mt-1 text-xs text-fg-3">
-              Opens a task for an agent each time. It can search, read
-              originals, avoid repeats, add images and decide whether to post.
-              More tokens.
-            </p>
-          </button>
-        </div>
-      </Modal>
 
       <ScheduleModal
         open={editing !== null}
