@@ -24,11 +24,9 @@
   <a href="README.zh-TW.md"><img src="https://img.shields.io/badge/lang-繁體中文-0b7285" alt="繁體中文" /></a>
 </p>
 
-```
- 你 · 排程 · MCP client ─▶ 任務 ─▶ Agent ─▶ 工具（內建 · MCP 伺服器 · Runner 上自己的 CLI）
-                                     │
-                     需要你決定 / 有風險的工具呼叫 ─▶ 你在對話串裡核准 ─▶ 它繼續
-```
+<p align="center">
+  <img src="docs/screenshots/board.png" alt="CueFlow 看板與等待核准的任務對話串" width="800" />
+</p>
 
 ---
 

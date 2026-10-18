@@ -25,11 +25,9 @@
   <a href="README.zh-TW.md"><img src="https://img.shields.io/badge/lang-繁體中文-555" alt="繁體中文" /></a>
 </p>
 
-```
- You · Schedule · MCP client ─▶ Task ─▶ Agent ─▶ tools (built-in · MCP servers · its own CLI on a runner)
-                                         │
-                       needs a decision / risky tool call ─▶ you approve in the thread ─▶ it continues
-```
+<p align="center">
+  <img src="docs/screenshots/board.png" alt="CueFlow board with a task thread waiting for approval" width="800" />
+</p>
 
 ---
 
