@@ -34,6 +34,9 @@ worker acts on it (`DONE` or `FAILED`, and a failed one can be retried). Nothing
 - **Acting**: a kind can act by itself (the content module's `post` publishes); otherwise the worker calls the
   org's `action` connector (`mcp_action`, see [connectors.md](connectors.md)). An org with neither is done at
   approval: the review was the point.
+- **Approving**: a kind can refuse an approval its action could not carry out (its `Approve` hook, run on the
+  item inside the approval). `post` refuses one with no publisher to use, or no accounts for a publisher that
+  needs them; the approve endpoints answer `400 invalid_argument` with the reason.
 - **Agents**: capability `deliverables` (tools `create_deliverable`, `list_deliverables`,
   `revise_deliverable`).
 - **Dashboard**: the Deliverables page (review, edit, approve, reject, retry) and a task's deliverables.

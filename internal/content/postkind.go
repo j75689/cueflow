@@ -15,6 +15,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/media"
+	"github.com/j75689/cueflow/internal/store"
 )
 
 // PostKind is the deliverable kind that carries a social post. It is the post flow on the
@@ -114,8 +115,37 @@ func (m *Module) postKind() deliverable.Kind {
 			_, err := DecodePostPayload(raw)
 			return err
 		},
-		Act: m.publishDeliverable,
+		Approve: m.approvablePost,
+		Act:     m.publishDeliverable,
 	}
+}
+
+// approvablePost refuses to approve a post its publisher could not take: one with no publisher to use, or no
+// accounts for a publisher that needs them (the MCP publisher). Without it the post would be queued and fail
+// in the worker; the review page warns about the same thing before the button is pressed.
+func (m *Module) approvablePost(ctx context.Context, d *deliverable.Deliverable) error {
+	p, err := DecodePostPayload(d.Payload)
+	if err != nil {
+		return &store.ValidationError{Msg: err.Error()}
+	}
+	id, err := m.resolvePublisher(ctx, p.PublisherConnectorID)
+	if err != nil {
+		if errors.Is(err, errNoPublisher) {
+			return &store.ValidationError{Msg: err.Error()}
+		}
+		return err
+	}
+	c, err := m.Store.GetConnector(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return &store.ValidationError{Msg: "the post's publisher connector no longer exists; choose another"}
+	}
+	if err != nil {
+		return err
+	}
+	if spec, ok := connector.Lookup(c.Type); ok && spec.AccountsRequired && len(p.Accounts) == 0 {
+		return &store.ValidationError{Msg: fmt.Sprintf("%s needs at least one account: pick the accounts to post to before approving", c.Name)}
+	}
+	return nil
 }
 
 // publishDeliverable is the post kind's action: hand the post to the publisher under the grant
@@ -164,13 +194,15 @@ func (m *Module) publishDeliverable(ctx context.Context, d *deliverable.Delivera
 	return out, nil
 }
 
+var errNoPublisher = errors.New("no active publisher connector configured (add an MCP publisher under Connectors)")
+
 func (m *Module) resolvePublisher(ctx context.Context, chosen *uuid.UUID) (uuid.UUID, error) {
 	if chosen != nil {
 		return *chosen, nil
 	}
 	c, err := m.Store.FirstActiveConnector(ctx, connector.KindPublisher)
 	if errors.Is(err, domain.ErrNotFound) {
-		return uuid.Nil, errors.New("no active publisher connector configured (add an MCP publisher under Connectors)")
+		return uuid.Nil, errNoPublisher
 	}
 	if err != nil {
 		return uuid.Nil, err

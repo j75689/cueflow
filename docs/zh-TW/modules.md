@@ -18,6 +18,7 @@ CueFlow 的核心不綁任何一種工作：org、agent、task、看板、排程
 Deliverable 是 agent 寫進審核佇列的型別化項目（內建 `document`，其他模組可以加 kind）。狀態流程是 `DRAFT → PENDING_REVIEW → APPROVED | REJECTED`；核准的項目變成 `QUEUED`，由 worker 執行（`DONE` 或 `FAILED`，失敗的可以重試）。人核准之前什麼都不會執行。
 
 - **執行**：kind 可以自己執行（content 模組的 `post` 會發布）；否則 worker 呼叫 org 的 `action` connector（`mcp_action`，見 [connectors.md](../connectors.md)（英文））。兩者都沒有的 org，核准就算完成：審核本身就是目的。
+- **核准**：kind 可以拒絕它做不到的核准（`Approve` hook，在核准過程中對項目執行）。`post` 在沒有可用的發布器、或發布器需要帳號卻沒選帳號時會拒絕，核准 API 回 `400 invalid_argument` 並附上原因。
 - **Agent**：能力 `deliverables`（工具 `create_deliverable`、`list_deliverables`、`revise_deliverable`）。
 - **儀表板**：Deliverables 頁（審核、編輯、核准、退回、重試），以及 task 頁上它產出的 deliverable。
 - **API 與 MCP**：`/api/v1/deliverables`（[api.md](../api.md)（英文）），以及 operator MCP 的 `list_deliverables`。

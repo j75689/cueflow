@@ -242,6 +242,7 @@ stateDiagram-v2
 - 轉換規則只定義在 `internal/deliverable/deliverable.go` 一處，任何不在表上的轉換都會回傳 `invalid_transition`。
 - 只有 `DRAFT` / `PENDING_REVIEW` 可以編輯，編輯需帶 `version`，版本不符回 `409`。
 - 每次轉換與稽核紀錄（`deliverable_audit_logs`）在**同一個交易**內寫入。
+- 核准時也會詢問項目的 kind（`Kind.Approve`，在鎖住的那一列上執行）：發布器需要帳號卻沒選帳號的 `post` 會以 `invalid_argument` 被拒，而不是之後才在 worker 失敗。
 
 ### 5.2 核准之後會發生什麼
 

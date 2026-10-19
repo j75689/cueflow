@@ -250,6 +250,8 @@ stateDiagram-v2
 - Transitions are defined in exactly one place, `internal/deliverable/deliverable.go`; anything not in the table returns `invalid_transition`.
 - Only `DRAFT` / `PENDING_REVIEW` items can be edited; edits must carry `version`, and a stale version returns `409`.
 - Each transition and its audit entry (`deliverable_audit_logs`) are written in **the same transaction**.
+- Approval also asks the item's kind (`Kind.Approve`, on the locked row): a `post` with no accounts for a publisher
+  that needs them is refused with `invalid_argument` instead of failing later in the worker.
 
 ### 5.2 What approval leads to
 

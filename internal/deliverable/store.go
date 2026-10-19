@@ -232,6 +232,9 @@ type TransitionOpts struct {
 	ExternalIDs       map[string]string
 	Result            map[string]any
 	ActedAt           *time.Time
+	// Check, when set, vets the current row after the state machine has allowed the move and before it is
+	// made; its error aborts the transition.
+	Check func(ctx context.Context, cur *Deliverable) error
 }
 
 // Transition moves an item to a new status if the state machine allows it, atomically with its
@@ -252,6 +255,11 @@ func (s *Store) Transition(ctx context.Context, id uuid.UUID, to Status, action 
 func transition(ctx context.Context, tx querier, cur *Deliverable, to Status, action Action, actor Actor, note string, opts *TransitionOpts) (*Deliverable, error) {
 	if err := CheckTransition(cur.Status, to); err != nil {
 		return nil, err
+	}
+	if opts != nil && opts.Check != nil {
+		if err := opts.Check(ctx, cur); err != nil {
+			return nil, err
+		}
 	}
 	sets := []string{"status=$2", "version=version+1", "updated_at=NOW()"}
 	args := []any{cur.ID, string(to)}
