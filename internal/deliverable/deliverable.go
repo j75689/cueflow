@@ -155,6 +155,12 @@ type Kind struct {
 	Schema map[string]any `json:"schema,omitempty"`
 	// Validate rejects a payload that does not fit the kind; nil accepts any JSON object.
 	Validate func(payload json.RawMessage) error `json:"-"`
+	// Approve, when set, says whether a reviewer may approve the item as it stands, beyond the payload's
+	// shape (the content module refuses a post its publisher could not take). It runs inside the approval
+	// transaction, holding the item's row lock, and its own queries take other pool connections: keep it to
+	// quick store lookups, never a network call (such as asking a publisher for its accounts). Return a
+	// *store.ValidationError for a reason the reviewer can fix.
+	Approve func(ctx context.Context, d *Deliverable) error `json:"-"`
 	// Act, when set, is what approval leads to for this kind, instead of an action connector: the
 	// worker calls it once per attempt under the item's grant (the content module publishes a
 	// "post" this way). Previous attempts' external ids are on the item.

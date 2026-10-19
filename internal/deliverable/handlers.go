@@ -168,12 +168,30 @@ func (h *handlers) transition(w http.ResponseWriter, r *http.Request, to Status,
 // apply is one reviewer transition and its event; the single endpoints and bulk both go through it,
 // so a rule added here (an org check, say) holds for both. Waking the dispatcher is the caller's.
 func (h *handlers) apply(ctx context.Context, id uuid.UUID, to Status, action Action, note string, opts *TransitionOpts) (*Deliverable, error) {
+	if to == StatusApproved {
+		// The kind may refuse the approval (e.g. a post with no accounts for a publisher that needs them);
+		// checked on the locked row, so an edit cannot slip in between.
+		o := TransitionOpts{}
+		if opts != nil {
+			o = *opts
+		}
+		o.Check = approvable
+		opts = &o
+	}
 	d, err := h.m.Store.Transition(ctx, id, to, action, ActorReviewer, note, opts)
 	if err != nil {
 		return nil, err
 	}
 	h.m.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	return d, nil
+}
+
+// approvable runs the item's kind's Approve hook, if it has one.
+func approvable(ctx context.Context, d *Deliverable) error {
+	if k, ok := KindByID(d.Kind); ok && k.Approve != nil {
+		return k.Approve(ctx, d)
+	}
+	return nil
 }
 
 func (h *handlers) submit(w http.ResponseWriter, r *http.Request) {
