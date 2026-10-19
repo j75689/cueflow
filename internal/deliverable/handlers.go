@@ -2,12 +2,14 @@ package deliverable
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/store"
 )
 
 // handlers serves the module's REST endpoints; h.s is the core server (auth, orgs, error mapping).
@@ -200,6 +202,83 @@ func (h *handlers) reject(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) retry(w http.ResponseWriter, r *http.Request) {
 	h.transition(w, r, StatusQueued, ActionRetried, "manual retry", nil)
+}
+
+// bulkLimit is how many ids one bulk request takes: the list page's size.
+const bulkLimit = 200
+
+// bulk approves or rejects many deliverables in one request. Each id is its own transition (and
+// audit entry), so one that another reviewer already moved fails alone, with the single endpoint's
+// code, and the rest go through; the response says which was which. Only a database error fails
+// the whole request.
+func (h *handlers) bulk(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Action string   `json:"action"`
+		IDs    []string `json:"ids"`
+		Note   string   `json:"note"`
+		Reason string   `json:"reason"`
+	}
+	if err := api.Decode(r, &req); err != nil {
+		h.s.Fail(w, err)
+		return
+	}
+	var to Status
+	var action Action
+	var opts *TransitionOpts
+	note := strings.TrimSpace(req.Note)
+	switch req.Action {
+	case "approve":
+		to, action = StatusApproved, ActionApproved
+	case "reject":
+		to, action = StatusRejected, ActionRejected
+		reason := strings.TrimSpace(req.Reason)
+		opts = &TransitionOpts{ReviewNote: &reason}
+		note = reason
+		if note == "" {
+			note = "rejected without a reason"
+		}
+	default:
+		h.s.Fail(w, store.Invalid(`action must be "approve" or "reject"`))
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > bulkLimit {
+		h.s.Fail(w, store.Invalid(fmt.Sprintf("ids must name 1 to %d deliverables", bulkLimit)))
+		return
+	}
+	type failure struct {
+		ID      string `json:"id"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	ok, failed := []uuid.UUID{}, []failure{}
+	seen := map[string]bool{}
+	for _, raw := range req.IDs {
+		if seen[raw] {
+			continue
+		}
+		seen[raw] = true
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			failed = append(failed, failure{raw, "not_found", "not found"})
+			continue
+		}
+		d, err := h.m.Store.Transition(r.Context(), id, to, action, ActorReviewer, note, opts)
+		if err != nil {
+			status, code, msg := api.ErrorStatus(err)
+			if status >= http.StatusInternalServerError || code == "canceled" {
+				h.s.Fail(w, err)
+				return
+			}
+			failed = append(failed, failure{raw, code, msg})
+			continue
+		}
+		ok = append(ok, d.ID)
+		h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	}
+	if to == StatusApproved && len(ok) > 0 {
+		h.m.Dispatcher.Wake()
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{"ok": ok, "failed": failed})
 }
 
 func (h *handlers) audit(w http.ResponseWriter, r *http.Request) {

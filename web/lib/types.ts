@@ -219,6 +219,12 @@ export interface DeliverableList {
   total: number;
 }
 
+// What POST /deliverables/bulk did to each id.
+export interface BulkResult {
+  ok: string[];
+  failed: { id: string; code: string; message: string }[];
+}
+
 export interface DeliverableAudit {
   id: string;
   deliverable_id: string;

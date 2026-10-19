@@ -6,7 +6,7 @@ import { STATUS_LABEL, STATUS_STYLE, StatusBadge } from "@/components/badges";
 import { RejectDialog } from "@/components/post";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import { Button, Checkbox, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, Select, cx } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { api } from "@/lib/api";
 import { fmtRelative, plural, shortId } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Deliverable, DeliverableStatus } from "@/lib/types";
@@ -86,31 +86,27 @@ export default function DeliverablesPage() {
       return next;
     });
 
-  // bulk runs fn over the chosen deliverables one by one and reports what failed and why.
-  // The ones that failed stay selected, so retrying them is one click.
-  const bulk = async (verb: "approve" | "reject", fn: (d: Deliverable) => Promise<unknown>) => {
+  // bulk sends the chosen deliverables to the server in one request and reports what failed and
+  // why. The ones that failed stay selected, so retrying them is one click.
+  const bulk = async (verb: "approve" | "reject", reason?: string) => {
     if (chosen.length === 0) {
       toast.info(`Nothing left to ${verb}`);
       return;
     }
     setBulkBusy(verb);
-    let ok = 0;
-    const failed: string[] = [];
-    const failedIds = new Set<string>();
-    for (const d of chosen) {
-      try {
-        await fn(d);
-        ok++;
-      } catch (e) {
-        failed.push(`${d.title || shortId(d.id)}: ${errorMessage(e)}`);
-        failedIds.add(d.id);
-      }
+    try {
+      const res = await api.bulkDeliverables({ action: verb, ids: chosen.map((d) => d.id), reason });
+      const title = Object.fromEntries(chosen.map((d) => [d.id, d.title || shortId(d.id)]));
+      setSelected(new Set(res.failed.map((f) => f.id)));
+      if (res.ok.length) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${plural(res.ok.length, "deliverable")}`);
+      if (res.failed.length)
+        toast.error(`Could not ${verb}: ${res.failed.map((f) => `${title[f.id] ?? shortId(f.id)}: ${f.message}`).join("; ")}`);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBulkBusy(null);
+      refresh();
     }
-    setBulkBusy(null);
-    setSelected(failedIds);
-    refresh();
-    if (ok) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${plural(ok, "deliverable")}`);
-    if (failed.length) toast.error(`Could not ${verb}: ${failed.join("; ")}`);
   };
 
   const counts = stats.data?.deliverables_by_status ?? {};
@@ -236,7 +232,7 @@ export default function DeliverablesPage() {
               <Button
                 size="sm"
                 variant="success"
-                onClick={() => void bulk("approve", (d) => api.approveDeliverable(d.id))}
+                onClick={() => void bulk("approve")}
                 loading={bulkBusy === "approve"}
                 disabled={!!bulkBusy}
               >
@@ -339,7 +335,7 @@ export default function DeliverablesPage() {
         open={bulkRejecting}
         title={`Reject ${plural(chosen.length, "deliverable")}`}
         onClose={() => setBulkRejecting(false)}
-        onConfirm={(reason) => bulk("reject", (d) => api.rejectDeliverable(d.id, reason))}
+        onConfirm={(reason) => bulk("reject", reason)}
       />
     </div>
   );

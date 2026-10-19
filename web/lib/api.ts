@@ -4,6 +4,7 @@ import type {
   AgentMemory,
   AgentRun,
   AgentToken,
+  BulkResult,
   Connector,
   ConnectorAccount,
   ConnectorTestResult,
@@ -161,6 +162,8 @@ export const api = {
   rejectDeliverable: (id: string, reason: string) =>
     request<Deliverable>("POST", `/deliverables/${id}/reject`, { reason }),
   retryDeliverable: (id: string) => request<Deliverable>("POST", `/deliverables/${id}/retry`),
+  bulkDeliverables: (body: { action: "approve" | "reject"; ids: string[]; note?: string; reason?: string }) =>
+    request<BulkResult>("POST", "/deliverables/bulk", body),
   deliverableAudit: (id: string) => request<DeliverableAudit[]>("GET", `/deliverables/${id}/audit`),
 
   listConnectors: (kind?: string) => request<Connector[]>("GET", "/connectors", undefined, { kind }),

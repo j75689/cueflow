@@ -51,6 +51,7 @@ func (m *Module) Routes(s *api.Server, r chi.Router) {
 	h := &handlers{m: m, s: s}
 	r.Get("/deliverables", h.list)
 	r.Post("/deliverables", h.create)
+	r.Post("/deliverables/bulk", h.bulk)
 	r.Get("/deliverables/{id}", h.get)
 	r.Patch("/deliverables/{id}", h.update)
 	r.Delete("/deliverables/{id}", h.remove)
