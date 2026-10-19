@@ -45,6 +45,11 @@ export function fromLocalInput(v: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// "1 deliverable", "3 deliverables".
+export function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 export function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : "—";
 }

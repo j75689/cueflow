@@ -134,7 +134,8 @@ export function Shell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-line bg-surface/90 px-4 py-2.5 backdrop-blur md:hidden">
+        {/* Fixed height: sticky bars inside pages sit below it on small screens (top-12). */}
+        <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-line bg-surface/90 px-4 backdrop-blur md:hidden">
           <button
             onClick={() => setOpen(true)}
             className="rounded p-1.5 text-fg-2 hover:bg-subtle"

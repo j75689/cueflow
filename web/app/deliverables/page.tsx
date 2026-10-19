@@ -7,7 +7,7 @@ import { RejectDialog } from "@/components/post";
 import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import { Button, Checkbox, EmptyState, ErrorBox, Icon, Input, Loading, PageHeader, Pill, Select, cx } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { fmtRelative, shortId } from "@/lib/format";
+import { fmtRelative, plural, shortId } from "@/lib/format";
 import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Deliverable, DeliverableStatus } from "@/lib/types";
 
@@ -60,6 +60,8 @@ export default function DeliverablesPage() {
     void stats.reload();
   }, 250);
   useServerEvent(["deliverable.updated", "deliverable.deleted"], refresh);
+  // A new scope, kind or search is a new list: what was ticked in the old one does not carry over.
+  useEffect(() => setSelected(new Set()), [scope, kind, query]);
 
   const run = async (id: string, fn: () => Promise<unknown>, msg: string) => {
     setBusy(id);
@@ -85,22 +87,29 @@ export default function DeliverablesPage() {
     });
 
   // bulk runs fn over the chosen deliverables one by one and reports what failed and why.
+  // The ones that failed stay selected, so retrying them is one click.
   const bulk = async (verb: "approve" | "reject", fn: (d: Deliverable) => Promise<unknown>) => {
+    if (chosen.length === 0) {
+      toast.info(`Nothing left to ${verb}`);
+      return;
+    }
     setBulkBusy(verb);
     let ok = 0;
     const failed: string[] = [];
+    const failedIds = new Set<string>();
     for (const d of chosen) {
       try {
         await fn(d);
         ok++;
       } catch (e) {
         failed.push(`${d.title || shortId(d.id)}: ${errorMessage(e)}`);
+        failedIds.add(d.id);
       }
     }
     setBulkBusy(null);
-    setSelected(new Set());
+    setSelected(failedIds);
     refresh();
-    if (ok) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${ok} deliverable${ok === 1 ? "" : "s"}`);
+    if (ok) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${plural(ok, "deliverable")}`);
     if (failed.length) toast.error(`Could not ${verb}: ${failed.join("; ")}`);
   };
 
@@ -112,13 +121,14 @@ export default function DeliverablesPage() {
     if (d.status === "PENDING_REVIEW")
       return (
         <>
-          <Button size="sm" variant="ghost" onClick={() => setRejecting(d)} disabled={busy === d.id}>
+          <Button size="sm" variant="ghost" onClick={() => setRejecting(d)} disabled={busy === d.id || !!bulkBusy}>
             Reject
           </Button>
           <Button
             size="sm"
             variant="success"
             loading={busy === d.id}
+            disabled={!!bulkBusy}
             onClick={() => run(d.id, () => api.approveDeliverable(d.id), "Approved")}
           >
             <Icon name="check" className="h-3.5 w-3.5" /> Approve
@@ -130,6 +140,7 @@ export default function DeliverablesPage() {
         <Button
           size="sm"
           loading={busy === d.id}
+          disabled={!!bulkBusy}
           onClick={() => run(d.id, () => api.retryDeliverable(d.id), "Re-queued")}
         >
           <Icon name="refresh" className="h-3.5 w-3.5" /> Retry
@@ -208,12 +219,14 @@ export default function DeliverablesPage() {
       {items.error && <ErrorBox onRetry={items.reload}>{items.error}</ErrorBox>}
       {items.loading && !items.data && <Loading />}
 
+      {/* top-12 clears the shell's mobile header (h-12), which is sticky in the same scroll flow. */}
       {pending.length > 0 && (
-        <div className="sticky top-0 z-20 mb-2.5 flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-surface/95 px-3 py-1.5 backdrop-blur">
+        <div className="sticky top-12 z-20 mb-2.5 flex min-h-11 flex-wrap items-center gap-3 rounded-lg border border-line bg-surface/95 px-3 py-1.5 backdrop-blur md:top-0">
           <Checkbox
             checked={chosen.length > 0 && chosen.length === pending.length}
             onChange={(on) => setSelected(on ? new Set(pending.map((d) => d.id)) : new Set())}
             label={chosen.length ? `${chosen.length} selected` : "Select all"}
+            disabled={!!bulkBusy}
           />
           {chosen.length > 0 && (
             <div className="ml-auto flex gap-1.5">
@@ -254,7 +267,9 @@ export default function DeliverablesPage() {
                 key={d.id}
                 className={cx(
                   "rounded-xl border bg-surface p-4 shadow-card transition-colors",
-                  selected.has(d.id) ? "border-accent-solid ring-1 ring-accent-solid/30" : "border-line hover:border-line-strong",
+                  d.status === "PENDING_REVIEW" && selected.has(d.id)
+                    ? "border-accent-solid ring-1 ring-accent-solid/30"
+                    : "border-line hover:border-line-strong",
                 )}
               >
                 <div className="flex flex-wrap items-start gap-2">
@@ -265,6 +280,7 @@ export default function DeliverablesPage() {
                           checked={selected.has(d.id)}
                           onChange={(on) => toggleSelect(d.id, on)}
                           label={<span className="sr-only">Select {d.title || "deliverable"}</span>}
+                          disabled={!!bulkBusy}
                         />
                       </div>
                     )}
@@ -321,7 +337,7 @@ export default function DeliverablesPage() {
       />
       <RejectDialog
         open={bulkRejecting}
-        title={`Reject ${chosen.length} deliverable${chosen.length === 1 ? "" : "s"}`}
+        title={`Reject ${plural(chosen.length, "deliverable")}`}
         onClose={() => setBulkRejecting(false)}
         onConfirm={(reason) => bulk("reject", (d) => api.rejectDeliverable(d.id, reason))}
       />
