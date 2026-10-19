@@ -17,8 +17,7 @@ All images are in one package, `ghcr.io/j75689/cueflow`. `runner` and `agents` a
 | `slim`: CueFlow only (distroless) | `latest` | `<version>` |
 
 Images are built for [releases](https://github.com/j75689/cueflow/releases), not for every commit on `main`.
-`FROM ...:runner` moves to each new release; pin `<version>-runner` to choose when to upgrade. Test builds of a
-branch, run by hand, are tagged `<branch>-runner` and `sha-<commit>-runner`; don't build on those.
+`FROM ...:runner` moves to each new release; pin `<version>-runner` to choose when to upgrade.
 
 ## Just a package or two
 

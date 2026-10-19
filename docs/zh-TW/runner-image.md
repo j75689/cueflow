@@ -20,7 +20,7 @@ agent 需要更多工具（其他 agent CLI、Python、ffmpeg⋯）時，就以�
 | `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents` | `<版本>-agents` |
 | `slim`：只有 CueFlow（distroless） | `latest` | `<版本>` |
 
-映像只在[發佈版本](https://github.com/j75689/cueflow/releases)時 build，不是 `main` 上的每個 commit 都有。`FROM ...:runner` 會跟著每個新版本移動；想自己決定什麼時候升級，就釘 `<版本>-runner`。手動對某個分支跑的測試 build 會標成 `<分支>-runner` 和 `sha-<commit>-runner`，不要拿來當底。
+映像只在[發佈版本](https://github.com/j75689/cueflow/releases)時 build，不是 `main` 上的每個 commit 都有。`FROM ...:runner` 會跟著每個新版本移動；想自己決定什麼時候升級，就釘 `<版本>-runner`。
 
 ## 只要一兩個套件
 
