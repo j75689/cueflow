@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.1](https://github.com/j75689/cueflow/compare/v1.0.0...v1.0.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **deliverables:** ask the kind before approving; refuse a post its publisher cannot take ([#49](https://github.com/j75689/cueflow/issues/49)) ([0189e67](https://github.com/j75689/cueflow/commit/0189e6744ec0deb22f6e0bdc7905d39bf9848987))
+* **events:** scope live updates to the org a tab is watching ([#48](https://github.com/j75689/cueflow/issues/48)) ([e3211fe](https://github.com/j75689/cueflow/commit/e3211fe2dc94c10c80be913209e42f8504ebebc4))
+* **web:** live updates, selection and one-request bulk actions on the Deliverables page ([#44](https://github.com/j75689/cueflow/issues/44)) ([c6a1b2e](https://github.com/j75689/cueflow/commit/c6a1b2e5d9957193447e23e8b516d7095d27b40e))
+
+
+### Documentation
+
+* **templates:** developer team template (product manager, tech lead, architect, engineer, reviewer, QA, tech writer) ([518805e](https://github.com/j75689/cueflow/commit/518805e06815e34ed1dba3b0ce7c4b98fbbbce06))
+
 ## [1.0.0](https://github.com/j75689/cueflow/commits/v1.0.0) (2026-10-19)
 
 
