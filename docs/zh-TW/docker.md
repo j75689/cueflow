@@ -33,6 +33,8 @@ docker compose up -d
 
 在 `deploy/.env` 設定後執行 `docker compose up -d --build`。另有 `runner` 目標（agents 加上 git 與 gh，以 `cueflow runner run` 啟動），給 [deploy/runner](../../deploy/runner/README.md)（英文）用。
 
+三種映像也都發佈在 ghcr：`ghcr.io/j75689/cueflow:main`（slim）、`:agents`、`:runner`。標籤說明，以及怎麼做一個裝了自己工具的 runner，見 [runner-image.md](runner-image.md)。
+
 ## 網頁搜尋
 
 compose 內含 SearXNG（請在 `deploy/.env` 設定 `SEARXNG_SECRET`）。新增 *SearXNG* connector，URL 填 `http://searxng:8080`；沒有指定搜尋 connector 的 agent 會使用第一個啟用中的。

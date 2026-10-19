@@ -8,9 +8,14 @@
 #   docker build -t cueflow:slim .
 #   docker build --target agents -t cueflow:agents .
 #   docker build --target runner -t cueflow:runner .
+#   docker build --target runner --build-arg RUNNER_EXTRA_PACKAGES="python3 ffmpeg" -t cueflow:runner .
+#
+# All three are published to ghcr.io (see .github/workflows/image.yml); docs/runner-image.md shows how
+# to build your own runner on top of the published one.
 
-# 1. Dashboard (Next.js static export)
-FROM node:26-alpine AS web
+# 1. Dashboard (Next.js static export). It and the Go build run on the build machine's platform and
+#    cross-compile, so an arm64 image does not build them under emulation.
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -18,14 +23,16 @@ COPY web/ ./
 RUN npm run build
 
 # 2. Go binaries with the dashboard embedded
-FROM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /web/out/ ./internal/webui/dist/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cueflow ./cmd/cueflow \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mock-publisher-mcp ./cmd/mock-publisher-mcp
+RUN export CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+ && go build -trimpath -ldflags="-s -w" -o /out/cueflow ./cmd/cueflow \
+ && go build -trimpath -ldflags="-s -w" -o /out/mock-publisher-mcp ./cmd/mock-publisher-mcp
 
 # 3. agents: Node.js plus the ACP adapters for Claude Code and Codex, for the
 #    "External agent (ACP)" runtime. Other presets (Gemini CLI, OpenCode...) run via npx or PATH.
@@ -52,10 +59,12 @@ ENTRYPOINT ["/usr/local/bin/cueflow"]
 # 4. runner: a machine that works agents' tasks (see deploy/runner). It adds git and gh so the agent
 #    can clone, push a branch and open a pull request with the token it is given (GH_TOKEN), and
 #    nothing else of the host: the work directory and the runner credentials are volumes.
+#    RUNNER_EXTRA_PACKAGES adds Debian packages (space-separated) for agents that need a tool or two.
 FROM agents AS runner
+ARG RUNNER_EXTRA_PACKAGES=""
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git gh openssh-client \
+ && apt-get install -y --no-install-recommends git gh openssh-client ${RUNNER_EXTRA_PACKAGES} \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system credential.helper '!gh auth git-credential' \
  && git config --system --add safe.directory '*' \

@@ -22,9 +22,16 @@ Your own `gh` / Claude / SSH logins on the host stay out of reach.
    docker compose up -d
    docker compose run --rm runner status
    ```
-   The registration is kept in the `config` volume, so restarts and rebuilds do not need it again.
+   The registration is kept in the `config` volume, so restarts and updates (`docker compose pull && docker compose
+   up -d`) do not need it again.
 5. Under **Connectors** add a **Runner pool** (label `claude-code`) and give the agent that runtime. Stop any other
    runner that is registered for the same pool, or they will share the tasks.
+
+## Other tools and agents
+
+The compose file runs the published `ghcr.io/j75689/cueflow:runner` image: Claude Code, Codex, git, gh and nothing
+else. To give agents more tools (Python, ffmpeg...) or another agent CLI (Gemini CLI, OpenCode, Goose), build your own
+image on top of it: [docs/runner-image.md](../../docs/runner-image.md).
 
 ## Coding agents and the shell
 

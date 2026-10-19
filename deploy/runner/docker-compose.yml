@@ -4,12 +4,18 @@
 #   cp .env.example .env            # fill it in
 #   docker compose run --rm runner register --url https://<your CueFlow> --token cfreg_... --name docker-runner
 #   docker compose up -d
+#
+# It runs the published image; `docker compose pull && docker compose up -d` updates it. To add tools, see
+# docs/runner-image.md.
 services:
   runner:
-    build:
-      context: ../..
-      target: runner
-    image: cueflow:runner
+    image: ${CUEFLOW_RUNNER_IMAGE:-ghcr.io/j75689/cueflow:runner}
+    # Working from source, or adding Debian packages: uncomment, then `docker compose up -d --build`.
+    # build:
+    #   context: ../..
+    #   target: runner
+    #   args:
+    #     RUNNER_EXTRA_PACKAGES: ${RUNNER_EXTRA_PACKAGES:-} # e.g. "python3 ffmpeg"
     restart: unless-stopped
     env_file: .env
     environment:

@@ -40,6 +40,9 @@ docker compose up -d
 Set it in `deploy/.env`, then `docker compose up -d --build`. The `runner` target (agents plus git and gh,
 started as `cueflow runner run`) is for [deploy/runner](../deploy/runner/README.md).
 
+All three are also published as `ghcr.io/j75689/cueflow:main` (slim), `:agents` and `:runner`; the tags and how to
+build a runner with your own tools are in [runner-image.md](runner-image.md).
+
 ## Web search
 
 The compose file includes SearXNG (set `SEARXNG_SECRET` in `deploy/.env`). Add a *SearXNG* connector with URL

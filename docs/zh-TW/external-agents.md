@@ -35,7 +35,7 @@ claude mcp add --transport http cueflow http://localhost:3000/mcp \
 
 本機政策優先：Runner 自己的 `runner.json` 只能縮小伺服器的要求（允許的 preset、禁用網路、要執行的指令、ACP 登入方式），`cueflow runner status` 可檢查連線，在後台撤銷 Runner 會立即讓它停止。細節與範例見 [api.md](../api.md#runners)（英文）。
 
-想讓 agent 碰不到你自己的登入，可以把 Runner 放進容器：它只拿到專屬的 Claude token、另給的 GitHub token 和乾淨的工作目錄，見 [deploy/runner](../../deploy/runner/README.md)（英文）。
+想讓 agent 碰不到你自己的登入，可以把 Runner 放進容器：它只拿到專屬的 Claude token、另給的 GitHub token 和乾淨的工作目錄，見 [deploy/runner](../../deploy/runner/README.md)（英文）。要在那個容器裡加工具或其他 agent CLI，見 [runner-image.md](runner-image.md)。
 
 ## 自主驅動的 agent
 
