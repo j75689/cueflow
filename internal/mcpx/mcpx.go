@@ -150,7 +150,7 @@ func textOf(res *mcp.CallToolResult) string {
 }
 
 // readableOf is the result as a reader sees it: the text, then each embedded resource's text under
-// its URI. A binary resource or a link is named, not inlined.
+// its URI. A binary resource, an image, audio or a link is named, not inlined.
 func readableOf(res *mcp.CallToolResult) string {
 	var parts []string
 	for _, c := range res.Content {
@@ -173,6 +173,10 @@ func readableOf(res *mcp.CallToolResult) string {
 			}
 		case *mcp.ResourceLink:
 			parts = append(parts, "--- link: "+c.URI)
+		case *mcp.ImageContent:
+			parts = append(parts, fmt.Sprintf("--- image (%s): %d bytes, not shown", c.MIMEType, len(c.Data)))
+		case *mcp.AudioContent:
+			parts = append(parts, fmt.Sprintf("--- audio (%s): %d bytes, not shown", c.MIMEType, len(c.Data)))
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))

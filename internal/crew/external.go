@@ -227,17 +227,19 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 			text, isErr = cerr.Error(), true
 		}
 	}
-	text = clipToolResult(text)
 	if text == "" {
 		text = "(no output)" // an empty result would read as "still running"
 	}
+	// The agent reads the result in the system message below; the full one is kept on the approval.
+	shown := clipNoted(text, 4000, "")
+	text = clipToolResult(text)
 	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
 	outcome := "It ran and returned"
 	if isErr {
 		outcome = "It ran but failed with"
 	}
 	c.system(ctx, ap.TaskID, fmt.Sprintf("A human approved the call to %s on %s.%s %s:\n%s\nDo not call it again for this request.",
-		ap.Tool, ap.ServerName, noteText, outcome, clip(text, 4000)))
+		ap.Tool, ap.ServerName, noteText, outcome, shown))
 	c.resumeAfterApproval(ctx, ap.TaskID)
 	return nil
 }

@@ -19,6 +19,8 @@ func TestCallTextKeepsEmbeddedResources(t *testing.T) {
 			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "repo://o/r/contents/src/sites.js", MIMEType: "text/javascript", Text: "const NETFLIX = {};"}},
 			&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: "repo://o/r/contents/icon.png", MIMEType: "image/png", Blob: []byte{1, 2, 3}}},
 			&mcp.ResourceLink{URI: "https://example.com/raw", Name: "raw"},
+			&mcp.ImageContent{Data: []byte{1, 2}, MIMEType: "image/png"},
+			&mcp.AudioContent{Data: []byte{1}, MIMEType: "audio/wav"},
 		}}, struct{}{}, nil
 	})
 	ct, st := mcp.NewInMemoryTransports()
@@ -44,6 +46,8 @@ func TestCallTextKeepsEmbeddedResources(t *testing.T) {
 		"--- repo://o/r/contents/src/sites.js (text/javascript)\nconst NETFLIX = {};",
 		"--- repo://o/r/contents/icon.png (image/png): binary, 3 bytes, not shown",
 		"--- link: https://example.com/raw",
+		"--- image (image/png): 2 bytes, not shown",
+		"--- audio (audio/wav): 1 bytes, not shown",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
