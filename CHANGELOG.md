@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.0](https://github.com/j75689/cueflow/compare/v0.2.0...v1.0.0) (2026-10-19)
+## [1.0.0](https://github.com/j75689/cueflow/commits/v1.0.0) (2026-10-19)
 
 
 ### ⚠ BREAKING CHANGES
@@ -24,8 +24,8 @@
 * drop Postiz and ship a mock publisher for the MCP publisher contract ([#7](https://github.com/j75689/cueflow/issues/7)) ([3b70a62](https://github.com/j75689/cueflow/commit/3b70a629729c5fab352b37eea085938f8f2d1c9e))
 * external agents over ACP (Claude Code, Codex, Gemini CLI, ...) ([8dd3aa6](https://github.com/j75689/cueflow/commit/8dd3aa6cac2929af13a6a4d211108a37821f1432))
 * external MCP tool servers with per-tool permissions ([2275467](https://github.com/j75689/cueflow/commit/2275467cccf49dde5c45876a253288499e127e1a))
-* **gcp:** an account for the lessons runner that may only create files under uploads/ ([b641552](https://github.com/j75689/cueflow/commit/b641552b280a6c8e078899ba9a2e6a239eda1e78))
-* **gcp:** let the helper account use Firestore documents for news-trends, with a TTL on news_seen ([642bba5](https://github.com/j75689/cueflow/commit/642bba5d2ef69c68b657c4d6ae11638a16832dbd))
+* **gcp:** a service account that may only create files under uploads/ ([b641552](https://github.com/j75689/cueflow/commit/b641552b280a6c8e078899ba9a2e6a239eda1e78))
+* **gcp:** let the helper account use Firestore documents, with a TTL on seen items ([642bba5](https://github.com/j75689/cueflow/commit/642bba5d2ef69c68b657c4d6ae11638a16832dbd))
 * Gemini on Vertex AI connector ([270a5d2](https://github.com/j75689/cueflow/commit/270a5d2e50cc44b294531c5c61f4c77fb06823d9))
 * more LLM auth options, Bedrock/Vertex, OpenRouter and Azure OpenAI ([77f8970](https://github.com/j75689/cueflow/commit/77f8970e4eece4b5297ec0c6bf08f66043a62cd0))
 * name connectors from their settings and show a config summary ([afc3273](https://github.com/j75689/cueflow/commit/afc327320ddb9ba728e3b7ebc10f96f799a5949b))
