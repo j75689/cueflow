@@ -41,7 +41,7 @@ flowchart LR
 
 ## 3. 預設團隊
 
-第一次啟動且尚無任何 agent 時，系統只會自動建立一個角色：Chief（`internal/crew/defaults.go`），可以在 UI 修改；其餘的隊友由你自己新增：手動建，或匯入一份**範本團隊**：一個 JSON 檔，用法和 Grafana 的 dashboard 一樣（Agents 頁的 *Import team*；*Export team* 可以把現有 org 匯出成一份）。Repo 附了 [`templates/social-content.json`](../../templates/social-content.json)，就是下表的研究員、文案與編輯：
+第一次啟動且尚無任何 agent 時，系統只會自動建立一個角色：Chief（`internal/crew/defaults.go`），可以在 UI 修改；其餘的隊友由你自己新增：手動建，或匯入一份**範本團隊**：一個 JSON 檔，用法和 Grafana 的 dashboard 一樣（Agents 頁的 *Import team*；*Export team* 可以把現有 org 匯出成一份）。Repo 附了 [`templates/social-content.json`](../../templates/social-content.json)，就是下表的研究員、文案與編輯；另外還有 [`templates/developer-team.json`](../../templates/developer-team.json)，一支軟體開發團隊（產品經理、tech lead、架構師、工程師、reviewer、QA、技術文件），說明在 [templates/README.md](../../templates/README.md)（英文）：
 
 | 角色 | slug | 能力 | 職責 |
 |---|---|---|---|

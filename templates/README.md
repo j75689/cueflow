@@ -16,3 +16,32 @@ in CueFlow is a template, you keep them as files and import them where you need 
 | File | Team |
 |---|---|
 | [`social-content.json`](social-content.json) | Researcher, Writer and Editor for post drafts (the [content module](../docs/modules.md#content)); the Chief a new org starts with delegates to them |
+| [`developer-team.json`](developer-team.json) | Product Manager, Tech Lead, Architect, Engineer, Reviewer, QA and Tech Writer for software work; see below |
+
+## Developer team
+
+The roles follow the engineering division of [agency-agents](https://github.com/msitarzewski/agency-agents),
+cut down to what runs on a board with a human merging: a request goes PRD → design → pull request → review →
+verification → docs. Ask the Chief for a change (or assign the task to `@tech-lead` directly) and the Tech Lead
+runs the stages as subtasks, one at a time, and reports the pull request back. A request that is a need rather
+than a change ("users keep asking for X") goes to the Product Manager first, which writes the PRD (problem,
+goals with metrics, non-goals, acceptance criteria) and asks you the decisions that are yours; a concrete
+change skips that stage. Nothing merges: the pull request is the deliverable, and the PRD, design, review and
+verification reports land under Deliverables as documents.
+
+What each role needs:
+
+- **Engineer, Reviewer, QA, Tech Writer** touch code, so give them a *Runtime* that allows the shell: a
+  [runner](../docs/external-agents.md#run-agents-on-your-own-machine-runners) started with `--allow-shell`, or
+  the [runner container](../deploy/runner/README.md), which also gives the agent its own GitHub token and Claude
+  login. On the built-in LLM loop (no runtime) they only read public pages and write documents: the Engineer
+  then delivers the change as a diff in a document, and the Reviewer and QA review what they can read.
+- **Product Manager, Tech Lead and Architect** work on the built-in loop; the Architect reads code better with a
+  runner too.
+- A repository to work in: name it in the task, or tell the Tech Lead once and it remembers.
+- Protect the default branch of that repository (require a pull request). The agents never merge, but the
+  token they hold decides what they *could* do.
+
+Two engineers working in parallel: import the file, then duplicate the Engineer in the dashboard with another
+slug (`frontend`, `backend`) and a line in its instructions about its half; the Tech Lead sees both in its team
+list.
