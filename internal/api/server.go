@@ -341,26 +341,35 @@ func WriteError(w http.ResponseWriter, code int, errCode, msg string) {
 	WriteJSON(w, code, map[string]any{"error": map[string]string{"code": errCode, "message": msg}})
 }
 
-// fail maps domain/store errors to HTTP responses.
+// Fail maps domain/store errors to HTTP responses.
 func (s *Server) Fail(w http.ResponseWriter, err error) {
+	status, code, msg := ErrorStatus(err)
+	if status == http.StatusInternalServerError {
+		s.Logger.Error("request failed", "err", err)
+	}
+	WriteError(w, status, code, msg)
+}
+
+// ErrorStatus is the HTTP status, error code and message a domain/store error maps to, for
+// handlers that report errors per item instead of failing the request (Fail uses it too).
+func ErrorStatus(err error) (status int, code, msg string) {
 	var te *domain.TransitionError
 	var ve *store.ValidationError
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return http.StatusNotFound, "not_found", "not found"
 	case errors.Is(err, store.ErrMediaInUse):
-		WriteError(w, http.StatusConflict, "in_use", "a deliverable that is not yet done or rejected still uses this media; remove it from the deliverable first")
+		return http.StatusConflict, "in_use", "a deliverable that is not yet done or rejected still uses this media; remove it from the deliverable first"
 	case errors.Is(err, domain.ErrVersionConflict):
-		WriteError(w, http.StatusConflict, "version_conflict", "it was changed by someone else; reload and try again")
+		return http.StatusConflict, "version_conflict", "it was changed by someone else; reload and try again"
 	case errors.As(err, &te):
-		WriteError(w, http.StatusConflict, "invalid_transition", te.Error())
+		return http.StatusConflict, "invalid_transition", te.Error()
 	case errors.As(err, &ve):
-		WriteError(w, http.StatusBadRequest, "invalid_argument", ve.Error())
+		return http.StatusBadRequest, "invalid_argument", ve.Error()
 	case errors.Is(err, context.Canceled):
-		WriteError(w, 499, "canceled", "request canceled")
+		return 499, "canceled", "request canceled"
 	default:
-		s.Logger.Error("request failed", "err", err)
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+		return http.StatusInternalServerError, "internal", err.Error()
 	}
 }
 

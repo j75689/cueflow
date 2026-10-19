@@ -118,6 +118,7 @@ and `deliverable_transitions`; `/stats` adds `deliverables_by_status`; `GET /tas
 | PATCH | `/deliverables/{id}` | `{"version","title"?,"payload"?,"action_connector_id"?}` | Only `DRAFT` / `PENDING_REVIEW`; `409` on a stale version; the diff is audited |
 | DELETE | `/deliverables/{id}` | | `DRAFT` and `REJECTED` only |
 | POST | `/deliverables/{id}/submit` `/approve` `/reject` `/retry` | approve: `{"note"?,"action_connector_id"?}`, reject: `{"reason"?}` | Same rules as posts |
+| POST | `/deliverables/bulk` | `{"action":"approve"\|"reject","ids":[id,...],"note"?,"reason"?}` | Up to 200 ids, each its own transition: `{"ok":[id],"failed":[{"id","code","message"}]}` with the single endpoints' codes (`invalid_transition`, `not_found`); `200` even when every id failed. A database error stops the batch: that id is `internal`, the rest `not_attempted` |
 | GET | `/deliverables/{id}/audit` | | `[{action, actor, from_status, to_status, note, payload_diff, created_at}]` |
 
 ```json

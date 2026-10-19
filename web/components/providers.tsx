@@ -113,6 +113,8 @@ const HIDDEN_GRACE_MS = 60_000;
 const SSE_EVENTS = [
   "post.updated",
   "post.deleted",
+  "deliverable.updated",
+  "deliverable.deleted",
   "run.updated",
   "connector.updated",
   "task.updated",
