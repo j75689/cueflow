@@ -16,8 +16,10 @@ All images are in one package, `ghcr.io/j75689/cueflow`. `runner` and `agents` a
 | `agents`: CueFlow + Node.js and the Claude Code / Codex ACP adapters | `agents` (follows `main`) | `main-agents`, `<version>-agents`, `sha-<commit>-agents` |
 | `slim`: CueFlow only (distroless) | `main` | `<version>`, `sha-<commit>` |
 
-`FROM ...:runner` picks up every change on `main`. To choose when to upgrade, pin a `sha-<commit>-runner` tag or a
-release tag instead. Both are pushed once and not rebuilt.
+`FROM ...:runner` picks up every change on `main`. To choose when to upgrade, pin a release tag (`<version>-runner`)
+or a `sha-<commit>-runner` tag instead. Both are pushed once and not rebuilt. Every release is built; a commit on
+`main` that was superseded by newer pushes before its build started has no `sha-<commit>` tags, so pick a sha from
+the [package's tag list](https://github.com/j75689/cueflow/pkgs/container/cueflow) rather than from the git log.
 
 ## Just a package or two
 

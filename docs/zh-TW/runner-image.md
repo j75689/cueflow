@@ -20,7 +20,7 @@ agent 需要更多工具（其他 agent CLI、Python、ffmpeg⋯）時，就以�
 | `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents`（跟著 `main`） | `main-agents`、`<版本>-agents`、`sha-<commit>-agents` |
 | `slim`：只有 CueFlow（distroless） | `main` | `<版本>`、`sha-<commit>` |
 
-`FROM ...:runner` 會拿到 `main` 上的每一次變更。想自己決定什麼時候升級，就改釘 `sha-<commit>-runner` 或某個版本的標籤。這兩種標籤只推一次，之後不會重新 build。
+`FROM ...:runner` 會拿到 `main` 上的每一次變更。想自己決定什麼時候升級，就改釘版本標籤（`<版本>-runner`）或 `sha-<commit>-runner`。這兩種標籤只推一次，之後不會重新 build。每個版本都一定會 build；但 `main` 上的 commit 如果在 build 開始前就被更新的 push 取代，就不會有 `sha-<commit>` 標籤，所以 sha 請從[套件的標籤清單](https://github.com/j75689/cueflow/pkgs/container/cueflow)挑，不要從 git log 抄。
 
 ## 只要一兩個套件
 

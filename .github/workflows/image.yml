@@ -6,10 +6,11 @@
 #
 # Tags, all in the one package:
 #   slim     main, 1.2.3, latest, sha-<commit>            (deployments pin these: keep them slim only)
-# sha-<commit> tags are pushed from branch builds only, so a release tag on the same commit does not rebuild them.
 #   agents   agents, main-agents, 1.2.3-agents, sha-<commit>-agents
 #   runner   runner, main-runner, 1.2.3-runner, sha-<commit>-runner
-# `agents` and `runner` follow main.
+# `agents` and `runner` follow main. sha-<commit> tags are pushed from branch builds only, so a release
+# tag on the same commit does not rebuild them; a commit whose build was superseded in the queue (see
+# concurrency below) gets none. Release tags are always built.
 name: image
 
 on:
@@ -28,6 +29,9 @@ jobs:
     # Each target queues behind its own previous build only, in order: a slow build finishing after a
     # newer one would move its tags (`main`, `agents`, `runner`) back to the older commit. The targets
     # build in parallel, so slim (what deployments pull) never waits for the emulated arm64 builds.
+    # A group holds one running and one pending build: a third push while both are busy replaces the
+    # pending one, so that commit is never built and has no sha-<commit> tags. The moving tags still end
+    # on the newest commit.
     concurrency:
       group: image-${{ github.ref }}-${{ matrix.target }}
       cancel-in-progress: false
