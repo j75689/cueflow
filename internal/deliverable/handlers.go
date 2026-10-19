@@ -1,6 +1,7 @@
 package deliverable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -148,16 +150,26 @@ func (h *handlers) transition(w http.ResponseWriter, r *http.Request, to Status,
 		h.s.Fail(w, err)
 		return
 	}
-	d, err := h.m.Store.Transition(r.Context(), id, to, action, ActorReviewer, note, opts)
+	d, err := h.apply(r.Context(), id, to, action, note, opts)
 	if err != nil {
 		h.s.Fail(w, err)
 		return
 	}
-	h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	if to == StatusApproved || to == StatusQueued {
 		h.m.Dispatcher.Wake()
 	}
 	api.WriteJSON(w, http.StatusOK, d)
+}
+
+// apply is one reviewer transition and its event; the single endpoints and bulk both go through it,
+// so a rule added here (an org check, say) holds for both. Waking the dispatcher is the caller's.
+func (h *handlers) apply(ctx context.Context, id uuid.UUID, to Status, action Action, note string, opts *TransitionOpts) (*Deliverable, error) {
+	d, err := h.m.Store.Transition(ctx, id, to, action, ActorReviewer, note, opts)
+	if err != nil {
+		return nil, err
+	}
+	h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	return d, nil
 }
 
 func (h *handlers) submit(w http.ResponseWriter, r *http.Request) {
@@ -209,8 +221,9 @@ const bulkLimit = 200
 
 // bulk approves or rejects many deliverables in one request. Each id is its own transition (and
 // audit entry), so one that another reviewer already moved fails alone, with the single endpoint's
-// code, and the rest go through; the response says which was which. Only a database error fails
-// the whole request.
+// code, and the rest go through; the response says which was which. A database error stops the
+// batch, and the answer is still the per-id result: what moved before it, the id it hit, and the
+// ids not tried, so the caller never has to guess what the server did.
 func (h *handlers) bulk(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string   `json:"action"`
@@ -251,29 +264,32 @@ func (h *handlers) bulk(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	ok, failed := []uuid.UUID{}, []failure{}
-	seen := map[string]bool{}
+	seen := map[uuid.UUID]bool{}
+	var stopped error
 	for _, raw := range req.IDs {
-		if seen[raw] {
+		if stopped != nil {
+			failed = append(failed, failure{raw, "not_attempted", "not attempted after an earlier error"})
 			continue
 		}
-		seen[raw] = true
 		id, err := uuid.Parse(raw)
 		if err != nil {
-			failed = append(failed, failure{raw, "not_found", "not found"})
+			err = domain.ErrNotFound
+		} else if seen[id] {
 			continue
-		}
-		d, err := h.m.Store.Transition(r.Context(), id, to, action, ActorReviewer, note, opts)
-		if err != nil {
-			status, code, msg := api.ErrorStatus(err)
-			if status >= http.StatusInternalServerError || code == "canceled" {
-				h.s.Fail(w, err)
-				return
+		} else {
+			seen[id] = true
+			var d *Deliverable
+			if d, err = h.apply(r.Context(), id, to, action, note, opts); err == nil {
+				ok = append(ok, d.ID)
+				continue
 			}
-			failed = append(failed, failure{raw, code, msg})
-			continue
 		}
-		ok = append(ok, d.ID)
-		h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+		status, code, msg := api.ErrorStatus(err)
+		if status >= http.StatusInternalServerError || code == "canceled" {
+			h.s.Logger.Error("bulk transition failed", "id", raw, "err", err)
+			stopped = err
+		}
+		failed = append(failed, failure{raw, code, msg})
 	}
 	if to == StatusApproved && len(ok) > 0 {
 		h.m.Dispatcher.Wake()

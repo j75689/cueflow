@@ -60,8 +60,17 @@ export default function DeliverablesPage() {
     void stats.reload();
   }, 250);
   useServerEvent(["deliverable.updated", "deliverable.deleted"], refresh);
-  // A new scope, kind or search is a new list: what was ticked in the old one does not carry over.
-  useEffect(() => setSelected(new Set()), [scope, kind, query]);
+  // Whenever the list is reloaded (a filter, a search, a live update) the selection is pruned to the
+  // pending items still in it: a card that left the list leaves the selection, one still shown
+  // stays ticked.
+  const loaded = items.data;
+  useEffect(() => {
+    if (!loaded) return;
+    setSelected((cur) => {
+      const keep = new Set(loaded.items.filter((d) => d.status === "PENDING_REVIEW" && cur.has(d.id)).map((d) => d.id));
+      return keep.size === cur.size ? cur : keep;
+    });
+  }, [loaded]);
 
   const run = async (id: string, fn: () => Promise<unknown>, msg: string) => {
     setBusy(id);
@@ -99,8 +108,14 @@ export default function DeliverablesPage() {
       const title = Object.fromEntries(chosen.map((d) => [d.id, d.title || shortId(d.id)]));
       setSelected(new Set(res.failed.map((f) => f.id)));
       if (res.ok.length) toast.success(`${verb === "approve" ? "Approved" : "Rejected"} ${plural(res.ok.length, "deliverable")}`);
-      if (res.failed.length)
-        toast.error(`Could not ${verb}: ${res.failed.map((f) => `${title[f.id] ?? shortId(f.id)}: ${f.message}`).join("; ")}`);
+      if (res.failed.length) {
+        // A few are named; a long list is summarised, the kept selection shows which they are.
+        const shown = res.failed.slice(0, 3).map((f) => `${title[f.id] ?? shortId(f.id)}: ${f.message}`);
+        const more = res.failed.length - shown.length;
+        toast.error(
+          `Could not ${verb} ${plural(res.failed.length, "deliverable")} (still selected): ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}`,
+        );
+      }
     } catch (e) {
       toast.error(e);
     } finally {

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,7 +34,8 @@ func TestDeliverableBulk(t *testing.T) {
 			ID, Code, Message string
 		} `json:"failed"`
 	}
-	ids := []string{docs[0].ID.String(), docs[1].ID.String(), docs[1].ID.String(), docs[2].ID.String(), uuid.NewString(), "not-a-uuid"}
+	// b appears twice, the second time upper-cased: one transition, no failure for the duplicate.
+	ids := []string{docs[0].ID.String(), docs[1].ID.String(), strings.ToUpper(docs[1].ID.String()), docs[2].ID.String(), uuid.NewString(), "not-a-uuid"}
 	if code := e.do("POST", "/deliverables/bulk", map[string]any{"action": "approve", "ids": ids, "note": "lgtm"}, &res); code != 200 {
 		t.Fatalf("bulk approve: %d", code)
 	}
