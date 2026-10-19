@@ -406,9 +406,9 @@ func (s *Store) CountByStatus(ctx context.Context, org uuid.UUID) (map[Status]in
 
 // --- worker support ---
 
-// QueueApproved moves every APPROVED item to QUEUED and returns their IDs.
-func (s *Store) QueueApproved(ctx context.Context) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
+// QueueApproved moves every APPROVED item to QUEUED and returns them as they were before the move.
+func (s *Store) QueueApproved(ctx context.Context) ([]*Deliverable, error) {
+	var queued []*Deliverable
 	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+columns+` FROM deliverables WHERE status='APPROVED' ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100`)
 		if err != nil {
@@ -431,11 +431,11 @@ func (s *Store) QueueApproved(ctx context.Context) ([]uuid.UUID, error) {
 			if _, err := transition(ctx, tx, d, StatusQueued, ActionQueued, ActorWorker, "", nil); err != nil {
 				return err
 			}
-			ids = append(ids, d.ID)
+			queued = append(queued, d)
 		}
 		return nil
 	})
-	return ids, err
+	return queued, err
 }
 
 // ClaimQueued leases up to limit unleased QUEUED items.

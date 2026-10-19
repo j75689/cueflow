@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { UNAUTHORIZED_EVENT, api, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
+import { ORG_CHANGED_EVENT, UNAUTHORIZED_EVENT, api, apiOrg, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
 import type { Meta } from "@/lib/types";
 import { DialogProvider } from "./dialog";
 import { Button, Field, Input, Modal, cx } from "./ui";
@@ -231,6 +231,8 @@ export function Providers({ children }: { children: ReactNode }) {
           } catch {
             /* ignore malformed payloads */
           }
+          // The stream is opened for one org; an event for another can only be one sent before a switch.
+          if (typeof data.org_id === "string" && data.org_id !== apiOrg()) return;
           listeners.current.get(name)?.forEach((fn) => fn(data));
         });
       }
@@ -260,12 +262,23 @@ export function Providers({ children }: { children: ReactNode }) {
       connect();
     };
 
+    // The stream carries one org's events: reopen it for the new org when the org changes. No catch-up is
+    // needed: the pages remount for the new org (see Shell) and load it afresh.
+    const onOrgChange = () => {
+      if (!es) return;
+      disconnect();
+      missed = false;
+      if (!document.hidden) connect();
+    };
+
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener(ORG_CHANGED_EVENT, onOrgChange);
     if (document.hidden) onVisibility();
     connect();
     return () => {
       closed = true;
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener(ORG_CHANGED_EVENT, onOrgChange);
       if (retry) clearTimeout(retry);
       if (sleep) clearTimeout(sleep);
       es?.close();

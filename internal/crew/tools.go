@@ -324,7 +324,7 @@ func toolCreateSubtask(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 	}
 	e.subtasks++
 	e.c.system(ctx, t.ID, fmt.Sprintf("Delegated by @%s from task #%d.", e.agent.Slug, e.task.Number))
-	e.c.broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+	e.c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": t.ID, "status": t.Status})
 	e.c.Wake()
 	return fmt.Sprintf("Subtask #%d created and assigned to @%s. Call wait_for_subtasks when you have delegated everything.", t.Number, assignee.Slug), nil
 }
@@ -442,7 +442,7 @@ func toolCreateTask(ctx context.Context, e *runEnv, raw json.RawMessage) (string
 	}
 	e.subtasks++
 	e.c.system(ctx, t.ID, fmt.Sprintf("Created by @%s while working on task #%d.", e.agent.Slug, e.task.Number))
-	e.c.broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+	e.c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": t.ID, "status": t.Status})
 	e.c.Wake()
 	return fmt.Sprintf("Task #%d created (%s).", t.Number, t.Status), nil
 }
@@ -467,7 +467,7 @@ func toolScheduleTask(ctx context.Context, e *runEnv, raw json.RawMessage) (stri
 		return "", err
 	}
 	e.c.schedulesChanged(ctx)
-	e.c.broker.Publish("schedule.updated", map[string]any{"id": sc.ID})
+	e.c.broker.Publish(sc.OrgID, "schedule.updated", map[string]any{"id": sc.ID})
 	return fmt.Sprintf("Schedule %s created: %q runs at %q (%s), assigned to @%s. The human can pause it under Schedules.",
 		sc.ID, sc.Name, sc.CronExpr, sc.Timezone, assignee.Slug), nil
 }
@@ -509,7 +509,7 @@ func toolPauseSchedule(ctx context.Context, e *runEnv, raw json.RawMessage) (str
 		return "", err
 	}
 	e.c.schedulesChanged(ctx)
-	e.c.broker.Publish("schedule.updated", map[string]any{"id": sc.ID})
+	e.c.broker.Publish(sc.OrgID, "schedule.updated", map[string]any{"id": sc.ID})
 	return "Schedule paused.", nil
 }
 
@@ -523,7 +523,7 @@ func toolRemember(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 	if _, err := e.c.store.AddMemory(ctx, e.agent.ID, a.Content); err != nil {
 		return "", err
 	}
-	e.c.broker.Publish("agent.updated", map[string]any{"id": e.agent.ID})
+	e.c.broker.Publish(e.agent.OrgID, "agent.updated", map[string]any{"id": e.agent.ID})
 	return "Saved.", nil
 }
 

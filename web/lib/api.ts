@@ -69,8 +69,17 @@ export class ApiError extends Error {
 // (connectors, usage, media) ignore it.
 let currentOrg = "";
 
+// Fired when the org changes, so the live-update stream can reopen for the new org.
+export const ORG_CHANGED_EVENT = "cueflow:org";
+
 export function setApiOrg(id: string) {
+  if (id === currentOrg) return;
   currentOrg = id;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(ORG_CHANGED_EVENT));
+}
+
+export function apiOrg(): string {
+  return currentOrg;
 }
 
 // Fired when the server answers 401 so the token prompt can open.
@@ -254,7 +263,7 @@ export function errorMessage(e: unknown): string {
   return String(e);
 }
 
+// eventsURL is the live-update stream for the current org: its events and the global ones.
 export function eventsURL(): string {
-  const token = getToken();
-  return `${BASE}/events${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  return `${BASE}/events${buildQuery({ token: getToken(), org: currentOrg })}`;
 }

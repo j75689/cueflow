@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/hub"
@@ -32,7 +34,7 @@ func (h *handlers) fetchConnector(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	h.m.Broker.Publish("connector.updated", map[string]any{"id": id})
+	h.m.Broker.Publish(uuid.Nil, "connector.updated", map[string]any{"id": id})
 	api.WriteJSON(w, http.StatusOK, map[string]int{"new_items": n})
 }
 

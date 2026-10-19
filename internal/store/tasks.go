@@ -138,6 +138,14 @@ func (s *Store) GetTask(ctx context.Context, id uuid.UUID) (*Task, error) {
 	return t, NotFound(err)
 }
 
+// TaskOrg is the org a task belongs to, or uuid.Nil if it is gone (live-update events use it to reach the
+// right org's tabs).
+func (s *Store) TaskOrg(ctx context.Context, id uuid.UUID) uuid.UUID {
+	var org uuid.UUID
+	_ = s.pool.QueryRow(ctx, "SELECT org_id FROM tasks WHERE id=$1", id).Scan(&org)
+	return org
+}
+
 // GetTaskByNumber finds a task by its #number within an org.
 func (s *Store) GetTaskByNumber(ctx context.Context, org uuid.UUID, n int64) (*Task, error) {
 	t, err := scanTask(s.pool.QueryRow(ctx, "SELECT "+taskColumns+taskFrom+" WHERE t.org_id=$1 AND t.number=$2", org, n))

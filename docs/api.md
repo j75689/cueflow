@@ -451,9 +451,12 @@ at all in the local deployment, and are not covered by `CUEFLOW_ADMIN_TOKEN`.
 
 ## Live updates
 
-### `GET /api/v1/events` (Server-Sent Events)
+### `GET /api/v1/events?org=` (Server-Sent Events)
+With `org` (id or slug; `400` if unknown) the stream carries that org's events plus the global ones (`connector.*`,
+`org.*`, `runner.*`); without it, every event of every org. An org's events have `org_id` in their `data`.
+
 Event names and `data` payloads:
-- `deliverable.updated` → `{"id":"uuid","status":"QUEUED"}`
+- `deliverable.updated` → `{"id":"uuid","status":"QUEUED","org_id":"uuid"}`
 - `deliverable.deleted` → `{"id":"uuid"}`
 - `connector.updated` → `{"id":"uuid"}`
 - `task.updated` → `{"id":"uuid","status":"IN_PROGRESS"}`

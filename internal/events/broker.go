@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,7 +18,16 @@ const Channel = "cueflow_events"
 
 type Event struct {
 	Name string `json:"name"`
+	// Org is the org the change belongs to; empty for global changes (connectors, runners, orgs), which
+	// every subscriber gets.
+	Org  string `json:"org,omitempty"`
 	Data any    `json:"data"`
+}
+
+// For reports whether a subscriber watching org should get ev: its own org's events and global ones.
+// An empty org watches every org.
+func (ev Event) For(org string) bool {
+	return org == "" || ev.Org == "" || ev.Org == org
 }
 
 type Broker struct {
@@ -51,13 +61,18 @@ func (b *Broker) Subscribe() (<-chan Event, func()) {
 	}
 }
 
-// Publish fans out without blocking; slow subscribers drop events (clients refetch on reconnect).
-func (b *Broker) Publish(name string, data any) {
+// Publish fans out without blocking; slow subscribers drop events (clients refetch on reconnect). org is
+// the org the change belongs to, or uuid.Nil for a global change.
+func (b *Broker) Publish(org uuid.UUID, name string, data any) {
 	if b == nil {
 		return
 	}
+	ev := Event{Name: name, Data: data}
+	if org != uuid.Nil {
+		ev.Org = org.String()
+	}
 	if b.pool != nil {
-		payload, err := json.Marshal(Event{Name: name, Data: data})
+		payload, err := json.Marshal(ev)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -67,7 +82,7 @@ func (b *Broker) Publish(name string, data any) {
 		}
 		b.log.Warn("notify failed; delivering locally", "err", err)
 	}
-	b.deliver(Event{Name: name, Data: data})
+	b.deliver(ev)
 }
 
 func (b *Broker) deliver(ev Event) {

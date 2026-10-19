@@ -51,6 +51,8 @@ type Crew struct {
 	mcp mcpRegistry
 	// selfEnvs holds the per-task tool state of self-driven agents (see selfdriven.go).
 	selfEnvs sync.Map
+	// taskOrgs caches each task's org for live-update events (a task never changes org).
+	taskOrgs sync.Map
 
 	mu      sync.Mutex
 	running map[uuid.UUID]context.CancelFunc
@@ -245,7 +247,7 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 		}
 		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {
 			c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
-			c.broker.Publish("task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
+			c.broker.Publish(c.taskOrg(ctx, id), "task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
 		}
 	}
 }
@@ -266,14 +268,26 @@ func (c *Crew) say(ctx context.Context, taskID uuid.UUID, a *store.Agent, kind, 
 		c.logger.Warn("thread write failed", "task", taskID, "err", err)
 		return
 	}
-	c.broker.Publish("task.message", map[string]any{"task_id": taskID, "id": m.ID})
+	c.broker.Publish(c.taskOrg(ctx, taskID), "task.message", map[string]any{"task_id": taskID, "id": m.ID})
 }
 
 func (c *Crew) system(ctx context.Context, taskID uuid.UUID, content string) {
 	m, err := c.store.AddTaskMessage(context.WithoutCancel(ctx), taskID, "system", nil, "status", content, nil)
 	if err == nil {
-		c.broker.Publish("task.message", map[string]any{"task_id": taskID, "id": m.ID})
+		c.broker.Publish(c.taskOrg(ctx, taskID), "task.message", map[string]any{"task_id": taskID, "id": m.ID})
 	}
+}
+
+// taskOrg is the org of a task, for the events about it; thread messages come often, so it is cached.
+func (c *Crew) taskOrg(ctx context.Context, taskID uuid.UUID) uuid.UUID {
+	if v, ok := c.taskOrgs.Load(taskID); ok {
+		return v.(uuid.UUID)
+	}
+	org := c.store.TaskOrg(context.WithoutCancel(ctx), taskID)
+	if org != uuid.Nil {
+		c.taskOrgs.Store(taskID, org)
+	}
+	return org
 }
 
 func (c *Crew) schedulesChanged(ctx context.Context) {
@@ -304,7 +318,7 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 		c.logger.Error("load task", "task", id, "err", err)
 		return
 	}
-	c.broker.Publish("task.updated", map[string]any{"id": id, "status": task.Status})
+	c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": id, "status": task.Status})
 	if task.AssigneeAgentID == nil {
 		c.finish(bg, task, nil, nil, &outcome{kind: "error", text: "task has no assignee"})
 		return
@@ -553,7 +567,7 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	if !changed {
 		return // a human moved the card meanwhile
 	}
-	c.broker.Publish("task.updated", map[string]any{"id": task.ID, "status": next})
+	c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": task.ID, "status": next})
 	if next == store.TaskBlocked {
 		// Subtasks may all have finished while we were still running.
 		c.resumeIfSubtasksDone(ctx, task.ID)
@@ -601,7 +615,7 @@ func (c *Crew) resumeIfSubtasksDone(ctx context.Context, parentID uuid.UUID) {
 	}
 	if ok, _ := c.store.SetTaskStatusIf(ctx, parentID, []store.TaskStatus{store.TaskBlocked}, store.TaskTodo, nil); ok {
 		c.system(ctx, parentID, b.String())
-		c.broker.Publish("task.updated", map[string]any{"id": parentID, "status": store.TaskTodo})
+		c.broker.Publish(c.taskOrg(ctx, parentID), "task.updated", map[string]any{"id": parentID, "status": store.TaskTodo})
 		c.Wake()
 	}
 }

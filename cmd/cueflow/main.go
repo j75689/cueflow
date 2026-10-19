@@ -200,7 +200,7 @@ func serve() error {
 	team.ValidateSchedule = scheduler.ValidateSchedule
 	team.OnSchedulesChanged = func(ctx context.Context) { _ = sched.Reload(ctx) }
 	sched.OnTaskSpawned = func(ctx context.Context, t *store.Task) {
-		broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+		broker.Publish(t.OrgID, "task.updated", map[string]any{"id": t.ID, "status": t.Status})
 		team.Wake()
 	}
 	if !cfg.Cloud() {

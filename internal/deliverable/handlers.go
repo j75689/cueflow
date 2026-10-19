@@ -91,7 +91,7 @@ func (h *handlers) create(w http.ResponseWriter, r *http.Request) {
 		h.s.Fail(w, err)
 		return
 	}
-	h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	h.m.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	api.WriteJSON(w, http.StatusCreated, d)
 }
 
@@ -126,7 +126,7 @@ func (h *handlers) update(w http.ResponseWriter, r *http.Request) {
 		h.s.Fail(w, err)
 		return
 	}
-	h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	h.m.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	api.WriteJSON(w, http.StatusOK, d)
 }
 
@@ -136,11 +136,15 @@ func (h *handlers) remove(w http.ResponseWriter, r *http.Request) {
 		h.s.Fail(w, err)
 		return
 	}
+	org := uuid.Nil
+	if d, err := h.m.Store.Get(r.Context(), id); err == nil {
+		org = d.OrgID
+	}
 	if err := h.m.Store.Remove(r.Context(), id); err != nil {
 		h.s.Fail(w, err)
 		return
 	}
-	h.m.Broker.Publish("deliverable.deleted", map[string]any{"id": id})
+	h.m.Broker.Publish(org, "deliverable.deleted", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -168,7 +172,7 @@ func (h *handlers) apply(ctx context.Context, id uuid.UUID, to Status, action Ac
 	if err != nil {
 		return nil, err
 	}
-	h.m.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	h.m.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	return d, nil
 }
 

@@ -136,7 +136,7 @@ func toolGenerateImage(ctx context.Context, r *crew.Run, raw json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
-	r.Broker.Publish("deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
+	r.Broker.Publish(item.OrgID, "deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
 	return fmt.Sprintf("Image %s generated (%s) and attached to draft %s. The reviewer sees it with the draft.", media.URL(m.ID), aspect, item.ID), nil
 }
 
@@ -209,7 +209,7 @@ func toolCreatePostDeliverable(ctx context.Context, r *crew.Run, raw json.RawMes
 		return "", err
 	}
 	r.Inc("drafts")
-	r.Broker.Publish("deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
+	r.Broker.Publish(item.OrgID, "deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
 	msg := fmt.Sprintf("Draft %s created for %s and queued for human review (not published).", item.ID, d.Platform)
 	if p, err := DecodePostPayload(item.Payload); err == nil && len(p.Warnings) > 0 {
 		msg += " Warnings: " + strings.Join(p.Warnings, "; ")
@@ -346,7 +346,7 @@ func toolRevisePostDeliverable(ctx context.Context, r *crew.Run, raw json.RawMes
 	if err != nil {
 		return "", err
 	}
-	r.Broker.Publish("deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
+	r.Broker.Publish(item.OrgID, "deliverable.updated", map[string]any{"id": item.ID, "status": item.Status})
 	msg := "Draft revised."
 	if np, err := DecodePostPayload(item.Payload); err == nil && len(np.Warnings) > 0 {
 		msg += " Warnings: " + strings.Join(np.Warnings, "; ")
