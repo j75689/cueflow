@@ -3,11 +3,6 @@
 ## [1.0.0](https://github.com/j75689/cueflow/commits/v1.0.0) (2026-10-19)
 
 
-### ⚠ BREAKING CHANGES
-
-* **content:** /posts, /pipelines and /runs are gone; the review queue is /deliverables.
-* the connector type `postiz_mcp` is no longer registered. An install with a Postiz connector needs an MCP server that follows the publisher contract instead.
-
 ### Features
 
 * agent team with command center, kanban board and schedules ([aa9c989](https://github.com/j75689/cueflow/commit/aa9c989bc95dd3246433740b836e240132427761))
