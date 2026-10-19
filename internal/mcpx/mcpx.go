@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/j75689/cueflow/internal/version"
 )
 
 const (
@@ -32,7 +34,7 @@ type Options struct {
 	HTTPClient *http.Client
 }
 
-var impl = &mcp.Implementation{Name: "cueflow", Version: "0.1.0"}
+var impl = &mcp.Implementation{Name: "cueflow", Version: version.Version}
 
 // Connect opens an MCP client session. Callers must Close it.
 func Connect(ctx context.Context, o Options) (*mcp.ClientSession, error) {

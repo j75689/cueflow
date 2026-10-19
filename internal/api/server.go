@@ -27,10 +27,9 @@ import (
 	"github.com/j75689/cueflow/internal/media"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/version"
 	"github.com/j75689/cueflow/internal/webui"
 )
-
-const Version = "0.2.0"
 
 type Server struct {
 	Store      *store.Store
@@ -256,7 +255,7 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := map[string]any{
-		"version":            Version,
+		"version":            version.Version,
 		"modules":            s.moduleIDs(),
 		"connector_types":    specs,
 		"agent_capabilities": crew.Capabilities(),

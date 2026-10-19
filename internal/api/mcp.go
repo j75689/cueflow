@@ -17,6 +17,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/version"
 )
 
 // MCPPath is the operator MCP endpoint: external agents (Claude Code, Codex, Cursor...) manage
@@ -131,7 +132,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 			}
 		}
 	}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: Version}, &mcp.ServerOptions{
+	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: version.Version}, &mcp.ServerOptions{
 		Instructions: strings.Join(instructions, " "),
 	})
 	tool := MCPTool

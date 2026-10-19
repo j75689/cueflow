@@ -49,6 +49,7 @@ import (
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/version"
 )
 
 func main() {
@@ -71,7 +72,7 @@ func main() {
 	case "rotate-key":
 		err = rotateKey(len(os.Args) > 2 && os.Args[2] == "--dry-run")
 	case "runner":
-		err = runner.Main(os.Args[2:], api.Version)
+		err = runner.Main(os.Args[2:], version.Version)
 	case "media":
 		err = mediaCmd(os.Args[2:])
 	case "mcp-bridge":
@@ -81,7 +82,7 @@ func main() {
 		}
 		err = mcpx.Bridge(context.Background(), os.Args[2])
 	case "version", "-v", "--version":
-		fmt.Println("cueflow", api.Version)
+		fmt.Println("cueflow", version.Version)
 	default:
 		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|runner|mcp-bridge|version]\n")
 		os.Exit(2)
@@ -277,7 +278,7 @@ func serve() error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", api.Version, "auth", cfg.AdminToken != "", "mcp", cfg.MCPToken != "", "modules", cfg.Modules)
+		logger.Info("CueFlow listening", "addr", "http://"+cfg.Addr, "version", version.Version, "auth", cfg.AdminToken != "", "mcp", cfg.MCPToken != "", "modules", cfg.Modules)
 		errc <- srv.ListenAndServe()
 	}()
 

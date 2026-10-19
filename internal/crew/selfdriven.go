@@ -16,6 +16,7 @@ import (
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/version"
 )
 
 // Self-driven agents: an external agent connects to /mcp with its agent token, claims tasks
@@ -36,7 +37,7 @@ func (c *Crew) isSelfDriven(ctx context.Context, a *store.Agent) bool {
 
 // AgentMCPServer is the tool server for one self-driven agent, acting with that agent's identity.
 func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: "0.2.0"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: version.Version}, nil)
 	add := func(name, desc string, schema map[string]any, fn func(ctx context.Context, args json.RawMessage) (string, bool)) {
 		srv.AddTool(&mcp.Tool{Name: name, Description: desc, InputSchema: schema},
 			func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

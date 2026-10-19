@@ -17,6 +17,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/version"
 )
 
 // Process is a running ACP agent.
@@ -92,7 +93,7 @@ func Handshake(ctx context.Context, conn *acp.ClientSideConnection) (acp.Initial
 		// No client file system or terminal: agents must not read or write the CueFlow host
 		// through us. Task actions go through CueFlow's MCP tools instead.
 		ClientCapabilities: acp.ClientCapabilities{Fs: acp.FileSystemCapabilities{}, Terminal: false},
-		ClientInfo:         &acp.Implementation{Name: "cueflow", Title: &title, Version: "0.1.0"},
+		ClientInfo:         &acp.Implementation{Name: "cueflow", Title: &title, Version: version.Version},
 	})
 }
 

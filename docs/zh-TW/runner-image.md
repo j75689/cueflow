@@ -14,13 +14,13 @@ agent 需要更多工具（其他 agent CLI、Python、ffmpeg⋯）時，就以�
 
 所有映像都在同一個套件 `ghcr.io/j75689/cueflow` 裡。`runner` 和 `agents` 提供 `linux/amd64` 與 `linux/arm64`，`slim` 只有 amd64。
 
-| 映像 | 會移動的標籤 | 固定的標籤 |
+| 映像 | 最新版本 | 指定版本 |
 |---|---|---|
-| `runner`：agents 加上 git、gh、SSH，以 `cueflow runner run` 啟動 | `runner`（跟著 `main`） | `main-runner`、`<版本>-runner`、`sha-<commit>-runner` |
-| `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents`（跟著 `main`） | `main-agents`、`<版本>-agents`、`sha-<commit>-agents` |
-| `slim`：只有 CueFlow（distroless） | `main` | `<版本>`、`sha-<commit>` |
+| `runner`：agents 加上 git、gh、SSH，以 `cueflow runner run` 啟動 | `runner` | `<版本>-runner`，例如 `1.0.0-runner` |
+| `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents` | `<版本>-agents` |
+| `slim`：只有 CueFlow（distroless） | `latest` | `<版本>` |
 
-`FROM ...:runner` 會拿到 `main` 上的每一次變更。想自己決定什麼時候升級，就改釘版本標籤（`<版本>-runner`）或 `sha-<commit>-runner`。這兩種標籤只推一次，之後不會重新 build。每個版本都一定會 build；但 `main` 上的 commit 如果在 build 開始前就被更新的 push 取代，就不會有 `sha-<commit>` 標籤，所以 sha 請從[套件的標籤清單](https://github.com/j75689/cueflow/pkgs/container/cueflow)挑，不要從 git log 抄。
+映像只在[發佈版本](https://github.com/j75689/cueflow/releases)時 build，不是 `main` 上的每個 commit 都有；`latest`、`agents` 和 `runner` 也只在發佈新版本時移動。所以 `FROM ...:runner` 跟著最新版本走；想自己決定什麼時候升級，就釘 `<版本>-runner`。
 
 ## 只要一兩個套件
 
@@ -149,4 +149,4 @@ docker compose up -d --force-recreate
 - 預裝套件的確切清單（git、gh、SSH client 之外）；
 - 各 preset 的預設指令。
 
-你的映像如果依賴其中任何一項，請釘 `sha-<commit>-runner` 標籤。
+你的映像如果依賴其中任何一項，請釘 `<版本>-runner` 標籤。

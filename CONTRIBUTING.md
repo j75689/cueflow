@@ -61,4 +61,23 @@ CI runs the same checks plus a Docker build and a secret scan (gitleaks).
 - Keep refactors separate from behaviour changes.
 - Expect a first reply within a week. If a change needs discussion, it may take longer.
 
+## Releases
+
+Releases are cut by [release-please](https://github.com/googleapis/release-please) (`.github/workflows/release.yml`):
+
+1. Every merge to `main` updates an open pull request titled `chore(main): release X.Y.Z`. It holds the
+   `CHANGELOG.md` entries generated from the Conventional Commit titles merged since the last release
+   (`feat` and `fix` in particular, so write those titles for the people reading the changelog), and bumps the
+   version in `.release-please-manifest.json` and `internal/version/version.go`.
+2. `feat` raises the minor version, `fix` the patch, and a breaking change (`feat!:`, or a `BREAKING CHANGE:`
+   footer) the major. To pick a version yourself, put `Release-As: X.Y.Z` on a line of its own in the pull
+   request description: a squash merge uses the description as the commit body, which is where release-please
+   reads it.
+3. Merging the release pull request tags `vX.Y.Z` and publishes the GitHub Release with the same notes. The tag
+   starts `image.yml`, which pushes `X.Y.Z`, `X.Y.Z-agents` and `X.Y.Z-runner`, and moves `latest`, `agents` and
+   `runner` to them when the release is the newest one. Nothing else moves those three tags.
+
+Pushes to `main` build no images. For a test image, run *Actions → image → Run workflow* on a branch; it is
+tagged with the branch name (`main`, `main-runner`, ...) and `sha-<commit>`. Release tags (`v*`) are immutable.
+
 By contributing you agree that your contribution is licensed under the Apache-2.0 license of this repository.
