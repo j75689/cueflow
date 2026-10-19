@@ -22,15 +22,15 @@ permissions:
   contents: read
   packages: write
 
-# One run per ref at a time, in order: a slow run finishing after a newer one would move `runner`,
-# `agents` and `main` back to the older commit.
-concurrency:
-  group: image-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   image:
     runs-on: ubuntu-latest
+    # Each target queues behind its own previous build only, in order: a slow build finishing after a
+    # newer one would move its tags (`main`, `agents`, `runner`) back to the older commit. The targets
+    # build in parallel, so slim (what deployments pull) never waits for the emulated arm64 builds.
+    concurrency:
+      group: image-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
