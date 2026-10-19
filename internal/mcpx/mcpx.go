@@ -116,8 +116,9 @@ func CallJSON(ctx context.Context, cs *mcp.ClientSession, name string, args any)
 	return json.Marshal(text)
 }
 
-// CallText invokes a tool and returns its text content. A tool-level failure (isError) is not
-// a Go error: the caller passes the text on, flagged.
+// CallText invokes a tool and returns its text content, embedded resources included (GitHub's
+// get_file_contents puts the file there and only a status line in the text). A tool-level failure
+// (isError) is not a Go error: the caller passes the text on, flagged.
 func CallText(ctx context.Context, cs *mcp.ClientSession, name string, args json.RawMessage) (string, bool, error) {
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
@@ -126,7 +127,7 @@ func CallText(ctx context.Context, cs *mcp.ClientSession, name string, args json
 	if err != nil {
 		return "", false, fmt.Errorf("mcp: tools/call %s: %w", name, err)
 	}
-	text := textOf(res)
+	text := readableOf(res)
 	if text == "" && res.StructuredContent != nil {
 		if b, err := json.Marshal(res.StructuredContent); err == nil {
 			text = string(b)
@@ -143,6 +144,39 @@ func textOf(res *mcp.CallToolResult) string {
 	for _, c := range res.Content {
 		if t, ok := c.(*mcp.TextContent); ok {
 			parts = append(parts, t.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+// readableOf is the result as a reader sees it: the text, then each embedded resource's text under
+// its URI. A binary resource, an image, audio or a link is named, not inlined.
+func readableOf(res *mcp.CallToolResult) string {
+	var parts []string
+	for _, c := range res.Content {
+		switch c := c.(type) {
+		case *mcp.TextContent:
+			parts = append(parts, c.Text)
+		case *mcp.EmbeddedResource:
+			r := c.Resource
+			if r == nil {
+				continue
+			}
+			head := "--- " + r.URI
+			if r.MIMEType != "" {
+				head += " (" + r.MIMEType + ")"
+			}
+			if r.Text != "" || len(r.Blob) == 0 {
+				parts = append(parts, head+"\n"+r.Text)
+			} else {
+				parts = append(parts, fmt.Sprintf("%s: binary, %d bytes, not shown", head, len(r.Blob)))
+			}
+		case *mcp.ResourceLink:
+			parts = append(parts, "--- link: "+c.URI)
+		case *mcp.ImageContent:
+			parts = append(parts, fmt.Sprintf("--- image (%s): %d bytes, not shown", c.MIMEType, len(c.Data)))
+		case *mcp.AudioContent:
+			parts = append(parts, fmt.Sprintf("--- audio (%s): %d bytes, not shown", c.MIMEType, len(c.Data)))
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))

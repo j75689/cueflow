@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -43,8 +45,53 @@ type runEnv struct {
 const (
 	maxSubtasksPerRun = 8
 	maxDelegateDepth  = 3
-	maxToolResult     = 12000
+	// maxToolResult is how much of one tool result the model sees: enough for a source file of a
+	// few hundred lines.
+	maxToolResult = 32000
+	// toolHistoryBudget caps the tool results a run carries back to the model each turn; past it the
+	// oldest are cut to toolHistoryKept (see trimToolHistory). Results shorter than twice that are
+	// left alone: cutting them saves little.
+	toolHistoryBudget = 64000
+	toolHistoryKept   = 2000
 )
+
+// clipToolResult cuts a result to maxToolResult and says how much was left out, so the agent knows
+// it has not seen the whole thing.
+func clipToolResult(s string) string { return clipNoted(s, maxToolResult, "") }
+
+// clipNoted cuts s to n characters and, when it does, ends it with how many were shown out of how
+// many, plus hint.
+func clipNoted(s string, n int, hint string) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", string(r[:n]), n, len(r), hint)
+}
+
+// trimToolHistory keeps a run's tool results within toolHistoryBudget by cutting the oldest ones to
+// toolHistoryKept characters, the way the thread shows them. The newest turn's results stay whole.
+func trimToolHistory(msgs []llm.Message) {
+	newest := len(msgs)
+	for newest > 0 && msgs[newest-1].Role == llm.RoleTool {
+		newest--
+	}
+	total := 0
+	for _, m := range msgs {
+		if m.Role == llm.RoleTool {
+			total += utf8.RuneCountInString(m.Content)
+		}
+	}
+	for i := 0; i < newest && total > toolHistoryBudget; i++ {
+		m := &msgs[i]
+		n := utf8.RuneCountInString(m.Content)
+		if m.Role != llm.RoleTool || n < 2*toolHistoryKept {
+			continue
+		}
+		m.Content = clipNoted(m.Content, toolHistoryKept, "; cut from the history to save room, call the tool again if you need the rest")
+		total -= n - utf8.RuneCountInString(m.Content)
+	}
+}
 
 // run is the module-facing view of this run.
 func (e *runEnv) run() *Run {

@@ -408,6 +408,7 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
 	for run.Turns < a.MaxTurns {
+		trimToolHistory(msgs)
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -500,9 +501,7 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	if isErr {
 		res = "error: " + err.Error()
 	}
-	if r := []rune(res); len(r) > maxToolResult {
-		res = string(r[:maxToolResult]) + "… (truncated)"
-	}
+	res = clipToolResult(res)
 	if !quietTools[call.Name] {
 		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), map[string]any{"tool": call.Name, "is_error": isErr})
 	}

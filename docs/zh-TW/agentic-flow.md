@@ -141,7 +141,7 @@ sequenceDiagram
             C->>DB: tool_call
             C->>T: 執行（權限檢查）
             T-->>C: 結果或錯誤
-            C->>DB: tool_result（截斷 2000 字顯示，餵回模型上限 12000 字）
+            C->>DB: tool_result（截斷 2000 字顯示，餵回模型上限 32000 字）
         end
         C->>B: task.message
     end
@@ -246,7 +246,8 @@ sequenceDiagram
 | 每次執行建立的子任務 + 獨立任務 | 8 | `crew/tools.go` |
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |
-| 餵回模型的單一工具結果 | 12,000 字（顯示在對話串時截斷為 2,000 字） | `crew/crew.go` |
+| 餵回模型的單一工具結果 | 32,000 字，超過時附註截掉多少（顯示在對話串時截斷為 2,000 字） | `crew/crew.go` |
+| 一次 run 每回合帶回模型的工具結果總量 | 64,000 字；超過時最舊的結果截成 2,000 字並附註（最新一回合的保持完整），agent 需要時可再呼叫一次工具 | `crew/tools.go` |
 | 任務簡報帶入的對話 | 最近 60 則 | `crew/prompt.go` |
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |

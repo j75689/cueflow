@@ -142,7 +142,7 @@ sequenceDiagram
             C->>DB: tool_call
             C->>T: execute (permission check)
             T-->>C: result or error
-            C->>DB: tool_result (2,000 chars shown, up to 12,000 fed back to the model)
+            C->>DB: tool_result (2,000 chars shown, up to 32,000 fed back to the model)
         end
         C->>B: task.message
     end
@@ -250,7 +250,8 @@ target each time.
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
-| A single tool result fed back to the model | 12,000 characters (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
+| A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
+| Tool results a run carries back to the model each turn | 64,000 characters; past it the oldest results are cut to 2,000 with a note (the newest turn's stay whole), and the agent can call the tool again | `crew/tools.go` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
