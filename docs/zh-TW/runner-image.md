@@ -20,11 +20,11 @@ agent 需要更多工具（其他 agent CLI、Python、ffmpeg⋯）時，就以�
 | `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents`（跟著 `main`） | `main-agents`、`<版本>-agents`、`sha-<commit>-agents` |
 | `slim`：只有 CueFlow（distroless） | `main` | `<版本>`、`sha-<commit>` |
 
-`FROM ...:runner` 會拿到 `main` 上的每一次變更。想自己決定什麼時候升級，就改釘 `sha-<commit>-runner` 或某個版本的標籤。
+`FROM ...:runner` 會拿到 `main` 上的每一次變更。想自己決定什麼時候升級，就改釘 `sha-<commit>-runner` 或某個版本的標籤。這兩種標籤只推一次，之後不會重新 build。
 
 ## 只要一兩個套件
 
-只需要幾個 Debian 套件的話，用 `RUNNER_EXTRA_PACKAGES` build 參數。這個做法需要原始碼：先把 `deploy/runner/docker-compose.yml` 裡的 `build:` 區塊取消註解，再執行：
+只需要幾個 Debian 套件的話，用 `RUNNER_EXTRA_PACKAGES` build 參數。這個做法需要原始碼：先把 `deploy/runner/docker-compose.yml` 裡的 `build:` 區塊取消註解，並把 `image:` 改成本機用的名稱，例如 `cueflow-runner:local`（不改的話，`docker compose pull` 會用發佈的映像蓋掉你 build 的版本），再執行：
 
 ```bash
 RUNNER_EXTRA_PACKAGES="python3 ffmpeg" docker compose up -d --build
@@ -61,6 +61,8 @@ USER nonroot:nonroot
 docker build -t my-runner . && echo CUEFLOW_RUNNER_IMAGE=my-runner >> .env
 docker compose up -d
 ```
+
+只存在你機器上的映像，`docker compose pull` 更新不到。要換上新版的底層映像，請用 `docker build --pull -t my-runner .` 重新 build，再執行一次 `docker compose up -d`。
 
 agent 需要的東西要在 build 時裝好。執行時根檔案系統是唯讀的，家目錄是 tmpfs，所以 agent 在執行時用 `npm install -g` 或 `apt-get` 安裝都會失敗，寫在 `~` 下的東西重啟後也會消失。
 

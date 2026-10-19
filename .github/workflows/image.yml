@@ -6,6 +6,7 @@
 #
 # Tags, all in the one package:
 #   slim     main, 1.2.3, latest, sha-<commit>            (deployments pin these: keep them slim only)
+# sha-<commit> tags are pushed from branch builds only, so a release tag on the same commit does not rebuild them.
 #   agents   agents, main-agents, 1.2.3-agents, sha-<commit>-agents
 #   runner   runner, main-runner, 1.2.3-runner, sha-<commit>-runner
 # `agents` and `runner` follow main.
@@ -20,6 +21,12 @@ on:
 permissions:
   contents: read
   packages: write
+
+# One run per ref at a time, in order: a slow run finishing after a newer one would move `runner`,
+# `agents` and `main` back to the older commit.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   image:
@@ -60,7 +67,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
-            type=sha,format=long
+            type=sha,format=long,enable=${{ github.ref_type == 'branch' }}
             type=raw,value=${{ matrix.target }},suffix=,enable=${{ matrix.target != 'slim' && github.ref == 'refs/heads/main' }}
       - uses: docker/build-push-action@v7
         with:

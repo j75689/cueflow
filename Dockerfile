@@ -10,6 +10,7 @@
 #   docker build --target runner -t cueflow:runner .
 #   docker build --target runner --build-arg RUNNER_EXTRA_PACKAGES="python3 ffmpeg" -t cueflow:runner .
 #
+# Needs BuildKit (the default since Docker 23) for the platform arguments.
 # All three are published to ghcr.io (see .github/workflows/image.yml); docs/runner-image.md shows how
 # to build your own runner on top of the published one.
 

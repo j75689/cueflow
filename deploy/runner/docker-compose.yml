@@ -6,11 +6,12 @@
 #   docker compose up -d
 #
 # It runs the published image; `docker compose pull && docker compose up -d` updates it. To add tools, see
-# docs/runner-image.md.
+# docs/runner-image.md (an image of your own is updated by rebuilding it with `docker build --pull` instead).
 services:
   runner:
     image: ${CUEFLOW_RUNNER_IMAGE:-ghcr.io/j75689/cueflow:runner}
-    # Working from source, or adding Debian packages: uncomment, then `docker compose up -d --build`.
+    # Working from source, or adding Debian packages: uncomment, set `image:` above to a local name (e.g.
+    # cueflow-runner:local, so `docker compose pull` cannot replace your build), then `docker compose up -d --build`.
     # build:
     #   context: ../..
     #   target: runner

@@ -17,12 +17,13 @@ All images are in one package, `ghcr.io/j75689/cueflow`. `runner` and `agents` a
 | `slim`: CueFlow only (distroless) | `main` | `<version>`, `sha-<commit>` |
 
 `FROM ...:runner` picks up every change on `main`. To choose when to upgrade, pin a `sha-<commit>-runner` tag or a
-release tag instead.
+release tag instead. Both are pushed once and not rebuilt.
 
 ## Just a package or two
 
 If all you need is a few Debian packages, use the `RUNNER_EXTRA_PACKAGES` build argument. It needs the source:
-uncomment the `build:` block in `deploy/runner/docker-compose.yml`, then run:
+uncomment the `build:` block in `deploy/runner/docker-compose.yml` and give `image:` a local name such as
+`cueflow-runner:local` (otherwise `docker compose pull` replaces your build with the published image), then run:
 
 ```bash
 RUNNER_EXTRA_PACKAGES="python3 ffmpeg" docker compose up -d --build
@@ -58,6 +59,9 @@ Then point the compose file at it. Either replace `image:` with `build: .`, or b
 docker build -t my-runner . && echo CUEFLOW_RUNNER_IMAGE=my-runner >> .env
 docker compose up -d
 ```
+
+`docker compose pull` cannot update an image that exists only on your machine. To pick up a newer base, rebuild with
+`docker build --pull -t my-runner .` and run `docker compose up -d` again.
 
 Install what agents need at build time. At run time the root file system is read-only and the home directory is a
 tmpfs. Anything an agent installs with `npm install -g` or `apt-get` fails, and anything it writes under `~` is gone
