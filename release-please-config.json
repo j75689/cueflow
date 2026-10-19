@@ -5,8 +5,7 @@
       "release-type": "go",
       "package-name": "cueflow",
       "include-component-in-tag": false,
-      "bump-minor-pre-major": true,
-      "extra-files": ["internal/api/server.go"],
+      "extra-files": ["internal/version/version.go"],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },

@@ -16,11 +16,11 @@ agent 需要更多工具（其他 agent CLI、Python、ffmpeg⋯）時，就以�
 
 | 映像 | 最新版本 | 指定版本 |
 |---|---|---|
-| `runner`：agents 加上 git、gh、SSH，以 `cueflow runner run` 啟動 | `runner` | `<版本>-runner`，例如 `0.3.0-runner` |
+| `runner`：agents 加上 git、gh、SSH，以 `cueflow runner run` 啟動 | `runner` | `<版本>-runner`，例如 `1.0.0-runner` |
 | `agents`：CueFlow 加上 Node.js 與 Claude Code／Codex 的 ACP 橋接器 | `agents` | `<版本>-agents` |
 | `slim`：只有 CueFlow（distroless） | `latest` | `<版本>` |
 
-映像只在[發佈版本](https://github.com/j75689/cueflow/releases)時 build，不是 `main` 上的每個 commit 都有。`FROM ...:runner` 會跟著每個新版本移動；想自己決定什麼時候升級，就釘 `<版本>-runner`。
+映像只在[發佈版本](https://github.com/j75689/cueflow/releases)時 build，不是 `main` 上的每個 commit 都有；`latest`、`agents` 和 `runner` 也只在發佈新版本時移動。所以 `FROM ...:runner` 跟著最新版本走；想自己決定什麼時候升級，就釘 `<版本>-runner`。
 
 ## 只要一兩個套件
 

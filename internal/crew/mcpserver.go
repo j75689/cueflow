@@ -16,6 +16,7 @@ import (
 	"github.com/j75689/cueflow/internal/guard"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/mcpx"
+	"github.com/j75689/cueflow/internal/version"
 )
 
 // MCPPathPrefix is where per-run tool servers are mounted on CueFlow's HTTP server.
@@ -80,7 +81,7 @@ type outcomeRecord struct {
 // newMCPRun exposes env's tools as an MCP server for the run identified by token.
 func (c *Crew) newMCPRun(ctx context.Context, env *runEnv, token string) *mcpRun {
 	run := &mcpRun{env: env, token: token, done: make(chan struct{}), born: time.Now()}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: "0.2.0"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: version.Version}, nil)
 	byName := map[string]tool{}
 	for _, t := range c.agentTools(ctx, env.agent) {
 		t := t

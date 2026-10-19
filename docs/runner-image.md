@@ -12,12 +12,13 @@ All images are in one package, `ghcr.io/j75689/cueflow`. `runner` and `agents` a
 
 | Image | Newest release | One release |
 |---|---|---|
-| `runner`: agents + git, gh, SSH, started as `cueflow runner run` | `runner` | `<version>-runner`, e.g. `0.3.0-runner` |
+| `runner`: agents + git, gh, SSH, started as `cueflow runner run` | `runner` | `<version>-runner`, e.g. `1.0.0-runner` |
 | `agents`: CueFlow + Node.js and the Claude Code / Codex ACP adapters | `agents` | `<version>-agents` |
 | `slim`: CueFlow only (distroless) | `latest` | `<version>` |
 
-Images are built for [releases](https://github.com/j75689/cueflow/releases), not for every commit on `main`.
-`FROM ...:runner` moves to each new release; pin `<version>-runner` to choose when to upgrade.
+Images are built for [releases](https://github.com/j75689/cueflow/releases), not for every commit on `main`, and
+`latest`, `agents` and `runner` move only when a release is cut. `FROM ...:runner` therefore follows the newest
+release; pin `<version>-runner` to choose when to upgrade.
 
 ## Just a package or two
 

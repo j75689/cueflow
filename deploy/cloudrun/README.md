@@ -27,11 +27,13 @@ g() { gcloud --project "$PROJECT" --quiet "$@"; }
 
 Each release publishes the **slim** image (no agent CLIs: the cloud runs agents on
 [Runners](../../docs/external-agents.md#run-agents-on-your-own-machine-runners) or as self-driven agents) as
-`ghcr.io/j75689/cueflow:<version>` (and `:latest`). Deploy a version tag such as `0.3.0`.
+`ghcr.io/j75689/cueflow:<version>` (and `:latest`). Deploy a version tag such as `1.0.0`.
 
 Cloud Run cannot pull from ghcr.io directly. Either mirror the image into Artifact Registry yourself, or
 create an Artifact Registry **remote repository** that proxies ghcr.io (step 3); the package is public, so the
-remote repository needs no credentials.
+remote repository needs no credentials. If you publish your own images from a fork, the package starts
+private and the remote repository cannot read it: set it to public in GitHub (Packages → cueflow →
+Package settings → Change visibility).
 
 ## 2. Database: Supabase
 
@@ -96,7 +98,7 @@ Deploy. The service's own URL is needed in its environment (Cloud Tasks and Sche
 their token audience must match it exactly), so deploy once, read the URL, and deploy again with it:
 
 ```sh
-IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/j75689/cueflow:0.3.0   # a release
+IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/j75689/cueflow:1.0.0   # a release
 g run deploy cueflow --region "$REGION" --image "$IMAGE" --service-account "$SA" \
   --allow-unauthenticated --min-instances 0 --max-instances 3 --timeout 1800 \
   --set-secrets "DATABASE_URL=cueflow-DATABASE_URL:latest,CUEFLOW_SECRET_KEY=cueflow-CUEFLOW_SECRET_KEY:latest,CUEFLOW_ADMIN_TOKEN=cueflow-CUEFLOW_ADMIN_TOKEN:latest,CUEFLOW_MCP_TOKEN=cueflow-CUEFLOW_MCP_TOKEN:latest" \
