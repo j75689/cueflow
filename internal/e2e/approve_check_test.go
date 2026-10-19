@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -51,6 +52,17 @@ func TestApproveRefusesPostItsPublisherCannotTake(t *testing.T) {
 	gone := post("deleted publisher", []string{"a1"}, uuid.New())
 	if code := e.do("POST", "/deliverables/"+gone.ID.String()+"/approve", nil, &apiErr); code != 400 {
 		t.Fatalf("approve with a missing publisher: %d %+v", code, apiErr)
+	}
+
+	// A disabled publisher, or a connector that is not a publisher, is refused too.
+	var off store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Switched off", "type": "fake_accounts_required", "config": map[string]any{}}, &off)
+	if code := e.do("PATCH", "/connectors/"+off.ID.String(), map[string]any{"is_active": false}, nil); code != 200 {
+		t.Fatalf("disable connector: %d", code)
+	}
+	disabled := post("disabled publisher", []string{"a1"}, off.ID)
+	if code := e.do("POST", "/deliverables/"+disabled.ID.String()+"/approve", nil, &apiErr); code != 400 || !strings.Contains(apiErr.Error.Message, "disabled") {
+		t.Fatalf("approve with a disabled publisher: %d %+v", code, apiErr)
 	}
 
 	with := post("with accounts", []string{"a1"}, pub.ID)

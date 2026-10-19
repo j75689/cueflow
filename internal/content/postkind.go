@@ -120,8 +120,9 @@ func (m *Module) postKind() deliverable.Kind {
 	}
 }
 
-// approvablePost refuses to approve a post its publisher could not take: one with no publisher to use, or no
-// accounts for a publisher that needs them (the MCP publisher). Without it the post would be queued and fail
+// approvablePost refuses to approve a post its publisher could not take: no publisher to use, a publisher
+// that is gone, disabled, not a publisher or of an unknown type, or no accounts for a publisher that needs
+// them (the MCP publisher). Without it the post would be queued and fail
 // in the worker; the review page warns about the same thing before the button is pressed.
 func (m *Module) approvablePost(ctx context.Context, d *deliverable.Deliverable) error {
 	p, err := DecodePostPayload(d.Payload)
@@ -142,7 +143,18 @@ func (m *Module) approvablePost(ctx context.Context, d *deliverable.Deliverable)
 	if err != nil {
 		return err
 	}
-	if spec, ok := connector.Lookup(c.Type); ok && spec.AccountsRequired && len(p.Accounts) == 0 {
+	// The same refusals the worker would meet (hub.Publisher), so they come now and not after the queue.
+	if c.Kind != connector.KindPublisher {
+		return &store.ValidationError{Msg: fmt.Sprintf("%s is not a publisher connector; choose a publisher", c.Name)}
+	}
+	if !c.IsActive {
+		return &store.ValidationError{Msg: fmt.Sprintf("publisher %s is disabled: enable it or choose another", c.Name)}
+	}
+	spec, ok := connector.Lookup(c.Type)
+	if !ok {
+		return &store.ValidationError{Msg: fmt.Sprintf("publisher %s has a type this server does not know (%s); choose another", c.Name, c.Type)}
+	}
+	if spec.AccountsRequired && len(p.Accounts) == 0 {
 		return &store.ValidationError{Msg: fmt.Sprintf("%s needs at least one account: pick the accounts to post to before approving", c.Name)}
 	}
 	return nil
