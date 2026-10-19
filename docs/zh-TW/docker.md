@@ -33,7 +33,7 @@ docker compose up -d
 
 在 `deploy/.env` 設定後執行 `docker compose up -d --build`。另有 `runner` 目標（agents 加上 git 與 gh，以 `cueflow runner run` 啟動），給 [deploy/runner](../../deploy/runner/README.md)（英文）用。
 
-三種映像也都發佈在 ghcr：`ghcr.io/j75689/cueflow:main`（slim，只有 amd64）、`:agents`、`:runner`（這兩個也有 arm64）。標籤說明，以及怎麼做一個裝了自己工具的 runner，見 [runner-image.md](runner-image.md)。
+每個發佈版本也會把三種映像推到 ghcr：`ghcr.io/j75689/cueflow:<版本>`／`:latest`（slim，只有 amd64）、`:<版本>-agents`／`:agents`、`:<版本>-runner`／`:runner`（這兩個也有 arm64）。標籤說明，以及怎麼做一個裝了自己工具的 runner，見 [runner-image.md](runner-image.md)。
 
 ## 網頁搜尋
 

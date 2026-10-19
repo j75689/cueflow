@@ -30,7 +30,8 @@ import (
 	"github.com/j75689/cueflow/internal/webui"
 )
 
-const Version = "0.2.0"
+// Version is bumped by the release pull request (release-please); see CONTRIBUTING.md.
+const Version = "0.2.0" // x-release-please-version
 
 type Server struct {
 	Store      *store.Store

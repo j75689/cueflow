@@ -4,18 +4,19 @@
 # package to public in GitHub (Packages -> cueflow -> Package settings -> Change visibility).
 # The images hold the compiled server and dashboard, no secrets.
 #
-# Tags, all in the one package:
-#   slim     main, 1.2.3, latest, sha-<commit>            (deployments pin these: keep them slim only)
-#   agents   agents, main-agents, 1.2.3-agents, sha-<commit>-agents
-#   runner   runner, main-runner, 1.2.3-runner, sha-<commit>-runner
-# `agents` and `runner` follow main. sha-<commit> tags are pushed from branch builds only, so a release
-# tag on the same commit does not rebuild them; a commit whose build was superseded in the queue (see
-# concurrency below) gets none. Release tags are always built.
+# It runs for release tags (v1.2.3, created by release.yml) and by hand (Actions -> image -> Run workflow,
+# on a branch for a test build, or on a tag to rebuild a release). Pushes to main build nothing.
+#
+# Tags, all in the one package (deployments pin the slim ones: keep them slim only):
+#              release v1.2.3                  manual run on a branch
+#   slim       1.2.3, latest                   <branch>, sha-<commit>
+#   agents     1.2.3-agents, agents            <branch>-agents, sha-<commit>-agents
+#   runner     1.2.3-runner, runner            <branch>-runner, sha-<commit>-runner
+# `latest`, `agents` and `runner` follow the newest release.
 name: image
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -26,12 +27,9 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
-    # Each target queues behind its own previous build only, in order: a slow build finishing after a
-    # newer one would move its tags (`main`, `agents`, `runner`) back to the older commit. The targets
-    # build in parallel, so slim (what deployments pull) never waits for the emulated arm64 builds.
-    # A group holds one running and one pending build: a third push while both are busy replaces the
-    # pending one, so that commit is never built and has no sha-<commit> tags. The moving tags still end
-    # on the newest commit.
+    # Each target queues behind its own previous build of the same ref only, in order, so a slow build
+    # cannot finish after a newer one and move a tag back. The targets build in parallel, so slim (what
+    # deployments pull) never waits for the emulated arm64 builds.
     concurrency:
       group: image-${{ github.ref }}-${{ matrix.target }}
       cancel-in-progress: false
@@ -72,7 +70,7 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha,format=long,enable=${{ github.ref_type == 'branch' }}
-            type=raw,value=${{ matrix.target }},suffix=,enable=${{ matrix.target != 'slim' && github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ matrix.target }},suffix=,enable=${{ matrix.target != 'slim' && startsWith(github.ref, 'refs/tags/v') }}
       - uses: docker/build-push-action@v7
         with:
           context: .

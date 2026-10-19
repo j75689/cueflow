@@ -1,0 +1,31 @@
+# Keeps a release pull request open on main (googleapis/release-please). It collects the Conventional
+# Commits merged since the last release into CHANGELOG.md and bumps the version (.release-please-manifest.json
+# and api.Version). Merging that pull request tags the release (v1.2.3) and creates the GitHub Release;
+# the tag starts image.yml.
+#
+# It needs RELEASE_PLEASE_TOKEN, a fine-grained personal access token for this repository with Contents,
+# Pull requests and Issues (labels) read/write: with the default GITHUB_TOKEN, CI would not run on the release pull request
+# (so it could never pass the required checks) and the tag would not start image.yml.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -10,16 +10,15 @@ ffmpeg...), build your own image on top of it. You don't need a clone of this re
 All images are in one package, `ghcr.io/j75689/cueflow`. `runner` and `agents` are built for `linux/amd64` and
 `linux/arm64`; `slim` only for amd64.
 
-| Image | Moving tag | Pinned tags |
+| Image | Newest release | One release |
 |---|---|---|
-| `runner`: agents + git, gh, SSH, started as `cueflow runner run` | `runner` (follows `main`) | `main-runner`, `<version>-runner`, `sha-<commit>-runner` |
-| `agents`: CueFlow + Node.js and the Claude Code / Codex ACP adapters | `agents` (follows `main`) | `main-agents`, `<version>-agents`, `sha-<commit>-agents` |
-| `slim`: CueFlow only (distroless) | `main` | `<version>`, `sha-<commit>` |
+| `runner`: agents + git, gh, SSH, started as `cueflow runner run` | `runner` | `<version>-runner`, e.g. `0.3.0-runner` |
+| `agents`: CueFlow + Node.js and the Claude Code / Codex ACP adapters | `agents` | `<version>-agents` |
+| `slim`: CueFlow only (distroless) | `latest` | `<version>` |
 
-`FROM ...:runner` picks up every change on `main`. To choose when to upgrade, pin a release tag (`<version>-runner`)
-or a `sha-<commit>-runner` tag instead. Both are pushed once and not rebuilt. Every release is built; a commit on
-`main` that was superseded by newer pushes before its build started has no `sha-<commit>` tags, so pick a sha from
-the [package's tag list](https://github.com/j75689/cueflow/pkgs/container/cueflow) rather than from the git log.
+Images are built for [releases](https://github.com/j75689/cueflow/releases), not for every commit on `main`.
+`FROM ...:runner` moves to each new release; pin `<version>-runner` to choose when to upgrade. Test builds of a
+branch, run by hand, are tagged `<branch>-runner` and `sha-<commit>-runner`; don't build on those.
 
 ## Just a package or two
 
@@ -156,4 +155,4 @@ The following may change in any release:
 - the exact list of preinstalled packages, beyond git, gh and an SSH client;
 - the presets' default commands.
 
-If your image depends on any of them, pin a `sha-<commit>-runner` tag.
+If your image depends on any of them, pin a `<version>-runner` tag.

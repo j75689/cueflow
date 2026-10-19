@@ -6,7 +6,7 @@ Tasks (work delivery) + Cloud Scheduler (the one-minute clock). How it works ins
 
 | Piece | Made by |
 | --- | --- |
-| Container image | `.github/workflows/image.yml` on every push to `main` (`ghcr.io/<owner>/cueflow`) |
+| Container image | `.github/workflows/image.yml` for each release tag, or run by hand (`ghcr.io/<owner>/cueflow`) |
 | APIs, service account, media bucket, Cloud Tasks queue, permissions | `gcloud`, once (step 3) |
 | Cloud Run service, its secrets, the Scheduler tick | `gcloud` (step 4), or any IaC tool that can deploy a Cloud Run service with secrets and a Scheduler job |
 | Database | Supabase, by hand (step 2) |
@@ -25,9 +25,11 @@ g() { gcloud --project "$PROJECT" --quiet "$@"; }
 
 ## 1. Publish the image
 
-Push to `main`; `image.yml` builds the **slim** image (no agent CLIs: the cloud runs agents on
-[Runners](../../docs/external-agents.md#run-agents-on-your-own-machine-runners) or as self-driven agents) and
-pushes `ghcr.io/<owner>/cueflow:main`.
+`image.yml` builds the **slim** image (no agent CLIs: the cloud runs agents on
+[Runners](../../docs/external-agents.md#run-agents-on-your-own-machine-runners) or as self-driven agents) for every
+release and pushes `ghcr.io/<owner>/cueflow:<version>` (and `:latest`). Deploy a version tag such as `0.3.0`. In a
+fork, cut a release or run the workflow by hand (Actions → image → Run workflow) on a branch, which pushes
+`:<branch>`.
 
 Cloud Run cannot pull from ghcr.io directly. Either mirror the image into Artifact Registry yourself, or
 create an Artifact Registry **remote repository** that proxies ghcr.io (step 3). The remote repository
@@ -74,7 +76,7 @@ g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --rol
 g iam service-accounts add-iam-policy-binding "$SA" --member "serviceAccount:$SA" --role roles/iam.serviceAccountUser
 g iam service-accounts add-iam-policy-binding "$SA" --member "serviceAccount:$SA" --role roles/iam.serviceAccountTokenCreator
 
-# Lets Cloud Run pull ghcr.io images as $REGION-docker.pkg.dev/$PROJECT/ghcr/<owner>/cueflow:main
+# Lets Cloud Run pull ghcr.io images as $REGION-docker.pkg.dev/$PROJECT/ghcr/<owner>/cueflow:<version>
 g artifacts repositories create ghcr --location "$REGION" --repository-format docker \
   --mode remote-repository --remote-repo-config-desc "ghcr.io" --remote-docker-repo https://ghcr.io
 ```
@@ -98,7 +100,7 @@ Deploy. The service's own URL is needed in its environment (Cloud Tasks and Sche
 their token audience must match it exactly), so deploy once, read the URL, and deploy again with it:
 
 ```sh
-IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/<owner>/cueflow:main
+IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/<owner>/cueflow:0.3.0   # a release
 g run deploy cueflow --region "$REGION" --image "$IMAGE" --service-account "$SA" \
   --allow-unauthenticated --min-instances 0 --max-instances 3 --timeout 1800 \
   --set-secrets "DATABASE_URL=cueflow-DATABASE_URL:latest,CUEFLOW_SECRET_KEY=cueflow-CUEFLOW_SECRET_KEY:latest,CUEFLOW_ADMIN_TOKEN=cueflow-CUEFLOW_ADMIN_TOKEN:latest,CUEFLOW_MCP_TOKEN=cueflow-CUEFLOW_MCP_TOKEN:latest" \
