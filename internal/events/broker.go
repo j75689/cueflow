@@ -65,7 +65,13 @@ func (b *Broker) Subscribe() (<-chan Event, func()) {
 // payload. An unknown org (uuid.Nil, e.g. a lookup that failed) drops the event rather than sending it to every
 // org as a global one; the clients catch up on their next refetch.
 func (b *Broker) Publish(org uuid.UUID, name string, data any) {
-	if b == nil || org == uuid.Nil {
+	if b == nil {
+		return
+	}
+	if org == uuid.Nil {
+		if b.log != nil {
+			b.log.Debug("event dropped: no org", "name", name)
+		}
 		return
 	}
 	if m, ok := data.(map[string]any); ok {

@@ -32,8 +32,9 @@ func TestEventsFollowTheOrg(t *testing.T) {
 		data map[string]any
 	}
 	got := make(chan sse, 16)
+	sc := bufio.NewScanner(resp.Body)
+	waitConnected(t, sc)
 	go func() {
-		sc := bufio.NewScanner(resp.Body)
 		var name string
 		for sc.Scan() {
 			line := sc.Text()
@@ -48,8 +49,6 @@ func TestEventsFollowTheOrg(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(300 * time.Millisecond) // let the stream subscribe
-
 	var other, mine store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "default org", "status": "BACKLOG"}, &other)
 	e.do("POST", "/tasks?org="+dev.Slug, map[string]any{"title": "dev org", "status": "BACKLOG"}, &mine)
@@ -89,15 +88,15 @@ func TestEventsForAGoneOrg(t *testing.T) {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 	names := make(chan string, 16)
+	sc := bufio.NewScanner(resp.Body)
+	waitConnected(t, sc)
 	go func() {
-		sc := bufio.NewScanner(resp.Body)
 		for sc.Scan() {
 			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
 				names <- n
 			}
 		}
 	}()
-	time.Sleep(300 * time.Millisecond)
 	e.do("POST", "/tasks", map[string]any{"title": "default org", "status": "BACKLOG"}, nil)
 	e.do("POST", "/orgs", map[string]any{"name": "Another"}, nil)
 	select {
@@ -108,4 +107,16 @@ func TestEventsForAGoneOrg(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("no org.updated")
 	}
+}
+
+// waitConnected reads the stream up to its ": connected" comment, which the handler writes after subscribing,
+// so events published from here on reach it.
+func waitConnected(t *testing.T, sc *bufio.Scanner) {
+	t.Helper()
+	for sc.Scan() {
+		if sc.Text() == ": connected" {
+			return
+		}
+	}
+	t.Fatalf("stream ended before it connected: %v", sc.Err())
 }

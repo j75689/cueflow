@@ -52,7 +52,7 @@ type Crew struct {
 	// selfEnvs holds the per-task tool state of self-driven agents (see selfdriven.go).
 	selfEnvs sync.Map
 	// taskOrgs caches the org of tasks being worked for live-update events (a task never changes org); an
-	// entry goes when the run ends.
+	// entry goes when the run ends (finish, and once more when runTask returns).
 	taskOrgs sync.Map
 
 	mu      sync.Mutex
@@ -511,6 +511,8 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 
 // finish records the outcome and moves the task, unless a human already moved it elsewhere.
 func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) {
+	// Both run paths (runTask and a self-driven agent) end here, after writing most of the task's messages.
+	defer c.taskOrgs.Delete(task.ID)
 	next := store.TaskWaitingHuman
 	var result *string
 	runStatus := "SUCCEEDED"
