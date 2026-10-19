@@ -85,7 +85,7 @@ func (s *Server) updateRunner(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish(uuid.Nil, "runner.updated", map[string]any{"id": out.ID})
+	s.Broker.PublishGlobal("runner.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusOK, out)
 }
 
@@ -99,7 +99,7 @@ func (s *Server) deleteRunner(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish(uuid.Nil, "runner.updated", map[string]any{"id": id})
+	s.Broker.PublishGlobal("runner.updated", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -176,7 +176,7 @@ func (s *Server) runnerRegister(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish(uuid.Nil, "runner.updated", map[string]any{"id": runner.ID})
+	s.Broker.PublishGlobal("runner.updated", map[string]any{"id": runner.ID})
 	WriteJSON(w, http.StatusCreated, runnerapi.RegisterResponse{RunnerID: runner.ID.String(), Token: token,
 		Name: runner.Name, Labels: runner.Labels})
 }

@@ -91,7 +91,7 @@ func (s *Server) setToolPermissions(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish(uuid.Nil, "connector.updated", map[string]any{"id": id})
+	s.Broker.PublishGlobal("connector.updated", map[string]any{"id": id})
 	WriteJSON(w, http.StatusOK, map[string]any{"permissions": perms})
 }
 

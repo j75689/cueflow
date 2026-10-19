@@ -51,7 +51,8 @@ type Crew struct {
 	mcp mcpRegistry
 	// selfEnvs holds the per-task tool state of self-driven agents (see selfdriven.go).
 	selfEnvs sync.Map
-	// taskOrgs caches each task's org for live-update events (a task never changes org).
+	// taskOrgs caches the org of tasks being worked for live-update events (a task never changes org); an
+	// entry goes when the run ends.
 	taskOrgs sync.Map
 
 	mu      sync.Mutex
@@ -312,6 +313,7 @@ func (c *Crew) llmFor(ctx context.Context, a *store.Agent) (connector.LLM, uuid.
 // --- the agent loop ---
 
 func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
+	defer c.taskOrgs.Delete(id) // the run wrote most of the task's messages; don't keep the entry forever
 	bg := context.WithoutCancel(ctx)
 	task, err := c.store.GetTask(bg, id)
 	if err != nil {

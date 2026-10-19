@@ -19,10 +19,6 @@ func TestEventsFollowTheOrg(t *testing.T) {
 	if code := e.do("POST", "/orgs", map[string]any{"name": "Dev"}, &dev); code != 201 {
 		t.Fatalf("create org: %d", code)
 	}
-	if code := e.do("GET", "/events?org=nope", nil, nil); code != 400 {
-		t.Fatalf("unknown org: %d", code)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", e.api.URL+"/api/v1/events?org="+dev.Slug, nil)
@@ -58,19 +54,58 @@ func TestEventsFollowTheOrg(t *testing.T) {
 	e.do("POST", "/tasks", map[string]any{"title": "default org", "status": "BACKLOG"}, &other)
 	e.do("POST", "/tasks?org="+dev.Slug, map[string]any{"title": "dev org", "status": "BACKLOG"}, &mine)
 	e.do("PATCH", "/orgs/"+dev.ID.String(), map[string]any{"name": "Dev team"}, nil)
+	e.do("DELETE", "/tasks/"+other.ID.String(), nil, nil)
+	e.do("DELETE", "/tasks/"+mine.ID.String(), nil, nil)
 
-	want := []string{"task.updated " + mine.ID.String(), "org.updated " + dev.ID.String()}
+	want := []string{"task.updated " + mine.ID.String(), "org.updated " + dev.ID.String(), "task.deleted " + mine.ID.String()}
 	for i, w := range want {
 		select {
 		case ev := <-got:
 			if ev.name+" "+ev.data["id"].(string) != w {
 				t.Fatalf("event %d: got %s %v, want %s (the default org's task must not arrive)", i, ev.name, ev.data, w)
 			}
-			if ev.name == "task.updated" && ev.data["org_id"] != dev.ID.String() {
+			if strings.HasPrefix(ev.name, "task.") && ev.data["org_id"] != dev.ID.String() {
 				t.Fatalf("task event org_id: %v", ev.data["org_id"])
 			}
 		case <-ctx.Done():
 			t.Fatalf("waiting for %s", w)
 		}
+	}
+}
+
+// A tab still watching an org that was deleted keeps a stream (EventSource would retry an error forever) that
+// carries the global events, so it hears org.updated and switches to another org.
+func TestEventsForAGoneOrg(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", e.api.URL+"/api/v1/events?org=deleted-org", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	names := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+				names <- n
+			}
+		}
+	}()
+	time.Sleep(300 * time.Millisecond)
+	e.do("POST", "/tasks", map[string]any{"title": "default org", "status": "BACKLOG"}, nil)
+	e.do("POST", "/orgs", map[string]any{"name": "Another"}, nil)
+	select {
+	case n := <-names:
+		if n != "org.updated" {
+			t.Fatalf("got %s first, want only the global org.updated", n)
+		}
+	case <-ctx.Done():
+		t.Fatal("no org.updated")
 	}
 }

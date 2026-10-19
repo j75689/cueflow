@@ -296,7 +296,9 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 }
 
 // events streams live updates (SSE). With ?org= (id or slug) it sends that org's events and the global ones
-// only, so a tab does not reload for other orgs' changes; without it, every event.
+// only, so a tab does not reload for other orgs' changes; without it, every event. An org that no longer exists
+// (deleted while a tab watched it) gets the global events only, not an error: EventSource would retry the same
+// URL forever, and the org.updated it needs to pick another org is a global event.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -305,12 +307,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	watch := ""
 	if r.URL.Query().Get(OrgParam) != "" {
-		o, err := s.ReqOrg(r)
-		if err != nil {
-			s.Fail(w, err)
-			return
+		watch = "-" // matches no org's events
+		if o, err := s.ReqOrg(r); err == nil {
+			watch = o.ID.String()
 		}
-		watch = o.ID.String()
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -336,25 +336,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !ev.For(watch) {
 				continue
 			}
-			data, _ := json.Marshal(eventData(ev))
+			data, _ := json.Marshal(ev.Data)
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, data)
 			flusher.Flush()
 		}
 	}
-}
-
-// eventData is what the client gets as the event's data: the payload plus org_id for an org's event.
-func eventData(ev events.Event) any {
-	m, ok := ev.Data.(map[string]any)
-	if !ok || ev.Org == "" {
-		return ev.Data
-	}
-	out := make(map[string]any, len(m)+1)
-	for k, v := range m {
-		out[k] = v
-	}
-	out["org_id"] = ev.Org
-	return out
 }
 
 // --- helpers ---

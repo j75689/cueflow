@@ -53,10 +53,22 @@ func TestPublishCarriesOrg(t *testing.T) {
 	mine, other := uuid.New(), uuid.New()
 	b.Publish(mine, "task.updated", map[string]any{"id": "a"})
 	b.Publish(other, "task.updated", map[string]any{"id": "b"})
-	b.Publish(uuid.Nil, "connector.updated", map[string]any{"id": "c"})
+	b.Publish(uuid.Nil, "task.updated", map[string]any{"id": "lost"}) // unknown org: dropped, not global
+	b.PublishGlobal("connector.updated", map[string]any{"id": "c"})
 	var got []string
 	for range 3 {
-		ev := <-ch
+		var ev Event
+		select {
+		case ev = <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("only %d events arrived", len(got))
+		}
+		if ev.Data.(map[string]any)["id"] == "lost" {
+			t.Fatal("an event with no org must be dropped")
+		}
+		if ev.Org != "" && ev.Data.(map[string]any)["org_id"] != ev.Org {
+			t.Fatalf("org_id missing from %+v", ev)
+		}
 		if ev.For(mine.String()) {
 			got = append(got, ev.Name+"/"+ev.Org)
 		}
