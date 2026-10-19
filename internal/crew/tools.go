@@ -43,8 +43,20 @@ type runEnv struct {
 const (
 	maxSubtasksPerRun = 8
 	maxDelegateDepth  = 3
-	maxToolResult     = 12000
+	// maxToolResult is how much of one tool result the model sees: enough for a source file of a
+	// few hundred lines. The whole run's history goes back each turn, so it is not unbounded.
+	maxToolResult = 32000
 )
+
+// clipToolResult cuts a result to maxToolResult and says how much was left out, so the agent knows
+// it has not seen the whole thing.
+func clipToolResult(s string) string {
+	r := []rune(s)
+	if len(r) <= maxToolResult {
+		return s
+	}
+	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters)", string(r[:maxToolResult]), maxToolResult, len(r))
+}
 
 // run is the module-facing view of this run.
 func (e *runEnv) run() *Run {

@@ -227,9 +227,7 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 			text, isErr = cerr.Error(), true
 		}
 	}
-	if r := []rune(text); len(r) > maxToolResult {
-		text = string(r[:maxToolResult]) + "… (truncated)"
-	}
+	text = clipToolResult(text)
 	if text == "" {
 		text = "(no output)" // an empty result would read as "still running"
 	}
