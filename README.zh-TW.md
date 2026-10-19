@@ -113,7 +113,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 
 ## 參與貢獻
 
-需要 Go 1.27+、Node 22+、Docker（跑 PostgreSQL 用）；`make test-db`、`go run ./cmd/cueflow`、`cd web && npm run dev`。完整的開發設定、不可妥協的規則與 commit 慣例在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
+需要 Go 1.27+、Node 26+、Docker（跑 PostgreSQL 用）；`make test-db`、`go run ./cmd/cueflow`、`cd web && npm run dev`。完整的開發設定、不可妥協的規則與 commit 慣例在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
 ## 安全性
 

@@ -133,7 +133,7 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 
 ## Contributing
 
-Go 1.27+, Node 22+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
+Go 1.27+, Node 26+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
 The full setup, the rules that are not negotiable and the commit convention are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
