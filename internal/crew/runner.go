@@ -163,5 +163,5 @@ func (c *Crew) stopRunnerJob(ctx context.Context, id uuid.UUID, grace time.Durat
 // RunnerPickedUp notes in the task thread which runner took the work.
 func (c *Crew) RunnerPickedUp(ctx context.Context, taskID uuid.UUID, runnerName string) {
 	c.system(ctx, taskID, fmt.Sprintf("Picked up by runner %q.", runnerName))
-	c.broker.Publish("task.updated", map[string]any{"id": taskID})
+	c.broker.Publish(c.taskOrg(ctx, taskID), "task.updated", map[string]any{"id": taskID})
 }

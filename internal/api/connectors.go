@@ -53,7 +53,7 @@ func (s *Server) createConnector(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("connector.updated", map[string]any{"id": c.ID})
+	s.Broker.PublishGlobal("connector.updated", map[string]any{"id": c.ID})
 	WriteJSON(w, http.StatusCreated, c)
 }
 
@@ -77,7 +77,7 @@ func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("connector.updated", map[string]any{"id": c.ID})
+	s.Broker.PublishGlobal("connector.updated", map[string]any{"id": c.ID})
 	WriteJSON(w, http.StatusOK, c)
 }
 
@@ -91,7 +91,7 @@ func (s *Server) deleteConnector(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("connector.updated", map[string]any{"id": id})
+	s.Broker.PublishGlobal("connector.updated", map[string]any{"id": id})
 	_ = s.Scheduler.Reload(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -120,7 +120,7 @@ func (s *Server) testConnector(w http.ResponseWriter, r *http.Request) {
 		res = &connector.TestResult{OK: false, Message: err.Error()}
 	}
 	_ = s.Store.SetConnectorCheck(context.Background(), id, res.OK, res.Message)
-	s.Broker.Publish("connector.updated", map[string]any{"id": id})
+	s.Broker.PublishGlobal("connector.updated", map[string]any{"id": id})
 	WriteJSON(w, http.StatusOK, res)
 }
 

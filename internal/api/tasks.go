@@ -149,7 +149,7 @@ func (s *Server) createTaskOp(ctx context.Context, in store.NewTask) (*store.Tas
 	if err != nil {
 		return nil, err
 	}
-	s.Broker.Publish("task.updated", map[string]any{"id": t.ID, "status": t.Status})
+	s.Broker.Publish(t.OrgID, "task.updated", map[string]any{"id": t.ID, "status": t.Status})
 	s.Crew.TaskChanged(ctx, t)
 	return t, nil
 }
@@ -215,7 +215,7 @@ func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.Tas
 		}
 		s.Crew.TaskChanged(ctx, after)
 	}
-	s.Broker.Publish("task.updated", map[string]any{"id": after.ID, "status": after.Status})
+	s.Broker.Publish(after.OrgID, "task.updated", map[string]any{"id": after.ID, "status": after.Status})
 	return after, nil
 }
 
@@ -233,11 +233,12 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Crew.Cancel(id)
+	org := s.Store.TaskOrg(r.Context(), id)
 	if err := s.Store.DeleteTask(r.Context(), id); err != nil {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("task.deleted", map[string]any{"id": id})
+	s.Broker.Publish(org, "task.deleted", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -309,7 +310,7 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 	if err != nil {
 		return nil, err
 	}
-	s.Broker.Publish("task.message", map[string]any{"task_id": id, "id": msg.ID})
+	s.Broker.Publish(t.OrgID, "task.message", map[string]any{"task_id": id, "id": msg.ID})
 
 	if t.AssigneeAgentID != nil {
 		switch t.Status {
@@ -320,7 +321,7 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 		default:
 			st := store.TaskTodo
 			if _, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{Status: &st}); err == nil {
-				s.Broker.Publish("task.updated", map[string]any{"id": id, "status": after.Status})
+				s.Broker.Publish(after.OrgID, "task.updated", map[string]any{"id": id, "status": after.Status})
 				s.Crew.TaskChanged(ctx, after)
 			}
 		}
@@ -358,7 +359,7 @@ func (s *Server) runTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, erro
 	if err != nil {
 		return nil, err
 	}
-	s.Broker.Publish("task.updated", map[string]any{"id": id, "status": after.Status})
+	s.Broker.Publish(after.OrgID, "task.updated", map[string]any{"id": id, "status": after.Status})
 	s.Crew.TaskChanged(ctx, after)
 	return after, nil
 }
@@ -389,7 +390,7 @@ func (s *Server) cancelTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, e
 	}
 	if ok {
 		_, _ = s.Store.AddTaskMessage(ctx, id, "system", nil, "status", "Stopped by a human.", nil)
-		s.Broker.Publish("task.updated", map[string]any{"id": id, "status": t.Status})
+		s.Broker.Publish(t.OrgID, "task.updated", map[string]any{"id": id, "status": t.Status})
 	}
 	return t, nil
 }

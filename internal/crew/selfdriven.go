@@ -114,7 +114,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 			}
 			// Tag the run now so an interrupted one is recognizable as self-driven.
 			_, _ = c.store.Pool().Exec(ctx, `UPDATE agent_runs SET runtime='external', connector_id=$2 WHERE id=$1`, run.ID, a.RuntimeConnectorID)
-			c.broker.Publish("task.updated", map[string]any{"id": task.ID, "status": task.Status})
+			c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": task.ID, "status": task.Status})
 			c.system(ctx, task.ID, fmt.Sprintf("%s claimed the task.", a.Name))
 			team, _ := c.store.ListAgents(ctx, task.OrgID)
 			var memories []store.AgentMemory
@@ -287,7 +287,7 @@ func (c *Crew) recoverSelfDriven(ctx context.Context, id uuid.UUID) bool {
 	_ = c.store.FailExternalRuns(ctx, id, "the agent stopped responding (claim expired)")
 	if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskTodo, nil); ok {
 		c.system(ctx, id, fmt.Sprintf("%s stopped responding; the task is back in To do.", a.Name))
-		c.broker.Publish("task.updated", map[string]any{"id": id, "status": store.TaskTodo})
+		c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": id, "status": store.TaskTodo})
 	}
 	return true
 }

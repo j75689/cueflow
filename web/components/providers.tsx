@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { UNAUTHORIZED_EVENT, api, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
+import { ORG_CHANGED_EVENT, UNAUTHORIZED_EVENT, api, apiOrg, errorMessage, eventsURL, getToken, setToken } from "@/lib/api";
 import type { Meta } from "@/lib/types";
 import { DialogProvider } from "./dialog";
 import { Button, Field, Input, Modal, cx } from "./ui";
@@ -231,6 +231,10 @@ export function Providers({ children }: { children: ReactNode }) {
           } catch {
             /* ignore malformed payloads */
           }
+          // The stream is opened for one org; an event for another can only be one sent before a switch. With
+          // no org chosen (yet, or the org list failed to load) the stream is unfiltered and every event counts.
+          const org = apiOrg();
+          if (org && typeof data.org_id === "string" && data.org_id !== org) return;
           listeners.current.get(name)?.forEach((fn) => fn(data));
         });
       }
@@ -260,12 +264,25 @@ export function Providers({ children }: { children: ReactNode }) {
       connect();
     };
 
+    // The stream carries one org's events: reopen it for the new org when the org changes. No catch-up is
+    // needed then: the pages remount for the new org (see Shell) and load it afresh. A hidden tab stays closed
+    // and keeps `missed`, so it catches up on what happened meanwhile when it is looked at again.
+    const onOrgChange = () => {
+      if (!es) return;
+      disconnect();
+      if (document.hidden) return;
+      missed = false;
+      connect();
+    };
+
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener(ORG_CHANGED_EVENT, onOrgChange);
     if (document.hidden) onVisibility();
     connect();
     return () => {
       closed = true;
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener(ORG_CHANGED_EVENT, onOrgChange);
       if (retry) clearTimeout(retry);
       if (sleep) clearTimeout(sleep);
       es?.close();

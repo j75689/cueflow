@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,7 +18,16 @@ const Channel = "cueflow_events"
 
 type Event struct {
 	Name string `json:"name"`
+	// Org is the org the change belongs to; empty for global changes (connectors, runners, orgs), which
+	// every subscriber gets.
+	Org  string `json:"org,omitempty"`
 	Data any    `json:"data"`
+}
+
+// For reports whether a subscriber watching org should get ev: its own org's events and global ones.
+// An empty org watches every org.
+func (ev Event) For(org string) bool {
+	return org == "" || ev.Org == "" || ev.Org == org
 }
 
 type Broker struct {
@@ -51,13 +61,42 @@ func (b *Broker) Subscribe() (<-chan Event, func()) {
 	}
 }
 
-// Publish fans out without blocking; slow subscribers drop events (clients refetch on reconnect).
-func (b *Broker) Publish(name string, data any) {
+// Publish sends an org's event: its subscribers and the unfiltered ones get it, with org_id added to a map
+// payload. An unknown org (uuid.Nil, e.g. a lookup that failed) drops the event rather than sending it to every
+// org as a global one; the clients catch up on their next refetch.
+func (b *Broker) Publish(org uuid.UUID, name string, data any) {
 	if b == nil {
 		return
 	}
+	if org == uuid.Nil {
+		if b.log != nil {
+			b.log.Debug("event dropped: no org", "name", name)
+		}
+		return
+	}
+	if m, ok := data.(map[string]any); ok {
+		withOrg := make(map[string]any, len(m)+1)
+		for k, v := range m {
+			withOrg[k] = v
+		}
+		withOrg["org_id"] = org.String()
+		data = withOrg
+	}
+	b.send(Event{Name: name, Org: org.String(), Data: data})
+}
+
+// PublishGlobal sends a change that belongs to no org (connectors, orgs, runners) to every subscriber.
+func (b *Broker) PublishGlobal(name string, data any) {
+	if b == nil {
+		return
+	}
+	b.send(Event{Name: name, Data: data})
+}
+
+// send fans out without blocking; slow subscribers drop events (clients refetch on reconnect).
+func (b *Broker) send(ev Event) {
 	if b.pool != nil {
-		payload, err := json.Marshal(Event{Name: name, Data: data})
+		payload, err := json.Marshal(ev)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -67,7 +106,7 @@ func (b *Broker) Publish(name string, data any) {
 		}
 		b.log.Warn("notify failed; delivering locally", "err", err)
 	}
-	b.deliver(Event{Name: name, Data: data})
+	b.deliver(ev)
 }
 
 func (b *Broker) deliver(ev Event) {

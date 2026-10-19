@@ -77,15 +77,15 @@ func (w *Worker) Tick(ctx context.Context) {
 	if err := w.failExpired(ctx); err != nil && ctx.Err() == nil {
 		w.logger.Error("expire leases", "err", err)
 	}
-	ids, err := w.store.QueueApproved(ctx)
+	queued, err := w.store.QueueApproved(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			w.logger.Error("queue approved", "err", err)
 		}
 		return
 	}
-	for _, id := range ids {
-		w.broker.Publish("deliverable.updated", map[string]any{"id": id, "status": StatusQueued})
+	for _, d := range queued {
+		w.broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": StatusQueued})
 	}
 	for {
 		items, err := w.store.ClaimQueued(ctx, w.lease, 5)
@@ -132,11 +132,12 @@ func (w *Worker) failExpired(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		msg := "worker stopped while acting; the action may or may not have happened - check before retrying"
-		if _, err := w.store.Transition(ctx, id, StatusFailed, ActionFailed, ActorWorker, msg, &TransitionOpts{ErrorMessage: &msg}); err != nil {
+		d, err := w.store.Transition(ctx, id, StatusFailed, ActionFailed, ActorWorker, msg, &TransitionOpts{ErrorMessage: &msg})
+		if err != nil {
 			w.logger.Error("fail expired lease", "deliverable", id, "err", err)
 			continue
 		}
-		w.broker.Publish("deliverable.updated", map[string]any{"id": id, "status": StatusFailed})
+		w.broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": id, "status": StatusFailed})
 	}
 	return nil
 }
@@ -157,7 +158,7 @@ func (w *Worker) act(ctx context.Context, d *Deliverable) {
 			"approved; no action connector configured, nothing to run", &TransitionOpts{ActedAt: &now, ErrorMessage: &empty}); terr != nil {
 			log.Error("mark done", "err", terr)
 		}
-		w.broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": StatusDone})
+		w.broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": StatusDone})
 		return
 	}
 	if err != nil {
@@ -171,7 +172,7 @@ func (w *Worker) act(ctx context.Context, d *Deliverable) {
 		if _, terr := w.store.Transition(context.Background(), d.ID, StatusFailed, ActionFailed, ActorWorker, msg, opts); terr != nil {
 			log.Error("mark failed", "err", terr)
 		}
-		w.broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": StatusFailed})
+		w.broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": StatusFailed})
 		return
 	}
 	note := fmt.Sprintf("external ids: %v", res.ExternalIDs)
@@ -181,7 +182,7 @@ func (w *Worker) act(ctx context.Context, d *Deliverable) {
 		return
 	}
 	log.Info("done", "external_ids", res.ExternalIDs)
-	w.broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": StatusDone})
+	w.broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": StatusDone})
 }
 
 func (w *Worker) doAct(ctx context.Context, d *Deliverable) (*connector.ActResult, error) {

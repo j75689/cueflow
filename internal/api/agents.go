@@ -124,7 +124,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("agent.updated", map[string]any{"id": out.ID})
+	s.Broker.Publish(out.OrgID, "agent.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusCreated, out)
 }
 
@@ -147,7 +147,7 @@ func (s *Server) importTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	created, skipped, err := crew.ApplyTeam(r.Context(), s.Store, org.ID, team)
 	for _, a := range created {
-		s.Broker.Publish("agent.updated", map[string]any{"id": a.ID})
+		s.Broker.Publish(a.OrgID, "agent.updated", map[string]any{"id": a.ID})
 	}
 	if err != nil {
 		s.Fail(w, err)
@@ -198,7 +198,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("agent.updated", map[string]any{"id": out.ID})
+	s.Broker.Publish(out.OrgID, "agent.updated", map[string]any{"id": out.ID})
 	s.Crew.Wake() // an agent may have been re-enabled with TODO work waiting
 	WriteJSON(w, http.StatusOK, out)
 }
@@ -215,11 +215,15 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 			s.Crew.Cancel(t.ID)
 		}
 	}
+	org := uuid.Nil
+	if a, err := s.Store.GetAgent(r.Context(), id); err == nil {
+		org = a.OrgID
+	}
 	if err := s.Store.DeleteAgent(r.Context(), id); err != nil {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("agent.updated", map[string]any{"id": id})
+	s.Broker.Publish(org, "agent.updated", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

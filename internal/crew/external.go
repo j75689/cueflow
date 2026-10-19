@@ -259,7 +259,7 @@ func (c *Crew) resumeAfterApproval(ctx context.Context, taskID uuid.UUID) {
 		return
 	}
 	if ok, _ := c.store.SetTaskStatusIf(ctx, taskID, []store.TaskStatus{store.TaskWaitingHuman}, store.TaskTodo, nil); ok {
-		c.broker.Publish("task.updated", map[string]any{"id": taskID, "status": store.TaskTodo})
+		c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": taskID, "status": store.TaskTodo})
 		c.Wake()
 	}
 }

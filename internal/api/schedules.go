@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -100,7 +102,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Scheduler.Reload(r.Context())
-	s.Broker.Publish("schedule.updated", map[string]any{"id": out.ID})
+	s.Broker.Publish(out.OrgID, "schedule.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusCreated, s.withScheduleNext(out))
 }
 
@@ -127,7 +129,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Scheduler.Reload(r.Context())
-	s.Broker.Publish("schedule.updated", map[string]any{"id": out.ID})
+	s.Broker.Publish(out.OrgID, "schedule.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusOK, s.withScheduleNext(out))
 }
 
@@ -137,12 +139,16 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
+	org := uuid.Nil
+	if sc, err := s.Store.GetSchedule(r.Context(), id); err == nil {
+		org = sc.OrgID
+	}
 	if err := s.Store.DeleteSchedule(r.Context(), id); err != nil {
 		s.Fail(w, err)
 		return
 	}
 	_ = s.Scheduler.Reload(r.Context())
-	s.Broker.Publish("schedule.updated", map[string]any{"id": id})
+	s.Broker.Publish(org, "schedule.updated", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

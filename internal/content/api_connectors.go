@@ -32,7 +32,7 @@ func (h *handlers) fetchConnector(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
-	h.m.Broker.Publish("connector.updated", map[string]any{"id": id})
+	h.m.Broker.PublishGlobal("connector.updated", map[string]any{"id": id})
 	api.WriteJSON(w, http.StatusOK, map[string]int{"new_items": n})
 }
 

@@ -309,7 +309,7 @@ Agents never approve and never publish. The `post_deliverables` capability ("Dra
 
 ## 7. Live updates
 
-`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (deliverables, tasks, threads, runs, connectors, agents, schedules, orgs, runners) publishes an event; `GET /api/v1/events` pushes them to the browser over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
+`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (deliverables, tasks, threads, runs, connectors, agents, schedules, orgs, runners) publishes an event; each event names its org (or none, for global changes such as connectors), `GET /api/v1/events?org=` pushes a tab only its own org's events and the global ones over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
 
 ## 8. Deployment topology
 

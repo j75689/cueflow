@@ -58,7 +58,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 			s.Logger.Warn("seed org agents", "org", out.Slug, "err", err)
 		}
 	}
-	s.Broker.Publish("org.updated", map[string]any{"id": out.ID})
+	s.Broker.PublishGlobal("org.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusCreated, out)
 }
 
@@ -89,7 +89,7 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("org.updated", map[string]any{"id": out.ID})
+	s.Broker.PublishGlobal("org.updated", map[string]any{"id": out.ID})
 	WriteJSON(w, http.StatusOK, out)
 }
 
@@ -103,6 +103,6 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish("org.updated", map[string]any{"id": id})
+	s.Broker.PublishGlobal("org.updated", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }

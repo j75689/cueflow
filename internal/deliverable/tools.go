@@ -81,7 +81,7 @@ func toolCreate(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, 
 		return "", err
 	}
 	r.Inc("deliverables")
-	r.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	r.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	if d.Status == StatusDraft {
 		return fmt.Sprintf("Deliverable %s (%s) saved as a draft.", d.ID, d.Kind), nil
 	}
@@ -162,7 +162,7 @@ func toolRevise(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	r.Broker.Publish("deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
+	r.Broker.Publish(d.OrgID, "deliverable.updated", map[string]any{"id": d.ID, "status": d.Status})
 	return "Deliverable revised.", nil
 }
 

@@ -301,7 +301,7 @@ Agent 永遠不核准、不發布。`post_deliverables` 能力（UI 上叫 Draft
 
 ## 7. 即時更新
 
-`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（deliverable、任務、對話串、執行、connector、agent、排程、org、runner）都會發佈事件，`GET /api/v1/events` 以 SSE 推給瀏覽器，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
+`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（deliverable、任務、對話串、執行、connector、agent、排程、org、runner）都會發佈事件，每個事件都標明所屬的 org（connector 這類全域變動則不標），`GET /api/v1/events?org=` 只把該 org 的事件和全域事件以 SSE 推給那個分頁，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
 
 ## 8. 部署拓樸
 
