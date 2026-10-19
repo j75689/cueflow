@@ -42,7 +42,7 @@ flowchart LR
 
 ## 3. Default team
 
-On first start, when no agents exist, the system creates a single agent, the Chief (`internal/crew/defaults.go`). It can be edited in the UI, and you add the rest of the team yourself: by hand, or by importing a **team template**, a JSON file like a Grafana dashboard (Agents → *Import team*; *Export team* writes one from an org). The repository ships [`templates/social-content.json`](../templates/social-content.json), the researcher, writer and editor below:
+On first start, when no agents exist, the system creates a single agent, the Chief (`internal/crew/defaults.go`). It can be edited in the UI, and you add the rest of the team yourself: by hand, or by importing a **team template**, a JSON file like a Grafana dashboard (Agents → *Import team*; *Export team* writes one from an org). The repository ships [`templates/social-content.json`](../templates/social-content.json), the researcher, writer and editor below, and [`templates/developer-team.json`](../templates/developer-team.json), a software team (tech lead, architect, engineer, reviewer, QA, tech writer) described in [templates/README.md](../templates/README.md):
 
 | Role | slug | Capabilities | Responsibility |
 |---|---|---|---|

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -92,5 +94,37 @@ func TestTeamTemplateImportExport(t *testing.T) {
 	agents, _ := e.store.ListAgents(ctx, other.ID)
 	if len(agents) != 3 || agents[0].OrgID != other.ID {
 		t.Fatalf("other org agents: %d", len(agents))
+	}
+}
+
+// Every template shipped under templates/ imports into a fresh org with all its agents created: the
+// roles and capabilities it names exist on a server with the built-in modules, so picking one from
+// the repository never ends in the "unknown capability" error the test above provokes on purpose.
+func TestShippedTemplatesImport(t *testing.T) {
+	e := setup(t)
+	files, err := filepath.Glob("../../templates/*.json")
+	if err != nil || len(files) < 2 {
+		t.Fatalf("templates: %v %v", files, err)
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		team, err := crew.ParseTeam(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		var org store.Org
+		if code := e.do("POST", "/orgs", map[string]any{"name": strings.TrimSuffix(filepath.Base(f), ".json")}, &org); code != 201 || org.Slug == "" {
+			t.Fatalf("%s: create org: %d %+v", f, code, org)
+		}
+		var res struct {
+			Created []store.Agent `json:"created"`
+			Skipped []string      `json:"skipped"`
+		}
+		if code := e.do("POST", "/agents/template?org="+org.Slug, json.RawMessage(raw), &res); code != 200 || len(res.Created) != len(team.Agents) || len(res.Skipped) != 0 {
+			t.Fatalf("%s: import: %d %+v", f, code, res)
+		}
 	}
 }
