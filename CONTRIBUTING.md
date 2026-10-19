@@ -14,7 +14,7 @@ are the ones most likely to land quickly.
 
 ## Development setup
 
-Requirements: Go 1.27+, Node 22+, Docker (for PostgreSQL).
+Requirements: Go 1.27+, Node 26+, Docker (for PostgreSQL).
 
 ```bash
 make test-db                      # disposable PostgreSQL on :55432

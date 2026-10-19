@@ -104,7 +104,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 
 - [整體架構設計](docs/zh-TW/architecture.md)，套件結構在 §2.1 · [Agentic flow 設計](docs/zh-TW/agentic-flow.md)
 - [設定](docs/zh-TW/configuration.md)：所有環境變數與金鑰更換
-- [用 Docker Compose 執行](docs/zh-TW/docker.md)
+- [用 Docker Compose 執行](docs/zh-TW/docker.md) · [自訂 Runner 映像](docs/zh-TW/runner-image.md)
 - [內建 connector](docs/zh-TW/builtin-connectors.md) · [外部 agent、Runner 與 MCP](docs/zh-TW/external-agents.md)
 - [模組：deliverables、content、圖片與影片](docs/zh-TW/modules.md)
 - 英文文件：[REST API](docs/api.md) · [Connector 插件開發](docs/connectors.md) · [發布器 MCP 約定](docs/publisher-mcp.md) · [團隊範本](templates/README.md) · [部署到 Google Cloud Run](deploy/cloudrun/README.md) · [容器裡的 Runner](deploy/runner/README.md)
@@ -113,7 +113,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 
 ## 參與貢獻
 
-需要 Go 1.27+、Node 22+、Docker（跑 PostgreSQL 用）；`make test-db`、`go run ./cmd/cueflow`、`cd web && npm run dev`。完整的開發設定、不可妥協的規則與 commit 慣例在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
+需要 Go 1.27+、Node 26+、Docker（跑 PostgreSQL 用）；`make test-db`、`go run ./cmd/cueflow`、`cd web && npm run dev`。完整的開發設定、不可妥協的規則與 commit 慣例在 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
 ## 安全性
 

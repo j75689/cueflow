@@ -123,7 +123,7 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 - [Architecture](docs/architecture.md), with the package layout in §2.1 · [Agentic flow](docs/agentic-flow.md)
 - [REST API](docs/api.md) · [Configuration](docs/configuration.md), every environment variable and key rotation
 - [Running with Docker Compose](docs/docker.md) · [Deploying on Google Cloud Run](deploy/cloudrun/README.md) ·
-  [A runner in a container](deploy/runner/README.md)
+  [A runner in a container](deploy/runner/README.md) · [Customizing the runner image](docs/runner-image.md)
 - [Built-in connectors](docs/builtin-connectors.md) · [Writing a connector plugin](docs/connectors.md) ·
   [Publisher MCP contract](docs/publisher-mcp.md)
 - [External agents, runners and MCP](docs/external-agents.md)
@@ -133,7 +133,7 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 
 ## Contributing
 
-Go 1.27+, Node 22+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
+Go 1.27+, Node 26+ and Docker (for PostgreSQL); `make test-db`, `go run ./cmd/cueflow`, `cd web && npm run dev`.
 The full setup, the rules that are not negotiable and the commit convention are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security

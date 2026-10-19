@@ -51,7 +51,8 @@ which command to run, which ACP login to use), and `cueflow runner status` check
 the dashboard stops it at once. Details and an example: [api.md](api.md#runners).
 
 To keep the agent away from your own logins, run the runner in a container with its own Claude token, a GitHub token
-of its own and a clean work directory: [deploy/runner](../deploy/runner/README.md).
+of its own and a clean work directory: [deploy/runner](../deploy/runner/README.md). To add tools or another agent CLI
+to that container, see [runner-image.md](runner-image.md).
 
 ## Self-driven agents
 
