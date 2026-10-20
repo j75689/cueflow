@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/domain"
@@ -56,10 +59,22 @@ func TestTaskFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, notes.ID.String())); err != nil {
 		t.Fatalf("bytes not in the blob backend: %v", err)
 	}
-	// Replacing keeps the row and its blob key.
+	// Replacing stores the new bytes under a fresh key and deletes the old ones after the commit.
 	again, err := e.store.WriteTaskFile(ctx, parent.ID, "notes.md", "text/markdown", []byte("version two"), "architect")
-	if err != nil || again.ID != notes.ID || again.SizeBytes != 11 {
+	if err != nil || again.ID == notes.ID || again.SizeBytes != 11 || again.MimeType != "text/markdown" {
 		t.Fatalf("replace: %+v %v", again, err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 1 || left[0].Name() != again.ID.String() {
+		t.Fatalf("want only the new bytes in the backend, got %v", left)
+	}
+	// A replace that fails after its bytes were written leaves the old file whole.
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := e.store.WriteTaskFile(canceled, parent.ID, "notes.md", "", []byte("never"), "architect"); err == nil {
+		t.Fatal("a write with a canceled context succeeded")
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 1 {
+		t.Fatalf("a failed replace left %d blobs", len(left))
 	}
 	if _, body, err := readTaskFile(t, e, parent, "notes.md"); err != nil || body != "version two" {
 		t.Fatalf("read own: %q %v", body, err)
@@ -90,10 +105,34 @@ func TestTaskFiles(t *testing.T) {
 		t.Fatalf("list: %v %v", list, err)
 	}
 
-	for _, bad := range []string{"", "/abs", "a//b", "../up", "a/./b", `win\path`, "tab\there", string(make([]byte, 201))} {
-		if _, err := e.store.WriteTaskFile(ctx, parent.ID, bad, "", []byte("x"), "a"); err == nil {
-			t.Errorf("name %q accepted", bad)
+	// Bad input is a validation error (400), never a database error (500), and writes no bytes.
+	before, _ := os.ReadDir(dir)
+	var invalid *store.ValidationError
+	for _, bad := range []string{"", "/abs", "a//b", "../up", "a/./b", `win\path`, "tab\there", "notes\xff.md", strings.Repeat("字", 201)} {
+		if _, err := e.store.WriteTaskFile(ctx, parent.ID, bad, "", []byte("x"), "a"); !errors.As(err, &invalid) {
+			t.Errorf("name %q: %v", bad, err)
 		}
+	}
+	if _, err := e.store.WriteTaskFile(ctx, parent.ID, "doc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", []byte("x"), "a"); !errors.As(err, &invalid) {
+		t.Errorf("a 71-character MIME type: %v", err)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, parent.ID, "a.txt", "", []byte("x"), strings.Repeat("a", 65)); !errors.As(err, &invalid) {
+		t.Errorf("a 65-character author: %v", err)
+	}
+	// 200 characters is the limit, however many bytes they take.
+	long := strings.Repeat("字", 200)
+	if _, err := e.store.WriteTaskFile(ctx, parent.ID, long, "", []byte("x"), "a"); err != nil {
+		t.Fatalf("a 200-character name: %v", err)
+	}
+	if err := e.store.DeleteTaskFile(ctx, parent.ID, long); err != nil {
+		t.Fatal(err)
+	}
+	// An unknown task is not found, and its bytes don't stay behind.
+	if _, err := e.store.WriteTaskFile(ctx, uuid.New(), "a.txt", "", []byte("x"), "a"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("unknown task: %v", err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != len(before) {
+		t.Fatalf("refused writes left blobs: %d before, %d after", len(before), len(left))
 	}
 	if _, err := e.store.WriteTaskFile(ctx, parent.ID, "huge", "", make([]byte, store.MaxTaskFileBytes+1), "a"); err == nil {
 		t.Error("an oversized file was accepted")

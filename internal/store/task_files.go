@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/j75689/cueflow/internal/domain"
 )
@@ -41,11 +43,14 @@ func (f *TaskFile) scanDest(kind *string) []any {
 	return []any{&f.ID, &f.TaskID, &f.Name, &f.MimeType, &f.SizeBytes, &f.CreatedBy, &f.CreatedAt, &f.UpdatedAt, kind}
 }
 
-// ValidTaskFileName checks a file name: 1–200 bytes, "/"-separated parts that are neither empty nor
-// "." or "..", no backslashes or control characters.
+// ValidTaskFileName checks a file name: valid UTF-8, 1–200 characters, "/"-separated parts that are
+// neither empty nor "." or "..", no backslashes or control characters.
 func ValidTaskFileName(name string) error {
-	if name == "" || len(name) > maxTaskFileName {
-		return Invalid(fmt.Sprintf("a file name must be 1 to %d bytes", maxTaskFileName))
+	if !utf8.ValidString(name) {
+		return Invalid("a file name must be valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(name); n == 0 || n > maxTaskFileName {
+		return Invalid(fmt.Sprintf("a file name must be 1 to %d characters", maxTaskFileName))
 	}
 	for _, r := range name {
 		if r == '\\' || unicode.IsControl(r) {
@@ -60,8 +65,16 @@ func ValidTaskFileName(name string) error {
 	return nil
 }
 
+// maxShortField is the size of the mime_type and created_by columns.
+const maxShortField = 64
+
 // WriteTaskFile creates or replaces the task's file name. Writing only ever touches the task's own
 // files; a subtask reads its ancestors' files (OpenTaskFile) but can't change them.
+//
+// Every write stores its bytes under a fresh row id and the upsert swaps that id in, so a reader
+// sees either the old file or the new one, never new bytes with old metadata, and a failed write
+// leaves the old file untouched. The old bytes are deleted after the commit. A file's id therefore
+// changes when it is replaced; refer to files by task and name.
 func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*TaskFile, error) {
 	if err := ValidTaskFileName(name); err != nil {
 		return nil, err
@@ -75,39 +88,48 @@ func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 	if createdBy == "" {
 		createdBy = "agent"
 	}
-	// Replacing keeps the row's id (and so its blob key), so the new bytes overwrite the old ones.
-	var oldKind string
-	id := uuid.New()
-	err := s.pool.QueryRow(ctx, `SELECT id, storage FROM task_files WHERE task_id=$1 AND name=$2`, taskID, name).Scan(&id, &oldKind)
-	if err = NotFound(err); err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return nil, err
+	for field, v := range map[string]string{"MIME type": mimeType, "author": createdBy} {
+		if !utf8.ValidString(v) || utf8.RuneCountInString(v) > maxShortField {
+			return nil, Invalid(fmt.Sprintf("a file's %s must be valid UTF-8 of at most %d characters", field, maxShortField))
+		}
 	}
+	id := uuid.New()
 	kind, row, err := s.putBytes(ctx, id, data)
 	if err != nil {
 		return nil, err
 	}
 	f := &TaskFile{}
-	var stored string
-	err = s.pool.QueryRow(ctx, `INSERT INTO task_files (id, task_id, name, mime_type, size_bytes, data, storage, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (task_id, name) DO UPDATE SET mime_type=EXCLUDED.mime_type, size_bytes=EXCLUDED.size_bytes,
-			data=EXCLUDED.data, storage=EXCLUDED.storage, created_by=EXCLUDED.created_by, updated_at=NOW()
-		RETURNING `+taskFileColumns+`, storage`,
-		id, taskID, name, mimeType, len(data), row, kind, createdBy).Scan(f.scanDest(&stored)...)
+	var old *storedBytes
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var prev storedBytes
+		err := tx.QueryRow(ctx, `SELECT id, storage FROM task_files WHERE task_id=$1 AND name=$2 FOR UPDATE`, taskID, name).Scan(&prev.ID, &prev.Kind)
+		switch {
+		case err == nil:
+			old = &prev
+		case !errors.Is(err, pgx.ErrNoRows):
+			return err
+		}
+		var stored string
+		return tx.QueryRow(ctx, `INSERT INTO task_files (id, task_id, name, mime_type, size_bytes, data, storage, created_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (task_id, name) DO UPDATE SET id=EXCLUDED.id, mime_type=EXCLUDED.mime_type,
+				size_bytes=EXCLUDED.size_bytes, data=EXCLUDED.data, storage=EXCLUDED.storage,
+				created_by=EXCLUDED.created_by, updated_at=NOW()
+			RETURNING `+taskFileColumns+`, storage`,
+			id, taskID, name, mimeType, len(data), row, kind, createdBy).Scan(f.scanDest(&stored)...)
+	})
 	if err != nil {
 		_ = s.dropBytes(ctx, kind, id)
+		var pg *pgconn.PgError
+		if asPg(err, &pg) && pg.Code == "23503" {
+			return nil, domain.ErrNotFound // no such task
+		}
 		return nil, err
 	}
-	if f.ID != id {
-		// Another write created the file between our lookup and insert: the row kept its id, so the
-		// bytes we just wrote under ours belong to no row. Write them under the row's id instead.
-		_ = s.dropBytes(ctx, kind, id)
-		if kind, _, err = s.putBytes(ctx, f.ID, data); err != nil {
-			return nil, err
-		}
-	}
-	if oldKind != "" && oldKind != kind {
-		_ = s.dropBytes(ctx, oldKind, f.ID) // it moved backends (CUEFLOW_MEDIA_STORAGE changed)
+	// A create racing this one can replace a row the lookup didn't see yet; its bytes are then
+	// orphaned, never read. Everything else that was replaced is deleted here.
+	if old != nil {
+		_ = s.dropAllBytes(ctx, []storedBytes{*old})
 	}
 	return f, nil
 }

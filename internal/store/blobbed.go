@@ -30,9 +30,13 @@ func (s *Store) putBytes(ctx context.Context, id uuid.UUID, data []byte) (kind s
 	return s.blobs.Kind(), nil, nil
 }
 
-// openBytes streams the bytes of row id stored as kind. inRow loads the data column, for "db".
+// openBytes streams the bytes of row id stored as kind. inRow loads the data column, for "db"; a
+// caller that already has the row's data (or never reads "db" rows) may pass nil.
 func (s *Store) openBytes(ctx context.Context, kind string, id uuid.UUID, inRow func() ([]byte, error)) (io.ReadSeekCloser, error) {
 	if kind == blob.KindDB {
+		if inRow == nil {
+			return nil, fmt.Errorf("bytes of %s are in the database row, which the caller did not load", id)
+		}
 		data, err := inRow()
 		if err != nil {
 			return nil, err
