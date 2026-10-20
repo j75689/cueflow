@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -47,6 +49,8 @@ func commonFields(modelDefault, modelHelp string) []connector.Field {
 		{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 16000},
 		{Key: "refusal_fallback", Label: "Refusal fallback", Type: connector.FieldBool, Default: true,
 			Help: "If a request is declined by a safety classifier, re-serve it with a fallback model"},
+		{Key: "prompt_caching", Label: "Prompt caching", Type: connector.FieldBool, Default: true,
+			Help: "Cache the agent's conversation between turns (cheaper, faster). Turn off for a model or gateway that rejects cache_control"},
 	}
 }
 
@@ -115,6 +119,10 @@ type Client struct {
 	maxTokens int
 	// serverFallback uses the Claude API's server-side fallback routing.
 	serverFallback bool
+	// promptCaching starts from the connector setting and is turned off for good if the endpoint
+	// rejects cache_control (see Chat).
+	promptCaching atomic.Bool
+	logger        *slog.Logger
 }
 
 func modelOf(cfg connector.Config, def string) string {
@@ -127,13 +135,18 @@ func modelOf(cfg connector.Config, def string) string {
 // baseModel strips a platform prefix ("anthropic.claude-opus-5-5" -> "claude-opus-5-5").
 func baseModel(m string) string { return strings.TrimPrefix(m, "anthropic.") }
 
-func newClient(cfg connector.Config, model string) *Client {
-	return &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000)}
+func newClient(cfg connector.Config, env connector.Env, model string) *Client {
+	c := &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000), logger: env.Logger}
+	if c.logger == nil {
+		c.logger = slog.Default()
+	}
+	c.promptCaching.Store(cfg.Bool("prompt_caching"))
+	return c
 }
 
 func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	opts := []option.RequestOption{option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3)}
-	c := newClient(cfg, modelOf(cfg, defaultModel))
+	c := newClient(cfg, env, modelOf(cfg, defaultModel))
 	switch {
 	case cfg.String("api_key") != "":
 		opts = append(opts, option.WithAPIKey(cfg.String("api_key")))
@@ -169,7 +182,7 @@ func clientFallback(cfg connector.Config, model, fallbackModel string) ([]option
 
 func newBedrock(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	model := modelOf(cfg, "anthropic."+defaultModel)
-	c := newClient(cfg, model)
+	c := newClient(cfg, env, model)
 	// The fallback middleware must be registered before the platform transform.
 	mw, state := clientFallback(cfg, model, "anthropic."+clientFallbackModel)
 	opts := append(mw, option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3))
@@ -211,7 +224,7 @@ func newVertex(cfg connector.Config, env connector.Env) (connector.Instance, err
 		region = "global"
 	}
 	model := modelOf(cfg, defaultModel)
-	c := newClient(cfg, model)
+	c := newClient(cfg, env, model)
 	mw, state := clientFallback(cfg, model, clientFallbackModel)
 	opts := append(mw, option.WithMaxRetries(3), vertex.WithCredentials(ctx, region, cfg.String("project_id"), creds))
 	client := sdk.NewClient(opts...)
@@ -243,14 +256,27 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		MaxTokens: int64(maxTokens),
 		Messages:  toParams(req.Messages),
 	}
+	// Prompt caching. The history is append-only, so every request repeats the previous one and adds
+	// to the end: one breakpoint after the fixed prefix (tools, then system) and one on the newest
+	// user turn make each turn read everything before it from the cache.
+	caching := c.promptCaching.Load()
 	if req.System != "" {
 		params.System = []sdk.BetaTextBlockParam{{Text: req.System}}
+		if caching {
+			params.System[0].CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+		}
 	}
 	if c.effort != "" {
 		params.OutputConfig = sdk.BetaOutputConfigParam{Effort: sdk.BetaOutputConfigEffort(c.effort)}
 	}
 	for _, t := range req.Tools {
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
+	}
+	if caching {
+		if req.System == "" && len(params.Tools) > 0 {
+			params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+		}
+		cacheUserTurns(params.Messages)
 	}
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
 	if c.serverFallback {
@@ -262,6 +288,16 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
+			if caching && rejectsCacheControl(apiErr) {
+				// A model or gateway without prompt caching: carry on without it rather than fail every run.
+				c.promptCaching.Store(false)
+				c.logger.Warn("anthropic: the endpoint rejected cache_control; prompt caching is off for this connector until it is rebuilt (turn off Prompt caching in its settings to skip this request)",
+					"model", c.model, "err", apiErr.RawJSON())
+				return c.Chat(ctx, req)
+			}
+			if isContextOverflow(apiErr) {
+				return nil, fmt.Errorf("anthropic: %w: HTTP %d: %s", llm.ErrContextOverflow, apiErr.StatusCode, apiErr.Error())
+			}
 			return nil, fmt.Errorf("anthropic: HTTP %d: %s", apiErr.StatusCode, apiErr.Error())
 		}
 		return nil, fmt.Errorf("anthropic: %w", err)
@@ -293,7 +329,42 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		return nil, fmt.Errorf("anthropic: request declined (refusal, category %q)", resp.StopDetails.Category)
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
-		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}, nil
+		// input_tokens counts only what came after the last cache breakpoint; the cached part is
+		// reported separately.
+		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
+			OutputTokens: resp.Usage.OutputTokens, CacheReadTokens: resp.Usage.CacheReadInputTokens,
+			CacheWriteTokens: resp.Usage.CacheCreationInputTokens}}, nil
+}
+
+// cacheUserTurns sets cache breakpoints on the last block of the two newest user turns. The newest
+// one writes this request's prefix; the one before it is where the previous request wrote its own, so
+// that entry is found however many blocks the latest turn added (the API only looks back about 20
+// blocks from a breakpoint for an earlier entry). With the system prompt that is 3 of the 4
+// breakpoints allowed. User turns are built afresh by toParams on every call; assistant turns replay
+// blocks held in ProviderState, which a breakpoint would write into.
+func cacheUserTurns(msgs []sdk.BetaMessageParam) {
+	marked := 0
+	for i := len(msgs) - 1; i >= 0 && marked < 2; i-- {
+		if msgs[i].Role != sdk.BetaMessageParamRoleUser || len(msgs[i].Content) == 0 {
+			continue
+		}
+		if cc := msgs[i].Content[len(msgs[i].Content)-1].GetCacheControl(); cc != nil {
+			*cc = sdk.NewBetaCacheControlEphemeralParam()
+			marked++
+		}
+	}
+}
+
+// rejectsCacheControl tells whether a 400 refuses the request over cache_control.
+func rejectsCacheControl(err *sdk.Error) bool {
+	return err.StatusCode == 400 && strings.Contains(err.RawJSON(), "cache_control")
+}
+
+// isContextOverflow recognizes the refusal of a prompt that doesn't fit the model's window. It reads
+// only a JSON error body, so the request URL or a gateway's own HTML error page can't match by accident.
+func isContextOverflow(err *sdk.Error) bool {
+	body := err.RawJSON()
+	return err.StatusCode == 400 && json.Valid([]byte(body)) && llm.IsOverflowText(body)
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

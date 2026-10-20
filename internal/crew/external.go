@@ -231,7 +231,7 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 		text = "(no output)" // an empty result would read as "still running"
 	}
 	// The agent reads the result in the system message below; the full one is kept on the approval.
-	shown := clipNoted(text, 4000, "")
+	shown := clipNoted(text, 4000)
 	text = clipToolResult(text)
 	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
 	outcome := "It ran and returned"

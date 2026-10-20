@@ -3,6 +3,7 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +26,7 @@ func TestChatWithToolCalls(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,
 			"tool_calls":[{"id":"c1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"go\"}"}}]}}],
-			"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+			"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":4}}}`))
 	}))
 	defer srv.Close()
 
@@ -52,7 +53,7 @@ func TestChatWithToolCalls(t *testing.T) {
 	if string(resp.Message.ToolCalls[0].Arguments) != `{"query":"go"}` {
 		t.Errorf("args: %s", resp.Message.ToolCalls[0].Arguments)
 	}
-	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 {
+	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 4 {
 		t.Errorf("usage: %+v", resp.Usage)
 	}
 	msgs := got["messages"].([]any)
@@ -73,6 +74,39 @@ func TestHTTPErrorSurfaced(t *testing.T) {
 	res, _ := inst.Test(context.Background())
 	if res.OK {
 		t.Fatal("expected test failure")
+	}
+}
+
+// A prompt longer than the model's window comes back as llm.ErrContextOverflow, so the crew can say so
+// plainly; other errors, including ones that only look similar, keep their own text.
+func TestContextOverflowRecognized(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{400, `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}`, true},
+		{400, `{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."}}`, true},
+		// DeepSeek, vLLM and OpenRouter. (The same words for a max_tokens larger than the window are
+		// told apart by the crew: that one fails on the first turn.)
+		{400, `{"object":"error","message":"This model's maximum context length is 65536 tokens. However, you requested 70000 tokens (65000 in the messages, 5000 in the completion)."}`, true},
+		// Ollama answers 500.
+		{500, `{"error":"context length exceeded"}`, true},
+		{500, `{"error":"internal error"}`, false},
+		// A proxy's body limit: not an overflow.
+		{413, `<html>413 Request Entity Too Large</html>`, false},
+		{400, `{"error":"invalid tool schema"}`, false},
+		{401, `{"error":"bad key"}`, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, c.body, c.status)
+		}))
+		inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m", "api_key": "k"}, connector.Env{})
+		_, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+		srv.Close()
+		if got := errors.Is(err, llm.ErrContextOverflow); got != c.want {
+			t.Errorf("%d %s: overflow=%v, want %v (%v)", c.status, c.body, got, c.want, err)
+		}
 	}
 }
 

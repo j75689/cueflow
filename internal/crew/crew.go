@@ -408,17 +408,22 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
 	for run.Turns < a.MaxTurns {
-		trimToolHistory(msgs)
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
 		if err != nil {
 			if ctx.Err() != nil {
 				return &outcome{kind: "canceled"}
+			}
+			if errors.Is(err, llm.ErrContextOverflow) {
+				c.logger.Warn("context window exceeded", "task", task.ID, "turns", run.Turns, "err", err)
+				return &outcome{kind: "overflow", text: overflowMessage(run.Turns)}
 			}
 			return &outcome{kind: "error", text: err.Error()}
 		}
 		run.Turns++
 		run.InputTokens += resp.Usage.InputTokens
 		run.OutputTokens += resp.Usage.OutputTokens
+		run.CacheReadTokens += resp.Usage.CacheReadTokens
+		run.CacheWriteTokens += resp.Usage.CacheWriteTokens
 		msgs = append(msgs, resp.Message)
 
 		text := strings.TrimSpace(resp.Message.Content)
@@ -453,6 +458,23 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		}
 	}
 	return &outcome{kind: "limit"}
+}
+
+// overflowMessage explains a refusal for exceeding the model's context window. The provider's raw
+// error goes to the log. On the first turn nothing the run did is to blame (the agent's instructions,
+// memories, tool schemas and the brief are already too big, or max_tokens doesn't fit the window),
+// and a reply would only fail the same way.
+func overflowMessage(turns int) string {
+	if turns == 0 {
+		return "the first request doesn't fit the model's context window. It carries the agent's instructions, its memories, " +
+			"the schemas of its tools and the task brief (description and thread). Trim the largest of those (fewer tools or " +
+			"memories, a shorter description), use a model with a larger window, or lower the connector's max output tokens."
+	}
+	// The next run starts from the brief and the thread, not this run's history. Many providers count
+	// max_tokens against the window too, so a small window can run out early.
+	return fmt.Sprintf("after %d turns the conversation no longer fits the model's context window. "+
+		"Reply to continue in a fresh run (it starts from the task and its thread), or split the work into subtasks. "+
+		"If this happens early, lower the connector's max output tokens or use a model with a larger window.", turns)
 }
 
 // quietTools write their own thread entries; logging their call/result would be noise.
@@ -538,6 +560,13 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		if run != nil {
 			run.Error = "turn limit reached"
 		}
+	case "overflow":
+		// Like "limit": the run used up what it had, and a comment left meanwhile still re-queues it.
+		c.system(ctx, task.ID, "The agent run stopped: "+out.text)
+		runStatus = "FAILED"
+		if run != nil {
+			run.Error = "context window exceeded"
+		}
 	case "canceled":
 		c.system(ctx, task.ID, "Stopped.")
 		runStatus = "CANCELED"
@@ -550,7 +579,9 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	}
 
 	// A human commented while the agent was working: run again so the comment is addressed.
-	if run != nil && out.kind != "canceled" && out.kind != "error" && next != store.TaskBlocked {
+	// Not after an overflow on the first turn: the new run would build the same first request.
+	rerunnable := out.kind != "canceled" && out.kind != "error" && !(out.kind == "overflow" && run != nil && run.Turns == 0)
+	if run != nil && rerunnable && next != store.TaskBlocked {
 		if newer, _ := c.store.HumanMessageSince(ctx, task.ID, run.StartedAt); newer {
 			next = store.TaskTodo
 		}

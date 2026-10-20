@@ -537,6 +537,9 @@ export interface AgentRun {
   tool_calls: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   error: string | null;
   started_at: string;
   finished_at: string | null;
@@ -551,6 +554,9 @@ export interface UsageTotals {
   failed_runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   tool_calls: number;
   unreported_runs: number;
 }
@@ -560,6 +566,9 @@ export interface UsageDay {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface UsageSource {
@@ -567,6 +576,9 @@ export interface UsageSource {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface UsageAgent {
@@ -577,6 +589,9 @@ export interface UsageAgent {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface UsageModel {
@@ -588,6 +603,9 @@ export interface UsageModel {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface UsageOrg {
@@ -597,6 +615,9 @@ export interface UsageOrg {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface UsageTask {
@@ -606,6 +627,9 @@ export interface UsageTask {
   runs: number;
   input_tokens: number;
   output_tokens: number;
+  /** Parts of input_tokens read from / written to the provider's prompt cache (billed at other rates). */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
 
 export interface Usage {

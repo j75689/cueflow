@@ -369,7 +369,7 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 {
   "from":"...","to":"...","tz":"Asia/Taipei",
   "totals":{"runs":42,"failed_runs":3,"input_tokens":812345,"output_tokens":90211,"tool_calls":310,
-            "unreported_runs":5},
+            "unreported_runs":5,"cache_read_tokens":700000,"cache_write_tokens":60000},
   "daily":[{"date":"2026-10-04","runs":7,"input_tokens":120000,"output_tokens":15000}],
   "by_source":[{"source":"agent","runs":42,"input_tokens":812345,"output_tokens":90211}],
   "by_org":[{"org_id":"uuid","name":"Default","slug":"default","runs":42,"input_tokens":812345,"output_tokens":90211}],
@@ -383,11 +383,18 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 ```
 - Every list is sorted by `input_tokens + output_tokens` descending (`daily` by date ascending, every day of
   the window present, zero-filled). `top_tasks` has at most 10 rows.
+- `input_tokens` is the whole prompt of every model call, whether or not the provider served it from its
+  prompt cache. Every row (totals, `daily` and each `by_*` and `top_tasks` row) also carries
+  `cache_read_tokens` and `cache_write_tokens` (omitted above for brevity): the parts of it read from and
+  written to the cache, which providers bill at different rates (Claude: about 0.1× and 1.25×), so a
+  long cached run reports many input tokens but costs far less than the same count uncached.
 - `unreported_runs`: finished runs that reported no token usage (e.g. external ACP agents that don't report
   usage), so totals may undercount.
 - `by_model.connector_name` is `""` when the connector was deleted; `runtime` is `acp` for external agents.
 
-`AgentRun` additionally carries `"connector_id":"uuid|null","model":"...","runtime":"builtin|acp"`.
+`AgentRun` additionally carries `"connector_id":"uuid|null","model":"...","runtime":"builtin|acp"`, and
+`"cache_read_tokens"` / `"cache_write_tokens"` (the parts of its `input_tokens` read from and written to the
+prompt cache).
 
 ---
 

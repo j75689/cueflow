@@ -217,6 +217,15 @@ function TaskView() {
                       {r.turns} turns · {r.tool_calls} tools ·{" "}
                       {(r.input_tokens + r.output_tokens).toLocaleString()}{" "}
                       tokens
+                      {r.cache_read_tokens > 0 && (
+                        <span
+                          className="text-fg-3"
+                          title="Input tokens served from the prompt cache, billed at a fraction of the normal input price"
+                        >
+                          {" "}
+                          ({r.cache_read_tokens.toLocaleString()} cached)
+                        </span>
+                      )}
                     </p>
                     {(r.model || r.runtime === "acp") && (
                       <p className="flex min-w-0 items-center gap-1.5 text-fg-3">
