@@ -203,6 +203,44 @@ func TestPromptCachingOff(t *testing.T) {
 	}
 }
 
+// An endpoint that rejects cache_control gets the request again without it, and later requests skip
+// it: caching is a saving, not a reason for every run to fail.
+func TestPromptCachingRejectedFallsBack(t *testing.T) {
+	isolateEnv(t)
+	var mu sync.Mutex
+	var withCache []bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		cached := strings.Contains(string(raw), "cache_control")
+		mu.Lock()
+		withCache = append(withCache, cached)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if cached {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"system.0.cache_control: Extra inputs are not permitted"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+			"content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":3,"output_tokens":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{System: "sys", Messages: []llm.Message{{Role: llm.RoleUser, Content: "ping"}}})
+		if err != nil || resp.Message.Content != "pong" {
+			t.Fatalf("resp %v, err %v", resp, err)
+		}
+	}
+	if len(withCache) != 3 || !withCache[0] || withCache[1] || withCache[2] {
+		t.Fatalf("want one refused cached request, then two without cache_control: %v", withCache)
+	}
+}
+
 // The Claude API's (prompt too long, or prompt plus max_tokens too long) and Bedrock's refusals come
 // back as llm.ErrContextOverflow; other 400s don't.
 func TestContextOverflowRecognized(t *testing.T) {

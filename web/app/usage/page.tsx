@@ -99,6 +99,14 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
           <p className="mt-1 text-xs text-fg-3">
             <Num value={t.input_tokens} /> input · <Num value={t.output_tokens} /> output
           </p>
+          {t.cache_read_tokens > 0 && (
+            <p
+              className="text-xs text-fg-3"
+              title="Input tokens served from the provider's prompt cache. They are billed at a fraction of the normal input price (Claude: about 0.1×), so a cached run costs far less than its input count suggests."
+            >
+              <Num value={t.cache_read_tokens} /> of input read from cache
+            </p>
+          )}
         </Tile>
         <Tile label="Runs">
           <Num value={t.runs} className="text-2xl font-semibold" />
@@ -161,6 +169,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
               ),
               runs: m.runs,
               input: m.input_tokens,
+              cached: m.cache_read_tokens,
               output: m.output_tokens,
             }))}
             empty="No model usage recorded."
@@ -179,6 +188,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
               ),
               runs: a.runs,
               input: a.input_tokens,
+              cached: a.cache_read_tokens,
               output: a.output_tokens,
             }))}
             empty="No agent runs in this period."
@@ -196,6 +206,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
                 label: <span className="truncate">{o.name}</span>,
                 runs: o.runs,
                 input: o.input_tokens,
+                cached: o.cache_read_tokens,
                 output: o.output_tokens,
               }))}
               empty="—"
@@ -210,6 +221,7 @@ function UsageBody({ u, days }: { u: Usage; days: number }) {
                 label: <span>{s.source === "agent" ? "Agent tasks" : s.source === "pipeline" ? "Simple schedules (retired)" : s.source}</span>,
                 runs: s.runs,
                 input: s.input_tokens,
+                cached: s.cache_read_tokens,
                 output: s.output_tokens,
               }))}
               empty="—"
@@ -270,6 +282,8 @@ interface ShareRow {
   label: React.ReactNode;
   runs: number;
   input: number;
+  /** The part of input read from the prompt cache. */
+  cached: number;
   output: number;
 }
 
@@ -298,6 +312,11 @@ function ShareTable({ rows, empty, compact }: { rows: ShareRow[]; empty: string;
                 {!compact && (
                   <td className="px-4 py-2 text-right">
                     <Num value={r.input} />
+                    {r.cached > 0 && (
+                      <div className="text-[11px] text-fg-3">
+                        <Num value={r.cached} /> cached
+                      </div>
+                    )}
                   </td>
                 )}
                 {!compact && (

@@ -251,7 +251,7 @@ target each time.
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
 | A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
-| A run's history | Append-only, on every connector: nothing already sent to the model is cut or rewritten (Claude's thinking blocks are bound to it), and there is no budget below the model's own window. Claude connectors cache it (Prompt caching, on by default); other connectors re-send the whole history each turn, cached only if the provider does so on its own. A run that outgrows the window stops with a message saying so; a reply starts a fresh run from the task and its thread | `crew/crew.go`, `connectors/anthropic` |
+| A run's history | Append-only, on every connector: nothing already sent to the model is cut or rewritten (Claude's thinking blocks are bound to it), and there is no budget below the model's own window. Claude connectors cache it (Prompt caching, on by default; if the endpoint rejects `cache_control`, the connector retries without it and logs a warning); other connectors re-send the whole history each turn, cached only if the provider does so on its own. A run that outgrows the window stops with a message saying so; a reply starts a fresh run from the task and its thread | `crew/crew.go`, `connectors/anthropic` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |

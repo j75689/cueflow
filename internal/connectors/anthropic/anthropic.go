@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -117,7 +119,10 @@ type Client struct {
 	maxTokens int
 	// serverFallback uses the Claude API's server-side fallback routing.
 	serverFallback bool
-	promptCaching  bool
+	// promptCaching starts from the connector setting and is turned off for good if the endpoint
+	// rejects cache_control (see Chat).
+	promptCaching atomic.Bool
+	logger        *slog.Logger
 }
 
 func modelOf(cfg connector.Config, def string) string {
@@ -130,14 +135,18 @@ func modelOf(cfg connector.Config, def string) string {
 // baseModel strips a platform prefix ("anthropic.claude-opus-5-5" -> "claude-opus-5-5").
 func baseModel(m string) string { return strings.TrimPrefix(m, "anthropic.") }
 
-func newClient(cfg connector.Config, model string) *Client {
-	return &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000),
-		promptCaching: cfg.Bool("prompt_caching")}
+func newClient(cfg connector.Config, env connector.Env, model string) *Client {
+	c := &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000), logger: env.Logger}
+	if c.logger == nil {
+		c.logger = slog.Default()
+	}
+	c.promptCaching.Store(cfg.Bool("prompt_caching"))
+	return c
 }
 
 func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	opts := []option.RequestOption{option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3)}
-	c := newClient(cfg, modelOf(cfg, defaultModel))
+	c := newClient(cfg, env, modelOf(cfg, defaultModel))
 	switch {
 	case cfg.String("api_key") != "":
 		opts = append(opts, option.WithAPIKey(cfg.String("api_key")))
@@ -173,7 +182,7 @@ func clientFallback(cfg connector.Config, model, fallbackModel string) ([]option
 
 func newBedrock(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	model := modelOf(cfg, "anthropic."+defaultModel)
-	c := newClient(cfg, model)
+	c := newClient(cfg, env, model)
 	// The fallback middleware must be registered before the platform transform.
 	mw, state := clientFallback(cfg, model, "anthropic."+clientFallbackModel)
 	opts := append(mw, option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3))
@@ -215,7 +224,7 @@ func newVertex(cfg connector.Config, env connector.Env) (connector.Instance, err
 		region = "global"
 	}
 	model := modelOf(cfg, defaultModel)
-	c := newClient(cfg, model)
+	c := newClient(cfg, env, model)
 	mw, state := clientFallback(cfg, model, clientFallbackModel)
 	opts := append(mw, option.WithMaxRetries(3), vertex.WithCredentials(ctx, region, cfg.String("project_id"), creds))
 	client := sdk.NewClient(opts...)
@@ -250,9 +259,10 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	// Prompt caching. The history is append-only, so every request repeats the previous one and adds
 	// to the end: one breakpoint after the fixed prefix (tools, then system) and one on the newest
 	// user turn make each turn read everything before it from the cache.
+	caching := c.promptCaching.Load()
 	if req.System != "" {
 		params.System = []sdk.BetaTextBlockParam{{Text: req.System}}
-		if c.promptCaching {
+		if caching {
 			params.System[0].CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 		}
 	}
@@ -262,7 +272,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	for _, t := range req.Tools {
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
 	}
-	if c.promptCaching {
+	if caching {
 		if req.System == "" && len(params.Tools) > 0 {
 			params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 		}
@@ -278,6 +288,13 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
+			if caching && rejectsCacheControl(apiErr) {
+				// A model or gateway without prompt caching: carry on without it rather than fail every run.
+				c.promptCaching.Store(false)
+				c.logger.Warn("anthropic: the endpoint rejected cache_control; prompt caching is off for this connector until it is rebuilt (turn off Prompt caching in its settings to skip this request)",
+					"model", c.model, "err", apiErr.RawJSON())
+				return c.Chat(ctx, req)
+			}
 			if isContextOverflow(apiErr) {
 				return nil, fmt.Errorf("anthropic: %w: HTTP %d: %s", llm.ErrContextOverflow, apiErr.StatusCode, apiErr.Error())
 			}
@@ -336,6 +353,11 @@ func cacheUserTurns(msgs []sdk.BetaMessageParam) {
 			marked++
 		}
 	}
+}
+
+// rejectsCacheControl tells whether a 400 refuses the request over cache_control.
+func rejectsCacheControl(err *sdk.Error) bool {
+	return err.StatusCode == 400 && strings.Contains(err.RawJSON(), "cache_control")
 }
 
 // isContextOverflow recognizes the refusal of a prompt that doesn't fit the model's window. It reads
