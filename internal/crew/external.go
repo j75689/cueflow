@@ -232,6 +232,13 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 	}
 	// The agent reads the result in the system message below; the full one is kept on the approval.
 	shown := clipNoted(text, 4000)
+	if !isErr {
+		if task, err := c.store.GetTask(ctx, ap.TaskID); err == nil {
+			if stub, _, ok := c.saveLargeResult(ctx, task, "approved-tool", ap.ServerName+"__"+ap.Tool, ap.Arguments, text); ok {
+				shown = stub
+			}
+		}
+	}
 	text = clipToolResult(text)
 	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
 	outcome := "It ran and returned"
