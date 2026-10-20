@@ -69,7 +69,7 @@ func (c *Crew) handOffOutcome(ctx context.Context, task *store.Task, a *store.Ag
 		if _, size, ok := c.handOffNote(ctx, task); ok {
 			c.say(ctx, task.ID, a, "message", fmt.Sprintf("Hand-off note saved as %s (%s).", handOffFile, humanBytes(size)),
 				map[string]any{"handoff": true, "file": handOffFile})
-			return &outcome{kind: "handoff", text: fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off. "+
+			return &outcome{kind: "handoff", noted: true, text: fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off. "+
 				"Review its note (%s; reply with corrections if anything is off), then reply to continue in a fresh run that starts from the note.",
 				pct, handOffFile)}
 		}
@@ -171,4 +171,54 @@ func (c *Crew) afterTurn(ctx context.Context, h *handOff, env *runEnv, run *stor
 		return &llm.Message{Role: llm.RoleUser, Content: handOffRequest(run)}, nil
 	}
 	return nil, nil
+}
+
+// maxAutoHandOffs caps the hand-offs in a row that continue without a human; the next waits for one.
+const maxAutoHandOffs = 3
+
+// autoHandOff reports whether a hand-off continues in a fresh run on its own, and what to tell the
+// thread. Only a hand-off with a saved note, by an agent with AutoHandOff on the built-in runtime,
+// and only up to maxAutoHandOffs in a row: a run that ended any other way, or a human message since,
+// starts the count again. The count is read from the task's recorded runs.
+func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) (bool, string) {
+	if a == nil || !a.AutoHandOff || !out.noted || run == nil || run.Runtime != "builtin" {
+		return false, ""
+	}
+	runs, err := c.store.ListAgentRuns(ctx, task.ID)
+	if err != nil {
+		return false, ""
+	}
+	streak := 1              // this run
+	for _, r := range runs { // newest first
+		if r.ID == run.ID || r.FinishedAt == nil {
+			continue
+		}
+		if r.Outcome != "handoff" {
+			break
+		}
+		if since, _ := c.store.HumanMessageSince(ctx, task.ID, r.StartedAt); since {
+			break
+		}
+		streak++
+	}
+	if streak > maxAutoHandOffs {
+		return false, fmt.Sprintf("This is the %d%s hand-off in a row, so it waits for you this time: review %s and reply to continue.",
+			streak, ordinal(streak), handOffFile)
+	}
+	return true, fmt.Sprintf("Continuing in a fresh run that starts from %s (automatic hand-off %d of %d in a row; the agent's "+
+		"Auto hand-off setting). Comment any time to steer it.", handOffFile, streak, maxAutoHandOffs)
+}
+
+func ordinal(n int) string {
+	switch {
+	case n%100 >= 11 && n%100 <= 13:
+		return "th"
+	case n%10 == 1:
+		return "st"
+	case n%10 == 2:
+		return "nd"
+	case n%10 == 3:
+		return "rd"
+	}
+	return "th"
 }

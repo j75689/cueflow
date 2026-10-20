@@ -67,6 +67,7 @@ const blank = (): AgentInput => ({
   language: "en",
   platforms: ["threads"],
   max_turns: 12,
+  auto_handoff: false,
   is_active: true,
 });
 
@@ -117,6 +118,7 @@ function AgentEditor() {
       language: a.language,
       platforms: a.platforms ?? [],
       max_turns: a.max_turns,
+      auto_handoff: a.auto_handoff ?? false,
       is_active: a.is_active,
     });
     setSlugTouched(true);
@@ -556,6 +558,18 @@ function AgentEditor() {
                   }
                 />
               </Field>
+              {!form.runtime_connector_id && (
+                <Field
+                  label="Hand-offs"
+                  help="When a run's context fills up it writes a hand-off note. With this on, a fresh run continues from the note without waiting for you, up to 3 times in a row; the next one waits. Built-in runtime only."
+                >
+                  <Toggle
+                    checked={form.auto_handoff}
+                    onChange={(v) => set("auto_handoff", v)}
+                    label="Continue without waiting for review"
+                  />
+                </Field>
+              )}
             </div>
           </Card>
 

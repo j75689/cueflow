@@ -27,8 +27,10 @@ type tool struct {
 
 // outcome is set by a terminal tool and ends the run.
 type outcome struct {
-	kind string // complete | ask | wait | limit | error
+	kind string // complete | ask | approval | wait | handoff | overflow | limit | error | canceled
 	text string
+	// noted is set on a handoff whose note was saved: only then may it continue on its own.
+	noted bool
 }
 
 type runEnv struct {

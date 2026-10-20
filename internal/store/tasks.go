@@ -634,9 +634,12 @@ type AgentRun struct {
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
 	// ContextTokens is the prompt of the run's latest model call, how full the context is (InputTokens
 	// adds up every call). ContextWindow is the model's limit, 0 when unknown.
-	ContextTokens int64  `json:"context_tokens"`
-	ContextWindow int64  `json:"context_window"`
-	Error         string `json:"error"`
+	ContextTokens int64 `json:"context_tokens"`
+	ContextWindow int64 `json:"context_window"`
+	// Outcome is how the run ended: complete, ask, approval, wait, handoff, overflow, limit, error,
+	// canceled ("" while running, and for runs before it was recorded).
+	Outcome string `json:"outcome"`
+	Error   string `json:"error"`
 	// ConnectorID is the LLM connector (built-in runtime) or the ACP runtime connector used.
 	ConnectorID *uuid.UUID `json:"connector_id"`
 	Model       string     `json:"model"`
@@ -648,12 +651,12 @@ type AgentRun struct {
 // agentRunColumns and scanDest keep every query that loads an AgentRun reading the same columns.
 const agentRunColumns = `id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
 	cache_read_tokens, cache_write_tokens, error, connector_id, model, runtime, started_at, finished_at,
-	context_tokens, context_window`
+	context_tokens, context_window, outcome`
 
 func (r *AgentRun) scanDest() []any {
 	return []any{&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens, &r.OutputTokens,
 		&r.CacheReadTokens, &r.CacheWriteTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt,
-		&r.ContextTokens, &r.ContextWindow}
+		&r.ContextTokens, &r.ContextWindow, &r.Outcome}
 }
 
 func (s *Store) StartAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
@@ -671,10 +674,10 @@ func (s *Store) FinishAgentRun(ctx context.Context, r *AgentRun) error {
 	}
 	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET status=$2, turns=$3, tool_calls=$4, input_tokens=$5, output_tokens=$6,
 		error=$7, connector_id=$8, model=$9, runtime=$10, cache_read_tokens=$11, cache_write_tokens=$12,
-		context_tokens=$13, context_window=$14, finished_at=NOW()
+		context_tokens=$13, context_window=$14, outcome=$15, finished_at=NOW()
 		WHERE id=$1`,
 		r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error, r.ConnectorID, r.Model, runtime,
-		r.CacheReadTokens, r.CacheWriteTokens, r.ContextTokens, r.ContextWindow)
+		r.CacheReadTokens, r.CacheWriteTokens, r.ContextTokens, r.ContextWindow, r.Outcome)
 	return err
 }
 
