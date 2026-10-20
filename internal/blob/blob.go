@@ -1,4 +1,4 @@
-// Package blob stores media bytes outside the database. The database keeps the metadata and a
+// Package blob stores media and task-file bytes outside the database. The database keeps the metadata and a
 // "storage" tag per row, so rows written before a backend was chosen (storage "db") stay readable.
 package blob
 

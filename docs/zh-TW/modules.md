@@ -48,6 +48,8 @@ Deliverable 是 agent 寫進審核佇列的型別化項目（內建 `document`�
 
 `cueflow media migrate --to <target>` 在後端之間搬移既有媒體；網址不變，因為每一列都記錄位元組在哪個後端。
 
+任務檔案（agent 在單一任務裡的工作儲存）也依同一個設定存放，但放在獨立的 `task_files` 表。它們永遠不會經由 `/media/{id}` 提供；子任務可以讀祖先任務的檔案，但只能寫自己的；刪除任務時會一併刪除它與子任務的檔案，連同位元組。`media migrate` 不會搬移任務檔案；設定改變前寫入的檔案，只要原本的後端還有設定就讀得到。
+
 把貼文交給發布器時，CueFlow 會把 `/media/{id}` 換成 `CUEFLOW_MEDIA_BASE_URL` 底下的絕對網址，發布器必須連得到（Compose 設為 `http://cueflow:3000`）。
 
 #### 刪除

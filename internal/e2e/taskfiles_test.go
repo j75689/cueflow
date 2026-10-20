@@ -1,0 +1,164 @@
+package e2e
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/j75689/cueflow/internal/blob"
+	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
+)
+
+func readTaskFile(t *testing.T, e *env, task *store.Task, name string) (*store.TaskFile, string, error) {
+	t.Helper()
+	tf, rc, err := e.store.OpenTaskFile(context.Background(), task.ID, name)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	return tf, string(b), err
+}
+
+// Task files live in the blob backend, are read by the task and its subtasks (nearest file wins),
+// written only by their own task, never served on /media, and go away with the task, bytes included.
+func TestTaskFiles(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	fs, err := blob.NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.store.SetBlobs(fs)
+
+	parent, err := e.store.CreateTask(ctx, store.NewTask{Title: "Plan Disney+ support"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := e.store.CreateTask(ctx, store.NewTask{Title: "Read the hooks", ParentID: &parent.ID, CreatedBy: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	notes, err := e.store.WriteTaskFile(ctx, parent.ID, "notes.md", "", []byte("v1"), "architect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notes.SizeBytes != 2 || notes.MimeType == "" || notes.TaskID != parent.ID {
+		t.Fatalf("file: %+v", notes)
+	}
+	if _, err := os.Stat(filepath.Join(dir, notes.ID.String())); err != nil {
+		t.Fatalf("bytes not in the blob backend: %v", err)
+	}
+	// Replacing keeps the row and its blob key.
+	again, err := e.store.WriteTaskFile(ctx, parent.ID, "notes.md", "text/markdown", []byte("version two"), "architect")
+	if err != nil || again.ID != notes.ID || again.SizeBytes != 11 {
+		t.Fatalf("replace: %+v %v", again, err)
+	}
+	if _, body, err := readTaskFile(t, e, parent, "notes.md"); err != nil || body != "version two" {
+		t.Fatalf("read own: %q %v", body, err)
+	}
+
+	// A subtask reads its parent's file; writing the same name makes its own and leaves the parent's.
+	if tf, body, err := readTaskFile(t, e, child, "notes.md"); err != nil || body != "version two" || tf.TaskID != parent.ID {
+		t.Fatalf("read parent's from child: %q %v", body, err)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, child.ID, "notes.md", "", []byte("child's"), "reader"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, child.ID, "results/hook-1.txt", "", []byte("big result"), "reader"); err != nil {
+		t.Fatal(err)
+	}
+	if tf, body, _ := readTaskFile(t, e, child, "notes.md"); body != "child's" || tf.TaskID != child.ID {
+		t.Fatalf("child should see its own file first: %q", body)
+	}
+	if _, body, _ := readTaskFile(t, e, parent, "notes.md"); body != "version two" {
+		t.Fatalf("the parent's file changed: %q", body)
+	}
+	// The parent doesn't see its subtask's files.
+	if _, _, err := readTaskFile(t, e, parent, "results/hook-1.txt"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("parent read child's file: %v", err)
+	}
+	list, err := e.store.ListTaskFiles(ctx, child.ID)
+	if err != nil || len(list) != 2 || list[0].Name != "notes.md" || list[0].TaskID != child.ID || list[1].Name != "results/hook-1.txt" {
+		t.Fatalf("list: %v %v", list, err)
+	}
+
+	for _, bad := range []string{"", "/abs", "a//b", "../up", "a/./b", `win\path`, "tab\there", string(make([]byte, 201))} {
+		if _, err := e.store.WriteTaskFile(ctx, parent.ID, bad, "", []byte("x"), "a"); err == nil {
+			t.Errorf("name %q accepted", bad)
+		}
+	}
+	if _, err := e.store.WriteTaskFile(ctx, parent.ID, "huge", "", make([]byte, store.MaxTaskFileBytes+1), "a"); err == nil {
+		t.Error("an oversized file was accepted")
+	}
+
+	// The public media route never serves a task file.
+	resp, err := http.Get(e.api.URL + "/media/" + notes.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("/media served a task file: %d", resp.StatusCode)
+	}
+
+	// Media still goes through the same byte layer.
+	m, err := e.store.CreateMedia(ctx, store.NewMedia{MimeType: "image/png", Data: []byte("png"), Source: "upload"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, rc, err := e.store.OpenMedia(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	} else {
+		b, _ := io.ReadAll(rc)
+		rc.Close()
+		if string(b) != "png" {
+			t.Fatalf("media bytes: %q", b)
+		}
+	}
+	if err := e.store.DeleteMedia(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting one file, then the whole task: the cascade takes the subtask, and every blob goes too.
+	if err := e.store.DeleteTaskFile(ctx, child.ID, "notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.DeleteTask(ctx, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) != 0 {
+		t.Fatalf("%d blobs left after deleting the task", len(left))
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM task_files`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d task_files rows left (%v)", n, err)
+	}
+}
+
+// Without a blob backend, task files live in the row, the same as media.
+func TestTaskFilesInDatabase(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	task, err := e.store.CreateTask(ctx, store.NewTask{Title: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, task.ID, "a.txt", "", []byte("in the row"), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, err := readTaskFile(t, e, task, "a.txt"); err != nil || body != "in the row" {
+		t.Fatalf("%q %v", body, err)
+	}
+	if err := e.store.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -17,7 +17,7 @@ import (
 type Store struct {
 	pool *pgxpool.Pool
 	box  *secret.Box
-	// blobs holds new media bytes; nil keeps them in the database.
+	// blobs holds new media and task-file bytes; nil keeps them in the database.
 	blobs blob.Store
 }
 

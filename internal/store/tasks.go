@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -434,13 +435,52 @@ func (s *Store) SetTaskStatusIf(ctx context.Context, id uuid.UUID, from []TaskSt
 	return tag.RowsAffected() == 1, nil
 }
 
+// DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade
+// removes the file rows, but blobs outside the database would be left behind.
 func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
+	type stored struct {
+		id   uuid.UUID
+		kind string
+	}
+	rows, err := s.pool.Query(ctx, `WITH RECURSIVE tree AS (
+			SELECT id, 0 AS depth FROM tasks WHERE id=$1
+			UNION ALL SELECT t.id, tr.depth+1 FROM tasks t JOIN tree tr ON t.parent_id=tr.id WHERE tr.depth < 20
+		) SELECT f.id, f.storage FROM task_files f JOIN tree ON tree.id = f.task_id WHERE f.storage <> 'db'`, id)
+	if err != nil {
+		return err
+	}
+	var files []stored
+	for rows.Next() {
+		var f stored
+		if err := rows.Scan(&f.id, &f.kind); err != nil {
+			rows.Close()
+			return err
+		}
+		files = append(files, f)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	tag, err := s.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
+	}
+	// After the rows: a failure here leaves an orphaned blob, never a row pointing at nothing.
+	var errs []error
+	for _, f := range files {
+		if _, err := s.blobFor(f.kind); err != nil {
+			continue // that backend is no longer configured; nothing this process can delete
+		}
+		if err := s.dropBytes(ctx, f.kind, f.id); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("task deleted, but %d of its files' bytes could not be removed: %w", len(errs), errors.Join(errs...))
 	}
 	return nil
 }
