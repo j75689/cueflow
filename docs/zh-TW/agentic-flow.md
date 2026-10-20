@@ -72,6 +72,7 @@ flowchart LR
 | imaging | `generate_image` | 用第一個啟用中的圖片生成 connector 生圖，並附到還能編輯的草稿上（預設用草稿的 `image_prompt`）。生圖要花錢，每次執行最多 2 張 |
 | deliverables | `create_deliverable` | 送出任一已註冊 kind 的 deliverable（預設 `document`）給人審核，直接進 `PENDING_REVIEW` |
 | | `list_deliverables` | 列出這個 org 的 deliverable 與狀態 |
+| | `get_deliverable` | 讀取一份 deliverable 的全文：標題、狀態、審核意見與內容，每次 30,000 字元，用 `offset` 分頁 |
 | | `revise_deliverable` | 修改仍在 `DRAFT` / `PENDING_REVIEW` 的項目（稽核紀錄記為 agent） |
 | delegation | `create_subtask` | 建立子任務並指派給隊友（立即開始） |
 | | `list_agents` | 列出可委派的隊友 |

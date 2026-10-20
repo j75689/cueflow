@@ -73,6 +73,7 @@ The default names and instructions are in English; the language agents write in 
 | imaging | `generate_image` | Generate an image with the first active image connector and attach it to an editable draft (default prompt: the draft's `image_prompt`). At most 2 per run, since each image costs money |
 | deliverables | `create_deliverable` | File a deliverable of any registered kind (`document` by default) for human review; it goes straight to `PENDING_REVIEW` |
 | | `list_deliverables` | List the org's deliverables and their status |
+| | `get_deliverable` | Read one in full: title, status, review note and content, in pages of 30,000 characters by `offset` |
 | | `revise_deliverable` | Revise one still in `DRAFT` / `PENDING_REVIEW` (audited as the agent) |
 | delegation | `create_subtask` | Create a subtask assigned to a teammate (starts immediately) |
 | | `list_agents` | List teammates available for delegation |

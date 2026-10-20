@@ -17,6 +17,10 @@ import (
 
 const maxPerRun = 10
 
+// getDeliverableChars is how much of a deliverable's content get_deliverable returns per call: the
+// rest is paged with offset (it is not saved as a task file, which would go stale on a revision).
+const getDeliverableChars = 30000
+
 // registerTools adds the deliverables capability to the crew: tools that write deliverables into
 // the review queue and revise the ones still pending. Nothing here acts: the worker does, after a
 // human approved.
@@ -44,9 +48,16 @@ var tools = []crew.ToolSpec{
 			"draft":   map[string]any{"type": "boolean", "description": "Keep it as a draft instead of submitting it for review (default false)"},
 		}, "title", "payload"), Run: toolCreate},
 	{Name: "list_deliverables", Capability: "deliverables",
-		Description: "List recent deliverables with their review status.",
+		Description: "List recent deliverables with their review status and the start of each (get_deliverable reads one in full).",
 		Schema: crew.Obj(map[string]any{"status": crew.Str("Optional status filter, e.g. PENDING_REVIEW"), "kind": crew.Str("Optional kind filter"),
 			"limit": crew.Integer("Max items (default 10)")}), Run: toolList},
+	{Name: "get_deliverable", Capability: "deliverables",
+		Description: fmt.Sprintf("Read a deliverable: its title, status, review note and content (list_deliverables shows only the start). "+
+			"Returns up to %d characters of the content from offset (default 0) and says how many it has in all; call again with a "+
+			"larger offset for the rest.", getDeliverableChars),
+		Schema: crew.Obj(map[string]any{"deliverable_id": crew.Str("Deliverable ID"),
+			"offset": crew.Integer("First character of the content to return (default 0)")}, "deliverable_id"),
+		Run: toolGet},
 	{Name: "revise_deliverable", Capability: "deliverables",
 		Description: "Revise a deliverable that is still DRAFT or PENDING_REVIEW.",
 		Schema: crew.Obj(map[string]any{
@@ -131,6 +142,56 @@ func toolList(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, er
 		out = append(out, row{d.ID, d.Kind, d.Status, d.Title, textutil.Clip(string(d.Payload), 240)})
 	}
 	return crew.JSONResult(out)
+}
+
+func toolGet(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {
+	var a struct {
+		DeliverableID string `json:"deliverable_id"`
+		Offset        int    `json:"offset"`
+	}
+	if err := crew.DecodeArgs(raw, &a); err != nil {
+		return "", err
+	}
+	id, err := uuid.Parse(strings.TrimSpace(a.DeliverableID))
+	if err != nil {
+		return "", errors.New("deliverable_id must be a UUID")
+	}
+	if a.Offset < 0 {
+		return "", errors.New("offset can't be negative")
+	}
+	d, err := inOrg(ctx, r, id)
+	if err != nil {
+		return "", err
+	}
+	// A document reads as its Markdown; any other kind as its payload.
+	body, summary := string(d.Payload), ""
+	var doc struct {
+		Content *string `json:"content"`
+		Summary string  `json:"summary"`
+	}
+	if d.Kind == DocumentKind && json.Unmarshal(d.Payload, &doc) == nil && doc.Content != nil {
+		body, summary = *doc.Content, doc.Summary
+	}
+	content := []rune(body)
+	total := len(content)
+	if a.Offset > 0 && a.Offset >= total {
+		return "", fmt.Errorf("offset %d is past the end of the content, which has %d characters", a.Offset, total)
+	}
+	end := min(a.Offset+getDeliverableChars, total)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Deliverable %s [%s] %s, version %d: %s\n", d.ID, d.Status, d.Kind, d.Version, d.Title)
+	if d.ReviewNote != "" {
+		fmt.Fprintf(&b, "Review note: %s\n", d.ReviewNote)
+	}
+	if summary != "" {
+		fmt.Fprintf(&b, "Summary: %s\n", summary)
+	}
+	fmt.Fprintf(&b, "Content: characters %d–%d of %d.", a.Offset, end, total)
+	if end < total {
+		fmt.Fprintf(&b, " Call get_deliverable with offset %d for the rest.", end)
+	}
+	b.WriteString("\n\n" + string(content[a.Offset:end]))
+	return b.String(), nil
 }
 
 func toolRevise(ctx context.Context, r *crew.Run, raw json.RawMessage) (string, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,6 +264,67 @@ func TestAgentCreatesDeliverable(t *testing.T) {
 	last := briefs[len(briefs)-1]
 	if !strings.Contains(last, "Deliverables created for this task") || !strings.Contains(last, "Weekly report") {
 		t.Fatalf("brief does not list the deliverable:\n%s", last)
+	}
+}
+
+// An agent reads a deliverable in full with get_deliverable: a short one in one call, a long one in
+// pages by offset, and none of another org's.
+func TestAgentReadsDeliverable(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "File the issue", "assignee_agent_id": team["chief"].ID}, &task)
+	doc := func(org uuid.UUID, title, content string) uuid.UUID {
+		raw, _ := json.Marshal(map[string]any{"content": content, "summary": "the plan"})
+		d, err := e.ds.Create(ctx, deliverable.New{OrgID: org, Kind: deliverable.DocumentKind, Title: title, Payload: raw}, deliverable.ActorAgent, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	long := "# 設計\n\n" + strings.Repeat("Disney+ 字幕。", 3000) + "\n## Last section\nthe end"
+	short, big := doc(task.OrgID, "Short", "# Short\n\nAll of it."), doc(task.OrgID, "Long", long)
+	other, err := e.store.CreateOrg(ctx, &store.Org{Name: "Other", Slug: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := doc(other.ID, "Theirs", "not yours")
+
+	var results []llm.Message
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		results = toolResults(req)
+		switch len(results) {
+		case 0:
+			return calls("get_deliverable", map[string]any{"deliverable_id": short.String()},
+				"get_deliverable", map[string]any{"deliverable_id": big.String()},
+				"get_deliverable", map[string]any{"deliverable_id": foreign.String()})
+		case 3:
+			return calls("get_deliverable", map[string]any{"deliverable_id": big.String(), "offset": 30000})
+		}
+		return calls("complete_task", map[string]any{"summary": "read"})
+	})
+	e.crew.RunPending(ctx, 2)
+	if len(results) != 4 {
+		t.Fatalf("tool results: %+v", results)
+	}
+	if r := results[0].Content; !strings.Contains(r, "[PENDING_REVIEW] document, version 2: Short") ||
+		!strings.Contains(r, "Summary: the plan") || !strings.Contains(r, "characters 0–19 of 19.\n") ||
+		strings.Contains(r, "offset") || !strings.HasSuffix(r, "# Short\n\nAll of it.") {
+		t.Fatalf("short deliverable: %q", r)
+	}
+	n := len([]rune(long))
+	first, rest := results[1].Content, results[3].Content
+	if !strings.Contains(first, fmt.Sprintf("characters 0–30000 of %d. Call get_deliverable with offset 30000", n)) ||
+		strings.Contains(first, "the end") || !strings.Contains(rest, fmt.Sprintf("characters 30000–%d of %d.\n", n, n)) {
+		t.Fatalf("long deliverable pages: %.200q … %.200q", first, rest)
+	}
+	_, firstBody, _ := strings.Cut(first, "\n\n")
+	_, restBody, _ := strings.Cut(rest, "\n\n")
+	if firstBody+restBody != long {
+		t.Fatalf("the pages don't add up to the content (%d + %d of %d characters)", len([]rune(firstBody)), len([]rune(restBody)), n)
+	}
+	if r := results[2].Content; !strings.HasPrefix(r, "error:") || strings.Contains(r, "not yours") {
+		t.Fatalf("another org's deliverable: %q", r)
 	}
 }
 
