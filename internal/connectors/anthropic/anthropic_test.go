@@ -179,13 +179,32 @@ func TestUsageCountsCachedInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Usage.InputTokens != 94002 || resp.Usage.OutputTokens != 7 {
+	if want := (llm.Usage{InputTokens: 94002, OutputTokens: 7, CacheReadTokens: 90000, CacheWriteTokens: 4000}); resp.Usage != want {
 		t.Fatalf("usage: %+v", resp.Usage)
 	}
 }
 
-// The Claude API's and Bedrock's refusals of an over-long prompt come back as llm.ErrContextOverflow;
-// other 400s don't.
+// With prompt caching turned off, no cache_control is sent anywhere.
+func TestPromptCachingOff(t *testing.T) {
+	isolateEnv(t)
+	srv, last := fakeMessages(t)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL, "prompt_caching": false}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{System: "sys",
+		Tools:    []llm.Tool{{Name: "a", Schema: map[string]any{"type": "object"}}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(last().body); strings.Contains(string(raw), "cache_control") {
+		t.Fatalf("cache_control sent: %s", raw)
+	}
+}
+
+// The Claude API's (prompt too long, or prompt plus max_tokens too long) and Bedrock's refusals come
+// back as llm.ErrContextOverflow; other 400s don't.
 func TestContextOverflowRecognized(t *testing.T) {
 	isolateEnv(t)
 	for _, c := range []struct {
@@ -193,6 +212,7 @@ func TestContextOverflowRecognized(t *testing.T) {
 		want bool
 	}{
 		{`{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1048213 tokens > 1000000 maximum"}}`, true},
+		{`{"type":"error","error":{"type":"invalid_request_error","message":"input length and max_tokens exceed context limit: 990000 + 16000 > 1000000, decrease input length or max_tokens and try again"}}`, true},
 		{`{"message":"Input is too long for requested model."}`, true},
 		{`{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.name: invalid"}}`, false},
 	} {

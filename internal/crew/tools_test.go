@@ -22,7 +22,8 @@ func TestClipToolResult(t *testing.T) {
 
 // An overflow on the first turn isn't fixed by a fresh run, so it doesn't suggest one.
 func TestOverflowMessage(t *testing.T) {
-	if m := overflowMessage(0); strings.Contains(m, "Reply to continue") || !strings.Contains(m, "max output tokens") {
+	if m := overflowMessage(0); strings.Contains(m, "Reply to continue") || !strings.Contains(m, "max output tokens") ||
+		!strings.Contains(m, "memories") || !strings.Contains(m, "tools") {
 		t.Fatalf("turn 0: %s", m)
 	}
 	if m := overflowMessage(12); !strings.Contains(m, "after 12 turns") || !strings.Contains(m, "Reply to continue") {

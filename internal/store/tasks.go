@@ -610,7 +610,11 @@ type AgentRun struct {
 	ToolCalls    int        `json:"tool_calls"`
 	InputTokens  int64      `json:"input_tokens"`
 	OutputTokens int64      `json:"output_tokens"`
-	Error        string     `json:"error"`
+	// CacheReadTokens and CacheWriteTokens are the parts of InputTokens served from and written to
+	// the provider's prompt cache.
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	Error            string `json:"error"`
 	// ConnectorID is the LLM connector (built-in runtime) or the ACP runtime connector used.
 	ConnectorID *uuid.UUID `json:"connector_id"`
 	Model       string     `json:"model"`
@@ -633,14 +637,17 @@ func (s *Store) FinishAgentRun(ctx context.Context, r *AgentRun) error {
 		runtime = "builtin"
 	}
 	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET status=$2, turns=$3, tool_calls=$4, input_tokens=$5, output_tokens=$6,
-		error=$7, connector_id=$8, model=$9, runtime=$10, finished_at=NOW() WHERE id=$1`,
-		r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error, r.ConnectorID, r.Model, runtime)
+		error=$7, connector_id=$8, model=$9, runtime=$10, cache_read_tokens=$11, cache_write_tokens=$12, finished_at=NOW()
+		WHERE id=$1`,
+		r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error, r.ConnectorID, r.Model, runtime,
+		r.CacheReadTokens, r.CacheWriteTokens)
 	return err
 }
 
 func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRun, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
-		error, connector_id, model, runtime, started_at, finished_at FROM agent_runs WHERE task_id=$1
+		cache_read_tokens, cache_write_tokens, error, connector_id, model, runtime, started_at, finished_at
+		FROM agent_runs WHERE task_id=$1
 		ORDER BY started_at DESC LIMIT 50`, taskID)
 	if err != nil {
 		return nil, err
@@ -650,7 +657,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRu
 	for rows.Next() {
 		var r AgentRun
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens,
-			&r.OutputTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt); err != nil {
+			&r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &r)

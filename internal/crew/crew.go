@@ -415,13 +415,15 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 			}
 			if errors.Is(err, llm.ErrContextOverflow) {
 				c.logger.Warn("context window exceeded", "task", task.ID, "turns", run.Turns, "err", err)
-				return &outcome{kind: "error", text: overflowMessage(run.Turns)}
+				return &outcome{kind: "overflow", text: overflowMessage(run.Turns)}
 			}
 			return &outcome{kind: "error", text: err.Error()}
 		}
 		run.Turns++
 		run.InputTokens += resp.Usage.InputTokens
 		run.OutputTokens += resp.Usage.OutputTokens
+		run.CacheReadTokens += resp.Usage.CacheReadTokens
+		run.CacheWriteTokens += resp.Usage.CacheWriteTokens
 		msgs = append(msgs, resp.Message)
 
 		text := strings.TrimSpace(resp.Message.Content)
@@ -459,12 +461,14 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 }
 
 // overflowMessage explains a refusal for exceeding the model's context window. The provider's raw
-// error goes to the log. On the first turn nothing the run did is to blame (the brief, system prompt
-// and tools are already too big, or max_tokens doesn't fit the window), and a reply would only fail
-// the same way.
+// error goes to the log. On the first turn nothing the run did is to blame (the agent's instructions,
+// memories, tool schemas and the brief are already too big, or max_tokens doesn't fit the window),
+// and a reply would only fail the same way.
 func overflowMessage(turns int) string {
 	if turns == 0 {
-		return "the task's brief doesn't fit the model's context window. Shorten the description or the thread, use a model with a larger window, or lower the connector's max output tokens."
+		return "the first request doesn't fit the model's context window. It carries the agent's instructions, its memories, " +
+			"the schemas of its tools and the task brief (description and thread). Trim the largest of those (fewer tools or " +
+			"memories, a shorter description), use a model with a larger window, or lower the connector's max output tokens."
 	}
 	// The next run starts from the brief and the thread, not this run's history.
 	return fmt.Sprintf("after %d turns the conversation no longer fits the model's context window. "+
@@ -553,6 +557,13 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		runStatus = "FAILED"
 		if run != nil {
 			run.Error = "turn limit reached"
+		}
+	case "overflow":
+		// Like "limit": the run used up what it had, and a comment left meanwhile still re-queues it.
+		c.system(ctx, task.ID, "The agent run stopped: "+out.text)
+		runStatus = "FAILED"
+		if run != nil {
+			run.Error = "context window exceeded"
 		}
 	case "canceled":
 		c.system(ctx, task.ID, "Stopped.")

@@ -14,6 +14,10 @@ type UsageTotals struct {
 	OutputTokens   int64 `json:"output_tokens"`
 	ToolCalls      int64 `json:"tool_calls"`
 	UnreportedRuns int64 `json:"unreported_runs"`
+	// CacheReadTokens and CacheWriteTokens are the parts of InputTokens read from and written to the
+	// providers' prompt caches.
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
 }
 
 type UsageDay struct {
@@ -86,7 +90,8 @@ type Usage struct {
 // "agent"; the column stays so the report can take other kinds of runs later).
 const usageRuns = `WITH runs AS (
 	SELECT r.started_at, 'agent' AS source, r.org_id, r.agent_id, r.task_id, r.connector_id, r.model, r.runtime,
-	       r.input_tokens AS inp, r.output_tokens AS outp, r.tool_calls::bigint AS calls, r.status
+	       r.input_tokens AS inp, r.output_tokens AS outp, r.tool_calls::bigint AS calls, r.status,
+	       r.cache_read_tokens AS cread, r.cache_write_tokens AS cwrite
 	FROM agent_runs r WHERE r.started_at >= $1
 ) `
 
@@ -97,9 +102,11 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 
 	if err := s.pool.QueryRow(ctx, usageRuns+`SELECT count(*), count(*) FILTER (WHERE status = 'FAILED'),
 		COALESCE(sum(inp), 0)::bigint, COALESCE(sum(outp), 0)::bigint, COALESCE(sum(calls), 0)::bigint,
-		count(*) FILTER (WHERE status = 'SUCCEEDED' AND inp = 0 AND outp = 0)
+		count(*) FILTER (WHERE status = 'SUCCEEDED' AND inp = 0 AND outp = 0),
+		COALESCE(sum(cread), 0)::bigint, COALESCE(sum(cwrite), 0)::bigint
 		FROM runs`, since).Scan(&u.Totals.Runs, &u.Totals.FailedRuns, &u.Totals.InputTokens,
-		&u.Totals.OutputTokens, &u.Totals.ToolCalls, &u.Totals.UnreportedRuns); err != nil {
+		&u.Totals.OutputTokens, &u.Totals.ToolCalls, &u.Totals.UnreportedRuns,
+		&u.Totals.CacheReadTokens, &u.Totals.CacheWriteTokens); err != nil {
 		return nil, err
 	}
 

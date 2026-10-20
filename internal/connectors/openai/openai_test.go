@@ -26,7 +26,7 @@ func TestChatWithToolCalls(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,
 			"tool_calls":[{"id":"c1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"go\"}"}}]}}],
-			"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+			"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":4}}}`))
 	}))
 	defer srv.Close()
 
@@ -53,7 +53,7 @@ func TestChatWithToolCalls(t *testing.T) {
 	if string(resp.Message.ToolCalls[0].Arguments) != `{"query":"go"}` {
 		t.Errorf("args: %s", resp.Message.ToolCalls[0].Arguments)
 	}
-	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 {
+	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 4 {
 		t.Errorf("usage: %+v", resp.Usage)
 	}
 	msgs := got["messages"].([]any)
@@ -87,8 +87,10 @@ func TestContextOverflowRecognized(t *testing.T) {
 	}{
 		{400, `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}`, true},
 		{400, `{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."}}`, true},
-		// A max_tokens setting larger than the window, and a proxy's body limit: not an overflow.
-		{400, `{"object":"error","message":"This model's maximum context length is 8192 tokens. However, you requested 16250 tokens (250 in the messages, 16000 in the completion)."}`, false},
+		// DeepSeek, vLLM and OpenRouter. (The same words for a max_tokens larger than the window are
+		// told apart by the crew: that one fails on the first turn.)
+		{400, `{"object":"error","message":"This model's maximum context length is 65536 tokens. However, you requested 70000 tokens (65000 in the messages, 5000 in the completion)."}`, true},
+		// A proxy's body limit: not an overflow.
 		{413, `<html>413 Request Entity Too Large</html>`, false},
 		{400, `{"error":"invalid tool schema"}`, false},
 		{401, `{"error":"bad key"}`, false},

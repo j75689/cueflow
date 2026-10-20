@@ -47,6 +47,8 @@ func commonFields(modelDefault, modelHelp string) []connector.Field {
 		{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 16000},
 		{Key: "refusal_fallback", Label: "Refusal fallback", Type: connector.FieldBool, Default: true,
 			Help: "If a request is declined by a safety classifier, re-serve it with a fallback model"},
+		{Key: "prompt_caching", Label: "Prompt caching", Type: connector.FieldBool, Default: true,
+			Help: "Cache the agent's conversation between turns (cheaper, faster). Turn off for a model or gateway that rejects cache_control"},
 	}
 }
 
@@ -115,6 +117,7 @@ type Client struct {
 	maxTokens int
 	// serverFallback uses the Claude API's server-side fallback routing.
 	serverFallback bool
+	promptCaching  bool
 }
 
 func modelOf(cfg connector.Config, def string) string {
@@ -128,7 +131,8 @@ func modelOf(cfg connector.Config, def string) string {
 func baseModel(m string) string { return strings.TrimPrefix(m, "anthropic.") }
 
 func newClient(cfg connector.Config, model string) *Client {
-	return &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000)}
+	return &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000),
+		promptCaching: cfg.Bool("prompt_caching")}
 }
 
 func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -247,7 +251,10 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	// to the end: one breakpoint after the fixed prefix (tools, then system) and one on the newest
 	// user turn make each turn read everything before it from the cache.
 	if req.System != "" {
-		params.System = []sdk.BetaTextBlockParam{{Text: req.System, CacheControl: sdk.NewBetaCacheControlEphemeralParam()}}
+		params.System = []sdk.BetaTextBlockParam{{Text: req.System}}
+		if c.promptCaching {
+			params.System[0].CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+		}
 	}
 	if c.effort != "" {
 		params.OutputConfig = sdk.BetaOutputConfigParam{Effort: sdk.BetaOutputConfigEffort(c.effort)}
@@ -255,10 +262,12 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	for _, t := range req.Tools {
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
 	}
-	if req.System == "" && len(params.Tools) > 0 {
-		params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+	if c.promptCaching {
+		if req.System == "" && len(params.Tools) > 0 {
+			params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+		}
+		cacheUserTurns(params.Messages)
 	}
-	cacheUserTurns(params.Messages)
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
 	if c.serverFallback {
 		params.Betas = append(params.Betas, sdk.AnthropicBetaServerSideFallback2026_07_01)
@@ -306,7 +315,8 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		// input_tokens counts only what came after the last cache breakpoint; the cached part is
 		// reported separately.
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
-			OutputTokens: resp.Usage.OutputTokens}}, nil
+			OutputTokens: resp.Usage.OutputTokens, CacheReadTokens: resp.Usage.CacheReadInputTokens,
+			CacheWriteTokens: resp.Usage.CacheCreationInputTokens}}, nil
 }
 
 // cacheUserTurns sets cache breakpoints on the last block of the two newest user turns. The newest
@@ -328,14 +338,17 @@ func cacheUserTurns(msgs []sdk.BetaMessageParam) {
 	}
 }
 
-// isContextOverflow recognizes the refusal of a prompt longer than the model's window: "prompt is
-// too long" on the Claude API and Vertex, "Input is too long for requested model" on Bedrock.
+// isContextOverflow recognizes the refusal of a prompt that doesn't fit the model's window: "prompt is
+// too long" and, when the prompt fits but not with max_tokens on top, "input length and max_tokens
+// exceed context limit" on the Claude API and Vertex; "Input is too long for requested model" on
+// Bedrock.
 func isContextOverflow(err *sdk.Error) bool {
 	if err.StatusCode != 400 {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "input is too long")
+	return strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "exceed context limit") ||
+		strings.Contains(msg, "input is too long")
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

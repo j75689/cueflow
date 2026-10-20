@@ -242,8 +242,11 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
+			PromptTokens        int64 `json:"prompt_tokens"`
+			CompletionTokens    int64 `json:"completion_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
@@ -276,7 +279,8 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		stop = "refusal"
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
-		Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}, nil
+		Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens,
+			CacheReadTokens: out.Usage.PromptTokensDetails.CachedTokens}}, nil
 }
 
 // endpoint returns the Chat Completions URL. Azure's legacy API addresses a deployment by path
@@ -298,14 +302,19 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-// isContextOverflow recognizes the error codes OpenAI-compatible servers use for a prompt longer than
-// the model's window: OpenAI and Azure (context_length_exceeded), Gemini ("exceeds the maximum
-// number of tokens"). Looser wording ("maximum context length") also covers a max_tokens setting
-// larger than the window, and a bare 413 is usually a proxy's body limit; those keep their own text.
+// isContextOverflow recognizes how OpenAI-compatible servers refuse a prompt that doesn't fit the
+// model's window: OpenAI and Azure (context_length_exceeded), DeepSeek, vLLM and OpenRouter
+// ("maximum context length"), Gemini ("exceeds the maximum number of tokens"). A bare 413 is usually
+// a proxy's body limit and keeps its own text.
 func isContextOverflow(status int, body string) bool {
 	if status != http.StatusBadRequest {
 		return false
 	}
 	b := strings.ToLower(body)
-	return strings.Contains(b, "context_length_exceeded") || strings.Contains(b, "exceeds the maximum number of tokens")
+	for _, s := range []string{"context_length_exceeded", "maximum context length", "exceeds the maximum number of tokens"} {
+		if strings.Contains(b, s) {
+			return true
+		}
+	}
+	return false
 }

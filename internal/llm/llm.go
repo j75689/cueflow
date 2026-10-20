@@ -52,6 +52,10 @@ type Usage struct {
 	// InputTokens is the whole prompt, whether or not the provider served part of it from a cache.
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
+	// CacheReadTokens and CacheWriteTokens are the parts of InputTokens read from and written to the
+	// provider's prompt cache, which are billed differently from the rest.
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
 }
 
 type Response struct {
