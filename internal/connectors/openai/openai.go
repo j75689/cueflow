@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/oauth2"
 
@@ -82,6 +84,11 @@ type Client struct {
 	http                                                      *http.Client
 	// tokens, when set, supplies short-lived OAuth access tokens (Vertex AI).
 	tokens oauth2.TokenSource
+	logger *slog.Logger
+	// noStreamOptions and noStream are set once the server has refused stream_options, or streaming
+	// itself, so later calls don't ask again.
+	noStreamOptions, noStream atomic.Bool
+	warnedNoUsage             atomic.Bool
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -98,7 +105,8 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		maxTokens:   cfg.Int("max_tokens", 8000),
 		// No overall timeout (it would cut a stream off), and a server that doesn't stream answers
 		// only once the whole answer is written. Chat bounds each call with llm.CallTimeout.
-		http: llm.HTTPClient(env.HTTPClient, 0),
+		http:   llm.HTTPClient(env.HTTPClient, 0),
+		logger: env.Logger,
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
 	if provider == "openrouter" {
@@ -212,36 +220,42 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	// Streamed: a long answer arrives as it is written, so no proxy or gateway in between times out
 	// an idle connection while the model works. A server that doesn't stream answers in one body,
 	// which is read the old way.
-	body["stream"] = true
-	body["stream_options"] = map[string]any{"include_usage": true}
 	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
 	defer cancel()
-	hresp, err := c.post(callCtx, body)
-	if err != nil {
-		return nil, err
-	}
-	defer hresp.Body.Close()
-	if hresp.StatusCode == http.StatusBadRequest {
-		// Some servers refuse stream_options (or streaming with tools): ask again without them.
-		data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
-		hresp.Body.Close()
-		if !strings.Contains(strings.ToLower(string(data)), "stream") {
-			return nil, httpError(hresp.StatusCode, data)
-		}
+	var hresp *http.Response
+	for {
 		delete(body, "stream")
 		delete(body, "stream_options")
+		if !c.noStream.Load() {
+			body["stream"] = true
+			if !c.noStreamOptions.Load() {
+				body["stream_options"] = map[string]any{"include_usage": true}
+			}
+		}
+		var err error
 		if hresp, err = c.post(callCtx, body); err != nil {
 			return nil, err
 		}
-		defer hresp.Body.Close()
+		if hresp.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
+			hresp.Body.Close()
+			// Some servers refuse stream_options, or streaming: drop the first one they named, remember
+			// it for this connector, and ask again.
+			if hresp.StatusCode == http.StatusBadRequest && body["stream"] != nil && c.dropStreaming(body, data) {
+				continue
+			}
+			return nil, httpError(hresp.StatusCode, data)
+		}
+		break
 	}
-	if hresp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
-		return nil, httpError(hresp.StatusCode, data)
-	}
+	defer hresp.Body.Close()
 	var out completion
+	var err error
 	if strings.HasPrefix(hresp.Header.Get("Content-Type"), "text/event-stream") {
-		out, err = readStream(io.LimitReader(hresp.Body, 16<<20))
+		out, err = readStream(hresp.Body)
+		if err == nil && !out.sawUsage && body["stream_options"] != nil && c.logger != nil && c.warnedNoUsage.CompareAndSwap(false, true) {
+			c.logger.Warn("llm: the server streamed no usage, so this connector's runs record no token counts or context size", "model", c.model)
+		}
 	} else {
 		data, rerr := io.ReadAll(io.LimitReader(hresp.Body, 16<<20))
 		if rerr != nil {
@@ -333,9 +347,29 @@ type wireUsage struct {
 
 // completion is the assistant message of one call, however it arrived.
 type completion struct {
-	message wireMessage
-	finish  string
-	usage   wireUsage
+	message  wireMessage
+	finish   string
+	usage    wireUsage
+	sawUsage bool
+}
+
+// maxStream caps a streamed answer, like the 16 MB cap on a plain one.
+const maxStream = 16 << 20
+
+// dropStreaming takes out what a 400 says the server refused: stream_options first (older vLLM,
+// LiteLLM and Azure versions refuse it but stream fine), then streaming itself. It remembers that on
+// the client and reports whether there was something to drop.
+func (c *Client) dropStreaming(body map[string]any, refusal []byte) bool {
+	r := strings.ToLower(string(refusal))
+	if !strings.Contains(r, "stream") {
+		return false
+	}
+	if body["stream_options"] != nil {
+		c.noStreamOptions.Store(true)
+		return true
+	}
+	c.noStream.Store(true)
+	return true
 }
 
 func readBody(data []byte) (completion, error) {
@@ -356,14 +390,16 @@ func readBody(data []byte) (completion, error) {
 }
 
 // readStream puts a streamed completion back together: text pieces in order, and each tool call
-// from its pieces (keyed by index: the id and name come first, the arguments in parts, and
-// provider extensions such as Gemini's thought signature on any of them).
-func readStream(r io.Reader) (completion, error) {
+// from its pieces (keyed by index: the id and name come first, the arguments in parts, and provider
+// extensions such as Gemini's thought signature on any of them). Servers that leave the index out
+// (it then reads 0) start each new call with its id.
+func readStream(body io.Reader) (completion, error) {
 	var out completion
 	var text strings.Builder
-	sawText, sawChunk := false, false
-	calls := map[int]*wireToolCall{}
-	var order []int
+	sawText, sawChoice := false, false
+	var calls []*wireToolCall
+	byIndex := map[int]*wireToolCall{}
+	r := &io.LimitedReader{R: body, N: maxStream + 1}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
 	for sc.Scan() {
@@ -392,32 +428,37 @@ func readStream(r io.Reader) (completion, error) {
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *wireUsage `json:"usage"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
+			Usage *wireUsage      `json:"usage"`
+			Error json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if r.N <= 0 { // the cap cut this chunk short
+				break
+			}
 			return out, fmt.Errorf("llm: decode stream: %w", err)
 		}
-		if chunk.Error != nil {
-			return out, fmt.Errorf("llm: stream error: %s", chunk.Error.Message)
+		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
+			// A 200 stream can still end in an error chunk (OpenRouter does); an overflow is still one.
+			if llm.IsOverflowText(data) {
+				return out, fmt.Errorf("llm: %w: %.400s", llm.ErrContextOverflow, data)
+			}
+			return out, fmt.Errorf("llm: stream error: %.400s", chunk.Error)
 		}
-		sawChunk = true
 		if chunk.Usage != nil {
-			out.usage = *chunk.Usage
+			out.usage, out.sawUsage = *chunk.Usage, true
 		}
 		for _, ch := range chunk.Choices {
+			sawChoice = true
 			if ch.Delta.Content != nil {
 				text.WriteString(*ch.Delta.Content)
 				sawText = true
 			}
 			for _, d := range ch.Delta.ToolCalls {
-				tc := calls[d.Index]
-				if tc == nil {
+				tc := byIndex[d.Index]
+				if tc == nil || d.ID != "" && tc.ID != "" && d.ID != tc.ID {
 					tc = &wireToolCall{Type: "function"}
-					calls[d.Index] = tc
-					order = append(order, d.Index)
+					byIndex[d.Index] = tc
+					calls = append(calls, tc)
 				}
 				if d.ID != "" {
 					tc.ID = d.ID
@@ -439,15 +480,18 @@ func readStream(r io.Reader) (completion, error) {
 	if err := sc.Err(); err != nil {
 		return out, fmt.Errorf("llm: read stream: %w", err)
 	}
-	if !sawChunk {
+	if r.N <= 0 {
+		return out, fmt.Errorf("llm: the answer stream is over %d MB", maxStream>>20)
+	}
+	if !sawChoice {
 		return out, fmt.Errorf("llm: empty response")
 	}
 	if sawText {
 		t := text.String()
 		out.message.Content = &t
 	}
-	for _, i := range order {
-		out.message.ToolCalls = append(out.message.ToolCalls, *calls[i])
+	for _, tc := range calls {
+		out.message.ToolCalls = append(out.message.ToolCalls, *tc)
 	}
 	return out, nil
 }

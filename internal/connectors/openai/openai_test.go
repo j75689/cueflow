@@ -279,24 +279,98 @@ func TestStreamedCompletion(t *testing.T) {
 	}
 }
 
-// A server that refuses the stream options gets the request again without them, and its plain
-// answer is read as before.
+// A server that refuses only stream_options keeps streaming without them, and isn't asked for them
+// again; one that refuses streaming gets plain requests from then on, and its plain answer is read.
 func TestStreamRefusedFallsBack(t *testing.T) {
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&b)
-		bodies = append(bodies, b)
-		if b["stream_options"] != nil {
-			http.Error(w, `{"error":{"message":"Unrecognized request argument supplied: stream_options"}}`, http.StatusBadRequest)
-			return
+	for _, refuse := range []string{"stream_options", "stream"} {
+		var bodies []map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var b map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			bodies = append(bodies, b)
+			if b["stream_options"] != nil || refuse == "stream" && b["stream"] != nil {
+				http.Error(w, `{"error":{"message":"Unrecognized request argument supplied: `+refuse+`"}}`, http.StatusBadRequest)
+				return
+			}
+			if b["stream"] != nil {
+				sse(w, 0, `{"choices":[{"index":0,"delta":{"content":"streamed"}}]}`)
+				return
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"plain"}}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`))
+		}))
+		inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m"}, connector.Env{})
+		chat := func() string {
+			resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+			if err != nil {
+				t.Fatalf("%s: %v", refuse, err)
+			}
+			return resp.Message.Content
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"plain"}}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`))
-	}))
-	defer srv.Close()
-	inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m"}, connector.Env{})
-	resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
-	if err != nil || resp.Message.Content != "plain" || len(bodies) != 2 || bodies[1]["stream"] != nil {
-		t.Fatalf("fallback: %v %+v (%d requests)", err, resp, len(bodies))
+		first, second := chat(), chat()
+		srv.Close()
+		switch refuse {
+		case "stream_options":
+			// options refused, then streamed without them; the second call doesn't ask for them.
+			if first != "streamed" || second != "streamed" || len(bodies) != 3 || bodies[1]["stream"] != true || bodies[2]["stream_options"] != nil {
+				t.Fatalf("stream_options: %q %q, %d requests", first, second, len(bodies))
+			}
+		case "stream":
+			// options refused, streaming refused, plain; the second call is plain at once.
+			if first != "plain" || second != "plain" || len(bodies) != 4 || bodies[3]["stream"] != nil {
+				t.Fatalf("stream: %q %q, %d requests", first, second, len(bodies))
+			}
+		}
+	}
+}
+
+// Broken or odd streams: a cut at the size cap, an overflow reported in an error chunk, tool calls
+// without an index, and a stream with no choice at all.
+func TestStreamEdgeCases(t *testing.T) {
+	serve := func(write func(w http.ResponseWriter)) (*llm.Response, error) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { write(w) }))
+		defer srv.Close()
+		inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m"}, connector.Env{})
+		return inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+	}
+
+	// Over 16 MB: an error, not the first 16 MB passed off as the answer.
+	_, err := serve(func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		piece := `data: {"choices":[{"index":0,"delta":{"content":"` + strings.Repeat("x", 1<<20) + `"}}]}` + "\n\n"
+		for range 17 {
+			fmt.Fprint(w, piece)
+		}
+	})
+	if err == nil || !strings.Contains(err.Error(), "over 16 MB") {
+		t.Errorf("oversized stream: %v", err)
+	}
+
+	// OpenRouter answers 200 and reports the overflow in the stream.
+	_, err = serve(func(w http.ResponseWriter) {
+		sse(w, 0, `{"error":{"code":400,"message":"This endpoint's maximum context length is 131072 tokens. However, you requested about 140000 tokens."}}`)
+	})
+	if !errors.Is(err, llm.ErrContextOverflow) {
+		t.Errorf("in-stream overflow: %v", err)
+	}
+
+	// No index on the tool-call deltas: each new id starts a new call.
+	resp, err := serve(func(w http.ResponseWriter) {
+		sse(w, 0,
+			`{"choices":[{"delta":{"tool_calls":[{"id":"a","function":{"name":"read_file","arguments":"{\"name\":"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"x\"}"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"id":"b","function":{"name":"list_files","arguments":"{}"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+	})
+	if err != nil || len(resp.Message.ToolCalls) != 2 || string(resp.Message.ToolCalls[0].Arguments) != `{"name":"x"}` ||
+		resp.Message.ToolCalls[1].Name != "list_files" {
+		t.Errorf("index-less tool calls: %v %+v", err, resp)
+	}
+
+	// Usage and metadata only (Azure's prompt filter results): an empty response, like a plain one.
+	_, err = serve(func(w http.ResponseWriter) {
+		sse(w, 0, `{"choices":[],"prompt_filter_results":[{"prompt_index":0}]}`, `{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0}}`)
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty response") {
+		t.Errorf("choice-less stream: %v", err)
 	}
 }

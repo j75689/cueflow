@@ -93,6 +93,7 @@ func newVertexGemini(cfg connector.Config, env connector.Env) (connector.Instanc
 		headers:     map[string]string{},
 		http:        llm.HTTPClient(env.HTTPClient, 0),
 		tokens:      oauth2.ReuseTokenSource(nil, creds.TokenSource),
+		logger:      env.Logger,
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
 	// gcloud user credentials have no project of their own; Vertex needs the billing/quota
