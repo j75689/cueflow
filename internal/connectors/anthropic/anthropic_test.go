@@ -511,3 +511,31 @@ func TestContextWindowLookupRobustness(t *testing.T) {
 		t.Fatalf("negative window: %d", w)
 	}
 }
+
+// A user message right after tool results (the crew's hand-off request) is sent in the same user
+// turn as the results, so turns still alternate.
+func TestUserMessageAfterToolResultsJoinsTheirTurn(t *testing.T) {
+	isolateEnv(t)
+	srv, last := fakeMessages(t)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: "brief"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "t1", Name: "read", Arguments: json.RawMessage(`{}`)}}},
+		{Role: llm.RoleTool, ToolCallID: "t1", Content: "result"},
+		{Role: llm.RoleUser, Content: "write the hand-off note"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := last().body["messages"].([]any)
+	if len(sent) != 3 {
+		t.Fatalf("want brief, assistant, one user turn; got %d messages", len(sent))
+	}
+	blocks := sent[2].(map[string]any)["content"].([]any)
+	if len(blocks) != 2 || blocks[0].(map[string]any)["type"] != "tool_result" || blocks[1].(map[string]any)["text"] != "write the hand-off note" {
+		t.Fatalf("last turn: %v", blocks)
+	}
+}

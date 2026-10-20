@@ -39,6 +39,9 @@ type runEnv struct {
 	subtasks int
 	counts   map[string]int // per-run counters of module tools (see Run.Inc)
 
+	// wroteHandOff is set once the run has written its hand-off note (see handoff.go).
+	wroteHandOff bool
+
 	searcher    connector.Searcher
 	searcherErr error
 	searchTried bool

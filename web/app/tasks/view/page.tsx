@@ -756,7 +756,8 @@ function MessageRow({ m }: { m: TaskMessage }) {
     );
   }
 
-  // agent messages: message | question | result
+  // agent messages: message | question | result; a hand-off note is a message marked data.handoff
+  const handOff = Boolean(m.data?.handoff);
   const tone =
     m.kind === "question"
       ? "border border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/40"
@@ -775,6 +776,7 @@ function MessageRow({ m }: { m: TaskMessage }) {
           {m.kind === "result" && (
             <span className="text-teal-700 dark:text-teal-400">finished</span>
           )}
+          {handOff && <Pill>hand-off</Pill>}
           {time}
         </p>
         <div
@@ -785,6 +787,12 @@ function MessageRow({ m }: { m: TaskMessage }) {
         >
           {m.content}
         </div>
+        {handOff && (
+          <p className="mt-1 text-[11px] text-fg-3">
+            The next run starts from <FileLink name={String(m.data?.file ?? "handoff.md")} />. Reply
+            with corrections, or just to continue.
+          </p>
+        )}
       </div>
     </div>
   );

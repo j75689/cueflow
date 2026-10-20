@@ -159,7 +159,7 @@ sequenceDiagram
 每次執行都**從頭重建上下文**，不重播上一次執行的原始 LLM 訊息：
 
 - **System prompt**：通用工作守則 + 角色描述 + 委派守則與隊友名單（有 delegation 能力時）+ 排程守則（有 planning 時）+ 該角色的 instructions + 最近 30 筆記憶 + 目前時間。
-- **任務簡報（第一則 user 訊息）**：任務標題、優先度、標籤、期限、描述、父任務、所有子任務與其結果、已產生的草稿，以及對話串最近 60 則（工具結果壓縮到 500 字）。
+- **任務簡報（第一則 user 訊息）**：任務標題、優先度、標籤、期限、描述、父任務、所有子任務與其結果、上一個 run 交接時留下的交接筆記（§6.3）、任務的檔案（檔名與第一行，不含內容）、已產生的草稿，以及對話串最近 60 則（工具結果壓縮到 500 字）。
 
 好處：
 - 跨 provider 無痛：不需要保存各家 LLM 的原生訊息格式；同一個任務中途換 LLM 或換 agent 都能接著做。
@@ -175,11 +175,23 @@ sequenceDiagram
 | `ask_human` | `question` | `WAITING_HUMAN` | SUCCEEDED |
 | `wait_for_subtasks` | 系統訊息 | `BLOCKED`（若子任務其實都已完成則立即回到 `TODO`） | SUCCEEDED |
 | 回合用盡 | 系統訊息（說明可回覆繼續或調高上限） | `WAITING_HUMAN` | FAILED |
+| context 達到交接點（§6.3） | 交接筆記（有標示）與系統訊息 | `WAITING_HUMAN` | SUCCEEDED |
+| 超過 context 上限 | 系統訊息（說明該縮減什麼，或回覆後以新的 run 繼續） | `WAITING_HUMAN` | FAILED |
 | LLM／設定錯誤 | 系統訊息（含錯誤原因） | `WAITING_HUMAN` | FAILED |
 | 被人停止 | 「Stopped.」 | `WAITING_HUMAN` | CANCELED |
 | 程序重啟、租約過期 | 系統訊息（說明中斷） | `WAITING_HUMAN` | FAILED |
 
-**執行中有人留言**：runner 不會打斷正在跑的 LLM 呼叫，而是在結束時檢查「本次執行開始後是否有人類訊息」。如果有，就不套用完成狀態，改回 `TODO` 立即重跑，讓新的留言被處理（被停止或失敗時除外）。
+**執行中有人留言**：runner 不會打斷正在跑的 LLM 呼叫，而是在結束時檢查「本次執行開始後是否有人類訊息」。如果有，就不套用完成狀態，改回 `TODO` 立即重跑，讓新的留言被處理（被停止或失敗時除外；第一輪就超過 context 上限時也不重跑，因為重跑只會重複同樣的結果）。
+
+### 6.3 context 快滿時交接
+
+run 的對話歷史只往後加（已送給模型的內容不會被截斷），所以長時間的 run 會一直長大，直到接近模型的上限。最新一次的 prompt 達到交接點（預設為已知上限的 80%，`CUEFLOW_CONTEXT_HANDOFF`）時：
+
+1. crew 在對話最後加一則訊息，請 agent 用 `write_file` 寫一份交接筆記存成 `handoff.md`（做了什麼、確認過的事實與決定、還剩什麼、先讀哪些任務檔案），然後停下。先前的回合照原樣送出。
+2. 筆記存好後 run 就結束：筆記會貼到對話串（標示為 *hand-off*），任務等待人處理。如果 agent 改用文字回覆，那段文字就是筆記；如果它繼續呼叫工具，會再給一輪，之後 run 結束並說明沒有寫筆記。就算交接點剛好落在 run 允許的最後一輪，也會提出請求：寫筆記的回合可以超過回合上限。
+3. 人審閱後回覆，可以附上修正，也可以只說繼續。新的 run 的 brief 一開始就有「Hand-off from the previous run」區段，引用這份筆記（完整內容在 `handoff.md`），後面照常接對話串。舊的對話完全不會重播。
+
+如果 run 的第一個 prompt 就已經超過交接點（brief 或筆記很大、模型上限很小），新的 run 一開始也一樣滿，所以這個 run 只會說明一次，然後照常繼續，不會交接。不知道模型上限時不會交接；真的用完時，run 會以超過 context 上限的訊息結束。
 
 ## 7. 委派與恢復
 
@@ -246,7 +258,8 @@ sequenceDiagram
 | 項目 | 上限／行為 | 位置 |
 |---|---|---|
 | 每次執行回合數 | 角色設定 `max_turns`（預設 12，Chief 16，最高 40） | `store/agents.go` |
-| run 的 context 可以多滿 | 預設為模型上限的 80%（`CUEFLOW_CONTEXT_HANDOFF`）；任務頁會把每個 run 最新一次的 prompt 顯示成「Context 182K / 1M (18%)」，達到這個比例起變色，不知道模型上限時則不顯示百分比 | `config`、`crew/crew.go` |
+| run 的 context 可以多滿 | 預設為模型上限的 80%（`CUEFLOW_CONTEXT_HANDOFF`）；超過時 run 會寫交接筆記並等人處理（§6.3），寫筆記最多可以超過回合上限 2 輪。任務頁會把每個 run 最新一次的 prompt 顯示成「Context 182K / 1M (18%)」，達到這個比例起變色，不知道模型上限時則不顯示百分比 | `config`、`crew/handoff.go` |
+| 下一次 brief 帶入的交接筆記 | 12,000 字（其餘在 `handoff.md`） | `crew/handoff.go` |
 | 每次執行建立的子任務 + 獨立任務 | 8 | `crew/tools.go` |
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |

@@ -416,7 +416,9 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
-	for run.Turns < a.MaxTurns {
+	var h handOff
+	// A hand-off asked for on the last allowed turn still gets its turns to write the note.
+	for run.Turns < a.MaxTurns || h.asked && h.turns < handOffTurns {
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -439,6 +441,13 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		msgs = append(msgs, resp.Message)
 
 		text := strings.TrimSpace(resp.Message.Content)
+		if len(resp.Message.ToolCalls) == 0 && h.asked && !env.wroteHandOff && text != "" {
+			// Asked for the note, it answered in text: that is the note.
+			if _, err := c.store.WriteTaskFile(ctx, task.ID, handOffFile, "", []byte(text), a.Slug); err == nil {
+				c.fileChanged(ctx, task.ID, handOffFile)
+				return c.handOffOutcome(ctx, task, a, run, true)
+			}
+		}
 		if len(resp.Message.ToolCalls) == 0 {
 			if text == "" {
 				if resp.StopReason == "max_tokens" {
@@ -467,6 +476,12 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		}
 		if ctx.Err() != nil {
 			return &outcome{kind: "canceled"}
+		}
+		// A new message at the end, never an edit of what was sent.
+		if req, out := c.afterTurn(ctx, &h, env, run); out != nil {
+			return out
+		} else if req != nil {
+			msgs = append(msgs, *req)
 		}
 	}
 	return &outcome{kind: "limit"}
@@ -604,6 +619,10 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		if run != nil {
 			run.Error = "turn limit reached"
 		}
+	case "handoff":
+		// The run ended to let a fresh one take over; the note (if any) is in the thread. A comment left
+		// meanwhile re-queues the task like any other.
+		c.system(ctx, task.ID, out.text)
 	case "overflow":
 		// Like "limit": the run used up what it had, and a comment left meanwhile still re-queues it.
 		c.system(ctx, task.ID, "The agent run stopped: "+out.text)
