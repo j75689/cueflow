@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0](https://github.com/j75689/cueflow/compare/v1.0.1...v1.1.0) (2026-10-20)
+
+
+### Features
+
+* **crew:** give agents task file tools and list the files in the brief ([#56](https://github.com/j75689/cueflow/issues/56)) ([b2d8d22](https://github.com/j75689/cueflow/commit/b2d8d22efceee42a91ee77e2f521c88fb35e7726))
+* **crew:** hand off to a fresh run when the context fills up, through a note the human reviews ([#60](https://github.com/j75689/cueflow/issues/60)) ([0847e7c](https://github.com/j75689/cueflow/commit/0847e7cbdc701a17c6d407f881528032f833af5d))
+* **crew:** let an agent continue a hand-off without waiting for review ([#61](https://github.com/j75689/cueflow/issues/61)) ([e1effd5](https://github.com/j75689/cueflow/commit/e1effd5966b9f6c49251242d53355d0948a02bdb))
+* **crew:** save large tool results as task files instead of putting them in the history ([#57](https://github.com/j75689/cueflow/issues/57)) ([f70b7e8](https://github.com/j75689/cueflow/commit/f70b7e8848dc46d6e0a921effbb1243659c6834b))
+* **crew:** show how full each run's context is, against the model's window ([#59](https://github.com/j75689/cueflow/issues/59)) ([e846223](https://github.com/j75689/cueflow/commit/e846223ab900e1dfee5e9561304d2d98db8348f9))
+* **deliverable:** let agents read a deliverable in full with get_deliverable ([#64](https://github.com/j75689/cueflow/issues/64)) ([63f2d8f](https://github.com/j75689/cueflow/commit/63f2d8feba06dee196b5c71a926c9410332679f2))
+* **openai:** stream chat completions ([#63](https://github.com/j75689/cueflow/issues/63)) ([917c7c0](https://github.com/j75689/cueflow/commit/917c7c081cdaa60619dcf16998c370b1c019665b))
+* **store:** task files on a byte layer shared with media ([#55](https://github.com/j75689/cueflow/issues/55)) ([493fb2a](https://github.com/j75689/cueflow/commit/493fb2aace439e2970e51fee3efaf9f656b0b188))
+* **web:** a Files card and viewer on the task page, with routes for a task's files ([#58](https://github.com/j75689/cueflow/issues/58)) ([6ff4dbd](https://github.com/j75689/cueflow/commit/6ff4dbdf36119aa6c6d38973b00615e2080b13c2))
+
+
+### Bug Fixes
+
+* **anthropic:** stream model calls so a long answer isn't cut off by the HTTP timeout ([#62](https://github.com/j75689/cueflow/issues/62)) ([1009fbc](https://github.com/j75689/cueflow/commit/1009fbc3e9487ea6b1e64319bd0faac8c493f677))
+* **crew:** keep the model's history append-only; cache it on Claude; say plainly when a run outgrows the window ([#54](https://github.com/j75689/cueflow/issues/54)) ([6696f61](https://github.com/j75689/cueflow/commit/6696f61e64132be26418f635d3b4262e0a828dd8))
+* **crew:** let agents read files MCP tools return as embedded resources; clip long results with a note ([#50](https://github.com/j75689/cueflow/issues/50)) ([18e1c9a](https://github.com/j75689/cueflow/commit/18e1c9ab2779b002733b949384f457f3b4eca97e))
+
 ## [1.0.1](https://github.com/j75689/cueflow/compare/v1.0.0...v1.0.1) (2026-10-19)
 
 
