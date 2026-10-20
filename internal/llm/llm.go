@@ -45,11 +45,17 @@ type Request struct {
 	Messages  []Message
 	Tools     []Tool
 	MaxTokens int
-	// ToolHistoryBudget, when set, asks the connector to keep the tool results it sends back within
-	// about this many characters by shedding the oldest. How is the connector's call: most use
-	// TrimToolHistory; Anthropic has the API clear them, since its thinking blocks are bound to the
-	// turns before them and must not see those turns change.
+	// ToolHistoryBudget is how many characters of tool results the caller wants carried back to the
+	// model. Only a HistoryShedder reads it; for any other connector the caller trims the history
+	// itself (TrimToolHistory) before Chat.
 	ToolHistoryBudget int
+}
+
+// HistoryShedder is implemented by connectors that keep Request.ToolHistoryBudget themselves and
+// must receive the history exactly as the model saw it. Claude's thinking blocks are bound to the
+// turns before them, so a client-side cut would make the API reject the request.
+type HistoryShedder interface {
+	ShedsToolHistory()
 }
 
 type Usage struct {

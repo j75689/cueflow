@@ -114,6 +114,9 @@ func TestToolHistoryBudgetClearsServerSide(t *testing.T) {
 		{Role: llm.RoleTool, ToolCallID: "t0", Content: long},
 		{Role: llm.RoleAssistant, ProviderState: thought},
 		{Role: llm.RoleTool, ToolCallID: "t1", Content: long},
+		{Role: llm.RoleTool, ToolCallID: "t2", Content: "a"},
+		{Role: llm.RoleTool, ToolCallID: "t3", Content: "b"},
+		{Role: llm.RoleTool, ToolCallID: "t4", Content: "c"},
 	}
 	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
 		t.Fatal(err)
@@ -125,6 +128,15 @@ func TestToolHistoryBudgetClearsServerSide(t *testing.T) {
 	edits, _ := c.body["context_management"].(map[string]any)["edits"].([]any)
 	if len(edits) != 1 || edits[0].(map[string]any)["type"] != "clear_tool_uses_20250919" {
 		t.Fatalf("context_management: %v", c.body["context_management"])
+	}
+	edit := edits[0].(map[string]any)
+	// The newest turn called four tools: all four results are kept.
+	if keep := edit["keep"].(map[string]any)["value"]; keep != 4.0 {
+		t.Fatalf("keep: %v", keep)
+	}
+	// The trigger is the budget plus the rest of the prompt ("brief", the tool-call arguments), in tokens.
+	if trig := edit["trigger"].(map[string]any)["value"]; trig != float64((len("brief")+len("{}")+64000)/3) {
+		t.Fatalf("trigger: %v", trig)
 	}
 	sent := c.body["messages"].([]any)
 	first := sent[2].(map[string]any)["content"].([]any)[0].(map[string]any)
@@ -139,6 +151,70 @@ func TestToolHistoryBudgetClearsServerSide(t *testing.T) {
 	chat(t, "anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL})
 	if c := last(); c.body["context_management"] != nil || strings.Contains(betas(c), "context-management") {
 		t.Fatal("context management sent without a budget")
+	}
+}
+
+// An endpoint that turns down context management (a gateway, or one that ignores it and lets the
+// prompt grow too long) gets the history cut on the client instead, with the thinking blocks after
+// the cut dropped so the API doesn't reject them. The connector stops asking for server clearing.
+func TestToolHistoryFallsBackToClientCut(t *testing.T) {
+	isolateEnv(t)
+	var mu sync.Mutex
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if body["context_management"] != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"context_management: Extra inputs are not permitted"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":3,"output_tokens":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 40000)
+	turn := func(id string) llm.Message {
+		return llm.Message{Role: llm.RoleAssistant, ProviderState: sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant,
+			Content: []sdk.BetaContentBlockParamUnion{sdk.NewBetaThinkingBlock("sig-"+id, "think"), sdk.NewBetaToolUseBlock(id, map[string]any{}, "read")}}}
+	}
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: "brief"},
+		turn("t0"), {Role: llm.RoleTool, ToolCallID: "t0", Content: long},
+		turn("t1"), {Role: llm.RoleTool, ToolCallID: "t1", Content: long},
+	}
+	req := llm.Request{Messages: msgs, ToolHistoryBudget: 64000}
+	for range 2 {
+		if _, err := inst.(connector.LLM).Chat(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(bodies) != 3 || bodies[0]["context_management"] == nil || bodies[2]["context_management"] != nil {
+		t.Fatalf("want one refused request, then two without context management; got %d requests", len(bodies))
+	}
+	sent := bodies[1]["messages"].([]any)
+	blocks := func(i int) []any { return sent[i].(map[string]any)["content"].([]any) }
+	if text := blocks(2)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string); !strings.Contains(text, "cut from the history") {
+		t.Fatal("the old result was not cut")
+	}
+	if blocks(1)[0].(map[string]any)["type"] != "thinking" {
+		t.Fatal("the thinking before the cut should stay")
+	}
+	if b := blocks(3); len(b) != 1 || b[0].(map[string]any)["type"] != "tool_use" {
+		t.Fatalf("the thinking after the cut should be dropped: %v", b)
+	}
+	if msgs[2].Content != long {
+		t.Fatal("the caller's history was changed")
 	}
 }
 

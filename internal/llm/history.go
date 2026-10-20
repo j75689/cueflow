@@ -12,20 +12,31 @@ const ToolHistoryKept = 2000
 // ClipNoted cuts s to n characters and, when it does, ends it with how many were shown out of how
 // many, plus hint.
 func ClipNoted(s string, n int, hint string) string {
-	r := []rune(s)
-	if len(r) <= n {
+	if len(s) <= n {
 		return s
 	}
-	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", string(r[:n]), n, len(r), hint)
+	total := utf8.RuneCountInString(s)
+	if total <= n {
+		return s
+	}
+	end, k := len(s), 0
+	for i := range s {
+		if k == n {
+			end = i
+			break
+		}
+		k++
+	}
+	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", s[:end], n, total, hint)
 }
 
-// TrimToolHistory is the default way a connector honours Request.ToolHistoryBudget: it returns msgs
-// with the oldest tool results cut to ToolHistoryKept characters until the results fit in budget.
-// The newest turn's results stay whole. msgs itself is not changed. The cuts depend only on msgs,
-// so a result cut once stays cut the same way on every later turn.
+// TrimToolHistory returns msgs with the oldest tool results cut to ToolHistoryKept characters until
+// the results fit in budget. The newest turn's results stay whole. msgs itself is not changed. The
+// cuts depend only on msgs, so a result cut once stays cut the same way on every later turn, and a
+// result already cut is left alone.
 //
-// Only for providers that don't check earlier turns: a cut changes what the model saw before, which
-// invalidates Anthropic's thinking signatures.
+// A cut changes what the model saw before, so it is only for connectors that are not a
+// HistoryShedder (or a shedder's own fallback that also drops what the cut invalidates).
 func TrimToolHistory(msgs []Message, budget int) []Message {
 	if budget <= 0 {
 		return msgs

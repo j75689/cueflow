@@ -408,6 +408,11 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
 	for run.Turns < a.MaxTurns {
+		if _, ok := model.(llm.HistoryShedder); !ok {
+			// Cut in place: an already-cut result is skipped on later turns, and the run doesn't hold on
+			// to text the model will never see again.
+			msgs = llm.TrimToolHistory(msgs, toolHistoryBudget)
+		}
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools,
 			ToolHistoryBudget: toolHistoryBudget})
 		if err != nil {

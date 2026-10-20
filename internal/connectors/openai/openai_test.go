@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/j75689/cueflow/internal/connector"
@@ -62,40 +61,6 @@ func TestChatWithToolCalls(t *testing.T) {
 	}
 	if got["model"] != "qwen3" || got["max_tokens"] == nil || got["tools"] == nil {
 		t.Errorf("request body: %v", got)
-	}
-}
-
-// A tool-history budget cuts the oldest tool results before sending (these servers don't check
-// earlier turns); the newest result and the caller's history stay whole.
-func TestToolHistoryBudgetCutsOldResults(t *testing.T) {
-	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&got)
-		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`))
-	}))
-	defer srv.Close()
-	inst, err := connector.Build("openai", connector.Config{"provider": "ollama", "base_url": srv.URL + "/v1", "model": "qwen3"}, connector.Env{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	long := strings.Repeat("x", 40000)
-	call := func(id string) llm.Message {
-		return llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: id, Name: "read", Arguments: json.RawMessage(`{}`)}}}
-	}
-	msgs := []llm.Message{
-		{Role: llm.RoleUser, Content: "brief"},
-		call("c0"), {Role: llm.RoleTool, ToolCallID: "c0", Content: long},
-		call("c1"), {Role: llm.RoleTool, ToolCallID: "c1", Content: long},
-	}
-	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
-		t.Fatal(err)
-	}
-	sent := got["messages"].([]any)
-	if c := sent[2].(map[string]any)["content"].(string); !strings.Contains(c, "cut from the history") || len(c) >= len(long) {
-		t.Fatalf("old result not cut: %d characters", len(c))
-	}
-	if sent[4].(map[string]any)["content"] != long || msgs[2].Content != long {
-		t.Fatal("cut the newest result or the caller's history")
 	}
 }
 

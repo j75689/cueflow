@@ -149,7 +149,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		s := req.System
 		msgs = append(msgs, wireMessage{Role: "system", Content: &s})
 	}
-	for _, m := range llm.TrimToolHistory(req.Messages, req.ToolHistoryBudget) {
+	for _, m := range req.Messages {
 		// Assistant turns produced by this connector are replayed exactly as the server sent them,
 		// so provider extensions (thought signatures) survive the tool loop.
 		if prev, ok := m.ProviderState.(wireMessage); ok && m.Role == llm.RoleAssistant {

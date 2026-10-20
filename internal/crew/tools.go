@@ -48,7 +48,8 @@ const (
 	// few hundred lines.
 	maxToolResult = 32000
 	// toolHistoryBudget caps the tool results a run carries back to the model each turn; past it the
-	// connector sheds the oldest (see llm.Request.ToolHistoryBudget).
+	// oldest are shed, by the loop (llm.TrimToolHistory) or by a connector that is an
+	// llm.HistoryShedder.
 	toolHistoryBudget = 64000
 )
 
