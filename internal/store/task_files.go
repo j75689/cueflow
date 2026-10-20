@@ -114,6 +114,16 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 			return nil, Invalid(fmt.Sprintf("a file's %s must be valid UTF-8 of at most %d characters", field, maxShortField))
 		}
 	}
+	if !replace {
+		// A taken name is the common case for CreateTaskFile's callers: answer it before uploading.
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM task_files WHERE task_id=$1 AND name=$2)`, taskID, name).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, ErrTaskFileExists
+		}
+	}
 	id := uuid.New()
 	kind, row, err := s.putBytes(ctx, id, data)
 	if err != nil {

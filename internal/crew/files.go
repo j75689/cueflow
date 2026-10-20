@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -246,34 +245,31 @@ const (
 	savedResultArgs = 200
 )
 
-var unsafeFileChars = regexp.MustCompile(`[^a-z0-9_-]+`)
-
-// readsFiles are the tools whose results come from task files already: saving them would only copy
-// a file into another one (and read_file's page would never be readable inline).
-var readsFiles = map[string]bool{"read_file": true, "list_files": true}
-
-// saveLargeResult keeps a long tool result out of the conversation: it saves it as a file of the
+// saveLargeResult keeps a long result of a tool marked saveLarge out of the conversation: it saves it as a file of the
 // run's own task, named results/<tool>-<n>.txt with n counting that tool's saved results in the task,
 // and returns what the model gets instead (where the file is and its start). The file starts with a
 // line naming the tool and its arguments, which is what the brief's Files list shows. ok is false
 // when the result stays inline: short enough, not text, or the save failed (logged; the caller
 // clips it as before).
-func (c *Crew) saveLargeResult(ctx context.Context, task *store.Task, author, toolName string, args json.RawMessage, result string) (stub, name string, ok bool) {
+func (c *Crew) saveLargeResult(ctx context.Context, taskID uuid.UUID, author, toolName string, args json.RawMessage, result string) (stub, name string, ok bool) {
 	total := utf8.RuneCountInString(result)
-	if total <= saveResultOver || !utf8.ValidString(result) || readsFiles[toolName] {
+	if total <= saveResultOver || !utf8.ValidString(result) {
 		return "", "", false
 	}
 	header := fmt.Sprintf("# Result of %s %s\n\n", toolName, clip(compactJSON(args), savedResultArgs))
+	if len(header)+len(result) > store.MaxTaskFileBytes {
+		return "", "", false // too big to keep; clipped inline as before
+	}
 	data := []byte(header + result)
-	base := strings.Trim(unsafeFileChars.ReplaceAllString(strings.ToLower(toolName), "_"), "_")
+	base := strings.Trim(unsafeName.ReplaceAllString(strings.ToLower(toolName), "_"), "_")
 	if base == "" {
 		base = "tool"
 	}
 	prefix := "results/" + base + "-"
-	n, err := c.store.CountTaskFiles(ctx, task.ID, prefix)
+	n, err := c.store.CountTaskFiles(ctx, taskID, prefix)
 	for attempt := 0; err == nil && attempt < 20; attempt++ {
 		name = fmt.Sprintf("%s%d.txt", prefix, n+1+attempt)
-		_, err = c.store.CreateTaskFile(ctx, task.ID, name, "", data, author)
+		_, err = c.store.CreateTaskFile(ctx, taskID, name, "", data, author)
 		if errors.Is(err, store.ErrTaskFileExists) {
 			err = nil // taken (an earlier run, or one the agent wrote itself): try the next number
 			continue
@@ -286,7 +282,7 @@ func (c *Crew) saveLargeResult(ctx context.Context, task *store.Task, author, to
 			return stub, name, true
 		}
 	}
-	c.logger.Warn("save a large tool result as a task file; keeping it inline", "task", task.ID, "tool", toolName, "err", err)
+	c.logger.Warn("save a large tool result as a task file; keeping it inline", "task", taskID, "tool", toolName, "err", err)
 	return "", "", false
 }
 

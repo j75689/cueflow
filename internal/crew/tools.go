@@ -19,6 +19,10 @@ type tool struct {
 	schema      map[string]any
 	capability  string // "" = every agent
 	run         func(ctx context.Context, e *runEnv, args json.RawMessage) (string, error)
+	// saveLarge marks a tool that returns outside content (a web page, an MCP server's answer): a long
+	// result is saved as a task file (saveLargeResult). Tools that report CueFlow's own state stay
+	// inline, so the task's files hold what the agent gathered, not dumps of the board.
+	saveLarge bool
 }
 
 // outcome is set by a terminal tool and ends the run.
@@ -109,7 +113,7 @@ func init() {
 		{name: "web_search", capability: "research", description: "Search the web for recent information.",
 			schema: Obj(map[string]any{"query": Str("Search query"), "limit": Integer("Max results (default 5)")}, "query"), run: toolWebSearch},
 		{name: "read_url", capability: "research", description: "Read the text of a public web page.",
-			schema: Obj(map[string]any{"url": Str("Absolute http(s) URL")}, "url"), run: toolReadURL},
+			schema: Obj(map[string]any{"url": Str("Absolute http(s) URL")}, "url"), run: toolReadURL, saveLarge: true},
 		// --- delegation ---
 		{name: "list_agents", capability: "delegation", description: "List teammates you can delegate to.",
 			schema: Obj(map[string]any{}), run: toolListAgents},

@@ -71,8 +71,8 @@ func (c *Crew) agentTools(ctx context.Context, a *store.Agent) []tool {
 			if perm == connector.PermAsk {
 				desc += " Each call needs the human's approval: calling it pauses this task until they decide."
 			}
-			out = append(out, tool{name: name, description: desc, schema: et.InputSchema,
-				run: c.externalRun(conn.ID, conn.Name, et.Name, perm)})
+			out = append(out, tool{name: name, description: desc, schema: et.InputSchema, saveLarge: true,
+				run: c.externalRun(conn.ID, conn.Name, et.Name, name, perm)})
 		}
 	}
 	return out
@@ -112,10 +112,11 @@ func (c *Crew) callExternal(ctx context.Context, id uuid.UUID, name string, args
 	return p.CallTool(ctx, name, args)
 }
 
-func (c *Crew) externalRun(connID uuid.UUID, server, name, perm string) func(context.Context, *runEnv, json.RawMessage) (string, error) {
+// externalRun calls the MCP tool name on connID; calledAs is the name the agent knows it by.
+func (c *Crew) externalRun(connID uuid.UUID, server, name, calledAs, perm string) func(context.Context, *runEnv, json.RawMessage) (string, error) {
 	return func(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 		if perm == connector.PermAsk {
-			return c.requestApproval(ctx, e, connID, server, name, raw)
+			return c.requestApproval(ctx, e, connID, server, name, calledAs, raw)
 		}
 		text, isErr, err := c.callExternal(ctx, connID, name, raw)
 		if err != nil {
@@ -129,12 +130,12 @@ func (c *Crew) externalRun(connID uuid.UUID, server, name, perm string) func(con
 }
 
 // requestApproval records the call, shows it to the human and ends the run until they decide.
-func (c *Crew) requestApproval(ctx context.Context, e *runEnv, connID uuid.UUID, server, name string, raw json.RawMessage) (string, error) {
+func (c *Crew) requestApproval(ctx context.Context, e *runEnv, connID uuid.UUID, server, name, calledAs string, raw json.RawMessage) (string, error) {
 	if len(raw) == 0 || !json.Valid(raw) {
 		raw = json.RawMessage(`{}`)
 	}
 	ap, err := c.store.CreateToolApproval(ctx, &store.ToolApproval{TaskID: e.task.ID, AgentID: &e.agent.ID,
-		ConnectorID: &connID, ServerName: server, Tool: name, Arguments: raw})
+		ConnectorID: &connID, ServerName: server, Tool: name, CalledAs: calledAs, Arguments: raw})
 	if err != nil {
 		return "", err
 	}
@@ -232,6 +233,7 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 	}
 	// The agent reads the result in the system message below; the full one is kept on the approval.
 	shown := clipNoted(text, 4000)
+	file := ""
 	if !isErr {
 		author := "agent"
 		if ap.AgentID != nil {
@@ -239,14 +241,17 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 				author = a.Slug
 			}
 		}
-		if task, err := c.store.GetTask(ctx, ap.TaskID); err == nil {
-			if stub, _, ok := c.saveLargeResult(ctx, task, author, ap.ServerName+"__"+ap.Tool, ap.Arguments, text); ok {
-				shown = stub
-			}
+		// The name the agent called it by, so its saved results share one sequence with direct calls.
+		calledAs := ap.CalledAs
+		if calledAs == "" { // an approval made before called_as was recorded
+			calledAs = ap.ServerName + "__" + ap.Tool
+		}
+		if stub, name, ok := c.saveLargeResult(ctx, ap.TaskID, author, calledAs, ap.Arguments, text); ok {
+			shown, file = stub, name
 		}
 	}
 	text = clipToolResult(text)
-	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
+	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr, file)
 	outcome := "It ran and returned"
 	if isErr {
 		outcome = "It ran but failed with"
