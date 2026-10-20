@@ -80,6 +80,9 @@ Task files (an agent's working storage for one task) are kept by the same settin
 `task_files` table. They are never served on `/media/{id}`, a subtask can read its ancestors' files but writes
 only its own, and deleting a task deletes its and its subtasks' files, bytes included. `media migrate` does not
 move them; a file written before the setting changed stays readable as long as its backend is configured.
+The task page lists them in a Files card (with the files of the tasks above it, marked), opens one in a
+viewer that loads 64 KB at a time, and downloads or deletes the task's own; see `/tasks/{id}/files` in
+[api.md](api.md).
 
 When handing a post to a publisher, CueFlow turns `/media/{id}` into an absolute URL under
 `CUEFLOW_MEDIA_BASE_URL`, which must be reachable from the publisher (Compose sets it to `http://cueflow:3000`).

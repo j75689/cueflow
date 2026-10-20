@@ -20,7 +20,7 @@ import {
   Toggle,
   cx,
 } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, saveBlob } from "@/lib/api";
 import type { Agent, TeamTemplate } from "@/lib/types";
 
 export default function AgentsPage() {
@@ -47,12 +47,7 @@ export default function AgentsPage() {
     try {
       const team = await api.exportTeam();
       const blob = new Blob([JSON.stringify(team, null, 2) + "\n"], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(org?.slug ?? "cueflow").replace(/[^a-z0-9-]+/gi, "-")}-team.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      saveBlob(blob, `${(org?.slug ?? "cueflow").replace(/[^a-z0-9-]+/gi, "-")}-team.json`);
     } catch (e) {
       toast.error(e);
     }

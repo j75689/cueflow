@@ -33,6 +33,8 @@ import type {
   ToolPermission,
   ToolPermissionValue,
   Usage,
+  TaskFile,
+  TaskFilePage,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -99,7 +101,8 @@ function buildQuery(q?: Query): string {
   return s ? `?${s}` : "";
 }
 
-async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
+// fetchApi sends one API request with the token and the current org, and opens the token prompt on 401.
+async function fetchApi(method: string, path: string, body?: unknown, query?: Query): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -121,6 +124,11 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   if (res.status === 401) {
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   }
+  return res;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
+  const res = await fetchApi(method, path, body, query);
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
@@ -245,6 +253,12 @@ export const api = {
   runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
   cancelTask: (id: string) => request<Task>("POST", `/tasks/${id}/cancel`),
   taskRuns: (id: string) => request<AgentRun[]>("GET", `/tasks/${id}/runs`),
+  // A task's files: its own and its ancestors' (own: false), addressed by task and name.
+  taskFiles: (id: string) => request<{ files: TaskFile[]; total: number }>("GET", `/tasks/${id}/files`),
+  taskFilePage: (id: string, name: string, offset = 0) =>
+    request<TaskFilePage>("GET", `/tasks/${id}/files/content`, undefined, { name, offset }),
+  deleteTaskFile: (id: string, name: string) => request<void>("DELETE", `/tasks/${id}/files`, undefined, { name }),
+  downloadTaskFile: (id: string, name: string) => downloadTaskFile(id, name),
 
   // usage
   usage: (q: { days: number; tz?: string }) =>
@@ -266,4 +280,24 @@ export function errorMessage(e: unknown): string {
 // eventsURL is the live-update stream for the current org: its events and the global ones.
 export function eventsURL(): string {
   return `${BASE}/events${buildQuery({ token: getToken(), org: currentOrg })}`;
+}
+
+// downloadTaskFile saves a task file. The API needs the token header, which a plain link can't send,
+// so the file is fetched and handed to the browser as a download.
+async function downloadTaskFile(id: string, name: string): Promise<void> {
+  const res = await fetchApi("GET", `/tasks/${id}/files/download`, undefined, { name });
+  if (!res.ok) throw new ApiError(res.status, "http_error", `${res.status} ${res.statusText}`);
+  saveBlob(await res.blob(), name.slice(name.lastIndexOf("/") + 1));
+}
+
+/** saveBlob hands bytes to the browser as a download named filename. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

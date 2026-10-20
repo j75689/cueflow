@@ -63,6 +63,7 @@ func toolWriteFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
+	e.c.fileChanged(ctx, e.task.ID, f.Name)
 	msg := fmt.Sprintf("Saved %s (%d characters).", f.Name, utf8.RuneCountInString(a.Content))
 	if n, ok, _ := e.c.store.AncestorTaskFile(ctx, e.task.ID, f.Name); ok {
 		msg += fmt.Sprintf(" Task #%d has a file of the same name; read_file now returns yours, and theirs is unchanged.", n)
@@ -275,6 +276,7 @@ func (c *Crew) saveLargeResult(ctx context.Context, taskID uuid.UUID, author, to
 			continue
 		}
 		if err == nil {
+			c.fileChanged(ctx, taskID, name)
 			skip := utf8.RuneCountInString(header) + savedResultHead
 			stub = fmt.Sprintf("%s returned %d characters, saved as the file %s. The first %d are below; "+
 				"call read_file with name %q and offset %d for the rest.\n\n%s",
@@ -293,4 +295,9 @@ func compactJSON(raw json.RawMessage) string {
 		return strings.Join(strings.Fields(string(raw)), " ")
 	}
 	return b.String()
+}
+
+// fileChanged tells open pages of the task (in its org) that one of its files was written.
+func (c *Crew) fileChanged(ctx context.Context, taskID uuid.UUID, name string) {
+	c.broker.Publish(c.taskOrg(ctx, taskID), "task.file", map[string]any{"task_id": taskID, "name": name, "action": "written"})
 }
