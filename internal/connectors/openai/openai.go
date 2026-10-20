@@ -3,14 +3,17 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/oauth2"
 
@@ -81,6 +84,11 @@ type Client struct {
 	http                                                      *http.Client
 	// tokens, when set, supplies short-lived OAuth access tokens (Vertex AI).
 	tokens oauth2.TokenSource
+	logger *slog.Logger
+	// noStreamOptions and noStream are set once the server has refused stream_options, or streaming
+	// itself, so later calls don't ask again.
+	noStreamOptions, noStream atomic.Bool
+	warnedNoUsage             atomic.Bool
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
@@ -95,9 +103,10 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		apiKey:      cfg.String("api_key"),
 		temperature: cfg.String("temperature"),
 		maxTokens:   cfg.Int("max_tokens", 8000),
-		// No overall timeout: the answer only arrives once it is complete, which can take minutes
-		// for a long one. Chat bounds each call with llm.CallTimeout.
-		http: llm.HTTPClient(env.HTTPClient, 0),
+		// No overall timeout (it would cut a stream off), and a server that doesn't stream answers
+		// only once the whole answer is written. Chat bounds each call with llm.CallTimeout.
+		http:   llm.HTTPClient(env.HTTPClient, 0),
+		logger: env.Logger,
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
 	if provider == "openrouter" {
@@ -208,13 +217,89 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		}
 		body["tools"] = tools
 	}
+	// Streamed: a long answer arrives as it is written, so no proxy or gateway in between times out
+	// an idle connection while the model works. A server that doesn't stream answers in one body,
+	// which is read the old way.
+	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
+	defer cancel()
+	var hresp *http.Response
+	for {
+		delete(body, "stream")
+		delete(body, "stream_options")
+		if !c.noStream.Load() {
+			body["stream"] = true
+			if !c.noStreamOptions.Load() {
+				body["stream_options"] = map[string]any{"include_usage": true}
+			}
+		}
+		var err error
+		if hresp, err = c.post(callCtx, body); err != nil {
+			return nil, err
+		}
+		if hresp.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
+			hresp.Body.Close()
+			// Some servers refuse stream_options, or streaming: drop the first one they named, remember
+			// it for this connector, and ask again.
+			if hresp.StatusCode == http.StatusBadRequest && body["stream"] != nil && c.dropStreaming(body, data) {
+				continue
+			}
+			return nil, httpError(hresp.StatusCode, data)
+		}
+		break
+	}
+	defer hresp.Body.Close()
+	var out completion
+	var err error
+	if strings.HasPrefix(hresp.Header.Get("Content-Type"), "text/event-stream") {
+		out, err = readStream(hresp.Body)
+		if err == nil && !out.sawUsage && body["stream_options"] != nil && c.logger != nil && c.warnedNoUsage.CompareAndSwap(false, true) {
+			c.logger.Warn("llm: the server streamed no usage, so this connector's runs record no token counts or context size", "model", c.model)
+		}
+	} else {
+		data, rerr := io.ReadAll(io.LimitReader(hresp.Body, 16<<20))
+		if rerr != nil {
+			return nil, rerr
+		}
+		out, err = readBody(data)
+	}
+	if err != nil {
+		return nil, err
+	}
+	replay := out.message
+	replay.Role = "assistant"
+	msg := llm.Message{Role: llm.RoleAssistant, ProviderState: replay}
+	if out.message.Content != nil {
+		msg.Content = *out.message.Content
+	}
+	for _, tc := range out.message.ToolCalls {
+		args := json.RawMessage(tc.Function.Arguments)
+		if !json.Valid(args) {
+			args = json.RawMessage(`{}`)
+		}
+		msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: args})
+	}
+	stop := "end"
+	switch {
+	case len(msg.ToolCalls) > 0:
+		stop = "tool_use"
+	case out.finish == "length":
+		stop = "max_tokens"
+	case out.finish == "content_filter":
+		stop = "refusal"
+	}
+	return &llm.Response{Message: msg, StopReason: stop,
+		Usage: llm.Usage{InputTokens: out.usage.PromptTokens, OutputTokens: out.usage.CompletionTokens,
+			CacheReadTokens: out.usage.PromptTokensDetails.CachedTokens}}, nil
+}
+
+// post sends one chat completions request.
+func (c *Client) post(ctx context.Context, body map[string]any) (*http.Response, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
-	defer cancel()
-	hreq, err := http.NewRequestWithContext(callCtx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -240,63 +325,175 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		return nil, fmt.Errorf("llm: %w", err)
 	}
-	defer hresp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(hresp.Body, 16<<20))
-	if err != nil {
-		return nil, err
+	return hresp, nil
+}
+
+func httpError(status int, data []byte) error {
+	body := strings.TrimSpace(string(data))
+	if isContextOverflow(status, body) {
+		return fmt.Errorf("llm: %w: HTTP %d: %.400s", llm.ErrContextOverflow, status, body)
 	}
-	if hresp.StatusCode != http.StatusOK {
-		body := strings.TrimSpace(string(data))
-		if isContextOverflow(hresp.StatusCode, body) {
-			return nil, fmt.Errorf("llm: %w: HTTP %d: %.400s", llm.ErrContextOverflow, hresp.StatusCode, body)
-		}
-		return nil, fmt.Errorf("llm: HTTP %d: %.400s", hresp.StatusCode, body)
+	return fmt.Errorf("llm: HTTP %d: %.400s", status, body)
+}
+
+// wireUsage is the usage block of a completion, streamed (the last chunk) or not.
+type wireUsage struct {
+	PromptTokens        int64 `json:"prompt_tokens"`
+	CompletionTokens    int64 `json:"completion_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+// completion is the assistant message of one call, however it arrived.
+type completion struct {
+	message  wireMessage
+	finish   string
+	usage    wireUsage
+	sawUsage bool
+}
+
+// maxStream caps a streamed answer, like the 16 MB cap on a plain one.
+const maxStream = 16 << 20
+
+// dropStreaming takes out what a 400 says the server refused: stream_options first (older vLLM,
+// LiteLLM and Azure versions refuse it but stream fine), then streaming itself. It remembers that on
+// the client and reports whether there was something to drop.
+func (c *Client) dropStreaming(body map[string]any, refusal []byte) bool {
+	r := strings.ToLower(string(refusal))
+	if !strings.Contains(r, "stream") {
+		return false
 	}
+	if body["stream_options"] != nil {
+		c.noStreamOptions.Store(true)
+		return true
+	}
+	c.noStream.Store(true)
+	return true
+}
+
+func readBody(data []byte) (completion, error) {
 	var out struct {
 		Choices []struct {
 			Message      wireMessage `json:"message"`
 			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
-			PromptTokens        int64 `json:"prompt_tokens"`
-			CompletionTokens    int64 `json:"completion_tokens"`
-			PromptTokensDetails struct {
-				CachedTokens int64 `json:"cached_tokens"`
-			} `json:"prompt_tokens_details"`
-		} `json:"usage"`
+		Usage wireUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("llm: decode: %w", err)
+		return completion{}, fmt.Errorf("llm: decode: %w", err)
 	}
 	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("llm: empty response")
+		return completion{}, fmt.Errorf("llm: empty response")
 	}
-	ch := out.Choices[0]
-	replay := ch.Message
-	replay.Role = "assistant"
-	msg := llm.Message{Role: llm.RoleAssistant, ProviderState: replay}
-	if ch.Message.Content != nil {
-		msg.Content = *ch.Message.Content
-	}
-	for _, tc := range ch.Message.ToolCalls {
-		args := json.RawMessage(tc.Function.Arguments)
-		if !json.Valid(args) {
-			args = json.RawMessage(`{}`)
+	return completion{message: out.Choices[0].Message, finish: out.Choices[0].FinishReason, usage: out.Usage}, nil
+}
+
+// readStream puts a streamed completion back together: text pieces in order, and each tool call
+// from its pieces (keyed by index: the id and name come first, the arguments in parts, and provider
+// extensions such as Gemini's thought signature on any of them). Servers that leave the index out
+// (it then reads 0) start each new call with its id.
+func readStream(body io.Reader) (completion, error) {
+	var out completion
+	var text strings.Builder
+	sawText, sawChoice := false, false
+	var calls []*wireToolCall
+	byIndex := map[int]*wireToolCall{}
+	r := &io.LimitedReader{R: body, N: maxStream + 1}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
 		}
-		msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: args})
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content   *string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+						ExtraContent json.RawMessage `json:"extra_content,omitempty"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage *wireUsage      `json:"usage"`
+			Error json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if r.N <= 0 { // the cap cut this chunk short
+				break
+			}
+			return out, fmt.Errorf("llm: decode stream: %w", err)
+		}
+		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
+			// A 200 stream can still end in an error chunk (OpenRouter does); an overflow is still one.
+			if llm.IsOverflowText(data) {
+				return out, fmt.Errorf("llm: %w: %.400s", llm.ErrContextOverflow, data)
+			}
+			return out, fmt.Errorf("llm: stream error: %.400s", chunk.Error)
+		}
+		if chunk.Usage != nil {
+			out.usage, out.sawUsage = *chunk.Usage, true
+		}
+		for _, ch := range chunk.Choices {
+			sawChoice = true
+			if ch.Delta.Content != nil {
+				text.WriteString(*ch.Delta.Content)
+				sawText = true
+			}
+			for _, d := range ch.Delta.ToolCalls {
+				tc := byIndex[d.Index]
+				if tc == nil || d.ID != "" && tc.ID != "" && d.ID != tc.ID {
+					tc = &wireToolCall{Type: "function"}
+					byIndex[d.Index] = tc
+					calls = append(calls, tc)
+				}
+				if d.ID != "" {
+					tc.ID = d.ID
+				}
+				if d.Type != "" {
+					tc.Type = d.Type
+				}
+				tc.Function.Name += d.Function.Name
+				tc.Function.Arguments += d.Function.Arguments
+				if len(d.ExtraContent) > 0 && string(d.ExtraContent) != "null" {
+					tc.ExtraContent = d.ExtraContent
+				}
+			}
+			if ch.FinishReason != nil && *ch.FinishReason != "" {
+				out.finish = *ch.FinishReason
+			}
+		}
 	}
-	stop := "end"
-	switch {
-	case len(msg.ToolCalls) > 0:
-		stop = "tool_use"
-	case ch.FinishReason == "length":
-		stop = "max_tokens"
-	case ch.FinishReason == "content_filter":
-		stop = "refusal"
+	if err := sc.Err(); err != nil {
+		return out, fmt.Errorf("llm: read stream: %w", err)
 	}
-	return &llm.Response{Message: msg, StopReason: stop,
-		Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens,
-			CacheReadTokens: out.Usage.PromptTokensDetails.CachedTokens}}, nil
+	if r.N <= 0 {
+		return out, fmt.Errorf("llm: the answer stream is over %d MB", maxStream>>20)
+	}
+	if !sawChoice {
+		return out, fmt.Errorf("llm: empty response")
+	}
+	if sawText {
+		t := text.String()
+		out.message.Content = &t
+	}
+	for _, tc := range calls {
+		out.message.ToolCalls = append(out.message.ToolCalls, *tc)
+	}
+	return out, nil
 }
 
 // endpoint returns the Chat Completions URL. Azure's legacy API addresses a deployment by path
