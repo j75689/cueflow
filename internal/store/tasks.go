@@ -610,6 +610,16 @@ func (s *Store) taskMessages(ctx context.Context, cond string, arg any) ([]*Task
 }
 
 // HumanMessageSince reports whether a human commented on the task after t.
+// LastHumanMessageAt is when a human last wrote in the task's thread; ok is false if never.
+func (s *Store) LastHumanMessageAt(ctx context.Context, taskID uuid.UUID) (t time.Time, ok bool, err error) {
+	var at *time.Time
+	err = s.pool.QueryRow(ctx, `SELECT max(created_at) FROM task_messages WHERE task_id=$1 AND author_type='human'`, taskID).Scan(&at)
+	if err != nil || at == nil {
+		return time.Time{}, false, err
+	}
+	return *at, true, nil
+}
+
 func (s *Store) HumanMessageSince(ctx context.Context, taskID uuid.UUID, t time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_messages WHERE task_id=$1 AND author_type='human' AND created_at > $2)`,

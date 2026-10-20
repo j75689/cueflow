@@ -629,12 +629,13 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	case "handoff":
 		// The run ended to let a fresh one take over; the note (if any) is in the thread. A comment left
 		// meanwhile re-queues the task like any other.
-		c.system(ctx, task.ID, out.text)
-		if auto, msg := c.autoHandOff(ctx, task, a, run, out); auto {
+		auto, msg := c.autoHandOff(ctx, task, a, run, out)
+		c.system(ctx, task.ID, msg)
+		if auto {
 			next = store.TaskTodo
-			c.system(ctx, task.ID, msg)
-		} else if msg != "" {
-			c.system(ctx, task.ID, msg)
+			if run != nil {
+				run.Outcome = outcomeAutoHandOff
+			}
 		}
 	case "overflow":
 		// Like "limit": the run used up what it had, and a comment left meanwhile still re-queues it.
@@ -664,7 +665,9 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	}
 	if run != nil {
 		run.Status = runStatus
-		run.Outcome = out.kind
+		if run.Outcome == "" {
+			run.Outcome = out.kind
+		}
 		if err := c.store.FinishAgentRun(ctx, run); err != nil {
 			c.logger.Warn("finish run", "err", err)
 		}

@@ -174,6 +174,9 @@ func (a *Agent) normalize() error {
 	if a.MaxTurns <= 0 {
 		a.MaxTurns = 12
 	}
+	if a.RuntimeConnectorID != nil {
+		a.AutoHandOff = false // only the built-in runtime hands off
+	}
 	if a.MaxTurns > 40 {
 		a.MaxTurns = 40
 	}

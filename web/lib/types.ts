@@ -556,7 +556,7 @@ export interface AgentRun {
   context_tokens: number;
   /** The model's input limit; 0 when unknown (the size is shown without a percentage). */
   context_window: number;
-  /** How the run ended (complete, ask, handoff, limit, ...); "" while running. */
+  /** How the run ended (complete, ask, handoff, handoff_auto, limit, ...); "" while running. */
   outcome: string;
   /** LLM connector (built-in) or runtime connector (ACP) used by this run. */
   connector_id?: string | null;

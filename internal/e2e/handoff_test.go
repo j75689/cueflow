@@ -357,22 +357,85 @@ func TestAutoHandOff(t *testing.T) {
 	if len(runs) != 4 || got.Status != store.TaskWaitingHuman || fresh != 3 {
 		t.Fatalf("want 3 automatic hand-offs then a stop: %d runs, %s, %d fresh starts", len(runs), got.Status, fresh)
 	}
-	for _, r := range runs {
-		if r.Outcome != "handoff" {
-			t.Fatalf("run outcome: %q", r.Outcome)
+	// Newest first: the one that waited, then the three that went on.
+	for i, want := range []string{"handoff", "handoff_auto", "handoff_auto", "handoff_auto"} {
+		if runs[i].Outcome != want {
+			t.Fatalf("run %d outcome: %q, want %q", i, runs[i].Outcome, want)
 		}
 	}
 	if !strings.Contains(thread, "automatic hand-off 3 of 3") || !strings.Contains(thread, "This is the 4th hand-off in a row, so it waits for you") {
 		t.Fatalf("thread:\n%s", thread)
 	}
+	// One message per hand-off: an automatic one doesn't also say "reply to continue".
+	if n := strings.Count(thread, "reply to continue in a fresh run that starts from the note"); n != 1 {
+		t.Fatalf("%d hand-offs asked for a reply, want 1 (the one that waited)\n%s", n, thread)
+	}
 
-	// The human replies: the count starts again, so three more go on their own before the next stop.
-	e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "Keep going."}, nil)
+	// The human moves the card to To do instead of commenting: that is a human moving it on, so the
+	// count starts again and three more go on their own before the next stop.
+	if code := e.do("PATCH", "/tasks/"+task.ID.String(), map[string]any{"status": "TODO"}, nil); code != 200 {
+		t.Fatalf("move to TODO: %d", code)
+	}
 	runAll(e)
 	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
 	thread = taskMessages(t, e, task.ID.String())
 	if len(runs) != 8 || strings.Count(thread, "automatic hand-off 1 of 3") != 2 || strings.Count(thread, "4th hand-off in a row") != 2 {
-		t.Fatalf("after the reply: %d runs\n%s", len(runs), thread)
+		t.Fatalf("after moving the card: %d runs\n%s", len(runs), thread)
+	}
+}
+
+// A comment during an automatic hand-off run starts the count again: the next hand-off is 1 of 3.
+func TestAutoHandOffCountResetsOnAComment(t *testing.T) {
+	e, team := crewSetup(t)
+	e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"auto_handoff": true}, nil)
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	var taskID string
+	starts := 0
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		switch {
+		case asksForHandOff(req):
+			if starts == 2 {
+				e.do("POST", "/tasks/"+taskID+"/messages", map[string]any{"content": "Note: use the new API."}, nil)
+			}
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": "progress"})
+		case len(req.Messages) == 1:
+			starts++
+			if starts == 3 {
+				return calls("complete_task", map[string]any{"summary": "done"})
+			}
+			return calls("add_comment", map[string]any{"content": "working"})
+		}
+		return calls("add_comment", map[string]any{"content": "more"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Steered", "assignee_agent_id": team["writer"].ID}, &task)
+	taskID = task.ID.String()
+	runAll(e)
+	thread := taskMessages(t, e, taskID)
+	if strings.Count(thread, "automatic hand-off 1 of 3") != 2 || strings.Contains(thread, "2 of 3") {
+		t.Fatalf("the comment should reset the count:\n%s", thread)
+	}
+}
+
+// An agent on an external runtime can't have Auto hand-off: the setting is cleared when saved.
+func TestAutoHandOffClearedForExternalRuntimes(t *testing.T) {
+	e, team := crewSetup(t)
+	var rt store.Connector
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Fake agent", "type": "acp_agent", "config": map[string]any{
+		"preset": "custom", "command": "/bin/true", "timeout_minutes": 1}}, &rt); code != 201 {
+		t.Fatalf("create runtime connector: %d", code)
+	}
+	var a store.Agent
+	if code := e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"runtime_connector_id": rt.ID, "auto_handoff": true}, &a); code != 200 {
+		t.Fatalf("patch: %d", code)
+	}
+	if a.AutoHandOff {
+		t.Fatal("auto_handoff kept for an agent on an external runtime")
 	}
 }
 
