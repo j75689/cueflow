@@ -97,6 +97,7 @@ export interface TeamAgent {
   platforms?: string[];
   language?: string;
   max_turns?: number;
+  auto_handoff?: boolean;
 }
 
 /** A team template: a JSON file imported into an org (Agents → Import team) or exported from one. */
@@ -381,6 +382,8 @@ export interface Agent {
   language: string;
   platforms: string[];
   max_turns: number;
+  /** Continue a hand-off (with a note) in a fresh run without waiting for a human, up to 3 in a row. */
+  auto_handoff: boolean;
   is_active: boolean;
   stats?: { open_tasks: number; running: number } | null;
   created_at: string;
@@ -553,6 +556,8 @@ export interface AgentRun {
   context_tokens: number;
   /** The model's input limit; 0 when unknown (the size is shown without a percentage). */
   context_window: number;
+  /** How the run ended (complete, ask, handoff, handoff_auto, limit, ...); "" while running. */
+  outcome: string;
   /** LLM connector (built-in) or runtime connector (ACP) used by this run. */
   connector_id?: string | null;
   model?: string;

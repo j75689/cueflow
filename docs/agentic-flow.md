@@ -202,6 +202,14 @@ window. When the latest prompt reaches the hand-off point, 80% of a known window
    as usual. Nothing of the old conversation is replayed. The note is quoted only in the run right after the
    hand-off, not in every later brief.
 
+**Without waiting.** An agent with **Auto hand-off** on (`auto_handoff`, off by default; built-in runtime only) skips
+step 3 when the note was saved: the task goes straight back to `TODO` and the fresh run starts from the note, which is
+still posted to the thread and quoted in its brief. At most 3 hand-offs in a row continue this way; the next waits for
+the human, saying so. The count is read from the task's recorded runs: it covers the latest hand-offs that went on
+by themselves, so a hand-off that waited (whatever moved the task on afterwards was a human: a reply, dragging the
+card, Run now), a run that ended any other way, or a human message starts it again. A hand-off without a note, where
+the agent ignored the request, always waits. Agents on an external runtime can't have the setting.
+
 A run hands off only once it has grown by a tenth of the window since its first prompt. If it reaches the point
 sooner (a large brief or note, a small window), a fresh run would start almost as full and hand off again, so the
 run says so once and carries on instead. Without a known window there is no
@@ -277,6 +285,7 @@ target each time.
 | Turns per run | The role's `max_turns` (default 12, Chief 16, max 40) | `store/agents.go` |
 | How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); past it the run writes a hand-off note and waits for the human (§6.3), getting up to 2 turns past its turn limit for the note. The task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/handoff.go` |
 | The hand-off note in the next brief | 12,000 characters (`handoff.md` has the rest) | `crew/handoff.go` |
+| Automatic hand-offs in a row (Auto hand-off on) | 3; the next waits for the human. A hand-off that waited, a run that ends otherwise, or a human message resets the count | `crew/handoff.go` |
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |

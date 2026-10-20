@@ -306,3 +306,161 @@ func TestHandOffNeedsANoteWrittenAfterTheRequest(t *testing.T) {
 		t.Fatalf("an earlier note was taken as the answer:\n%s", thread)
 	}
 }
+
+// runAll runs queued tasks until none is left (automatic hand-offs queue the next run).
+func runAll(e *env) {
+	for range 12 {
+		e.crew.RunPending(context.Background(), 10)
+	}
+}
+
+// With Auto hand-off on, a hand-off with a note goes straight to a fresh run that starts from it, up
+// to three in a row; the fourth waits for the human. A human comment starts the count again.
+func TestAutoHandOff(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	writer := team["writer"]
+	if code := e.do("PATCH", "/agents/"+writer.ID.String(), map[string]any{"auto_handoff": true}, nil); code != 200 {
+		t.Fatalf("auto_handoff: %d", code)
+	}
+	var a store.Agent
+	if e.do("GET", "/agents/"+writer.ID.String(), nil, &a); !a.AutoHandOff {
+		t.Fatal("auto_handoff not saved")
+	}
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	fresh := 0 // runs that started from a note
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		switch {
+		case asksForHandOff(req):
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": "progress so far"})
+		case len(req.Messages) == 1:
+			if strings.Contains(brief(req), "## Hand-off from the previous run") {
+				fresh++
+			}
+			return calls("add_comment", map[string]any{"content": "working"})
+		}
+		return calls("add_comment", map[string]any{"content": "more"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Long job", "assignee_agent_id": writer.ID}, &task)
+	runAll(e)
+
+	var runs []store.AgentRun
+	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
+	got, _ := e.store.GetTask(ctx, task.ID)
+	thread := taskMessages(t, e, task.ID.String())
+	if len(runs) != 4 || got.Status != store.TaskWaitingHuman || fresh != 3 {
+		t.Fatalf("want 3 automatic hand-offs then a stop: %d runs, %s, %d fresh starts", len(runs), got.Status, fresh)
+	}
+	// Newest first: the one that waited, then the three that went on.
+	for i, want := range []string{"handoff", "handoff_auto", "handoff_auto", "handoff_auto"} {
+		if runs[i].Outcome != want {
+			t.Fatalf("run %d outcome: %q, want %q", i, runs[i].Outcome, want)
+		}
+	}
+	if !strings.Contains(thread, "automatic hand-off 3 of 3") || !strings.Contains(thread, "This is the 4th hand-off in a row, so it waits for you") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+	// One message per hand-off: an automatic one doesn't also say "reply to continue".
+	if n := strings.Count(thread, "reply to continue in a fresh run that starts from the note"); n != 1 {
+		t.Fatalf("%d hand-offs asked for a reply, want 1 (the one that waited)\n%s", n, thread)
+	}
+
+	// The human moves the card to To do instead of commenting: that is a human moving it on, so the
+	// count starts again and three more go on their own before the next stop.
+	if code := e.do("PATCH", "/tasks/"+task.ID.String(), map[string]any{"status": "TODO"}, nil); code != 200 {
+		t.Fatalf("move to TODO: %d", code)
+	}
+	runAll(e)
+	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
+	thread = taskMessages(t, e, task.ID.String())
+	if len(runs) != 8 || strings.Count(thread, "automatic hand-off 1 of 3") != 2 || strings.Count(thread, "4th hand-off in a row") != 2 {
+		t.Fatalf("after moving the card: %d runs\n%s", len(runs), thread)
+	}
+}
+
+// A comment during an automatic hand-off run starts the count again: the next hand-off is 1 of 3.
+func TestAutoHandOffCountResetsOnAComment(t *testing.T) {
+	e, team := crewSetup(t)
+	e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"auto_handoff": true}, nil)
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	var taskID string
+	starts := 0
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		switch {
+		case asksForHandOff(req):
+			if starts == 2 {
+				e.do("POST", "/tasks/"+taskID+"/messages", map[string]any{"content": "Note: use the new API."}, nil)
+			}
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": "progress"})
+		case len(req.Messages) == 1:
+			starts++
+			if starts == 3 {
+				return calls("complete_task", map[string]any{"summary": "done"})
+			}
+			return calls("add_comment", map[string]any{"content": "working"})
+		}
+		return calls("add_comment", map[string]any{"content": "more"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Steered", "assignee_agent_id": team["writer"].ID}, &task)
+	taskID = task.ID.String()
+	runAll(e)
+	thread := taskMessages(t, e, taskID)
+	if strings.Count(thread, "automatic hand-off 1 of 3") != 2 || strings.Contains(thread, "2 of 3") {
+		t.Fatalf("the comment should reset the count:\n%s", thread)
+	}
+}
+
+// An agent on an external runtime can't have Auto hand-off: the setting is cleared when saved.
+func TestAutoHandOffClearedForExternalRuntimes(t *testing.T) {
+	e, team := crewSetup(t)
+	var rt store.Connector
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Fake agent", "type": "acp_agent", "config": map[string]any{
+		"preset": "custom", "command": "/bin/true", "timeout_minutes": 1}}, &rt); code != 201 {
+		t.Fatalf("create runtime connector: %d", code)
+	}
+	var a store.Agent
+	if code := e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"runtime_connector_id": rt.ID, "auto_handoff": true}, &a); code != 200 {
+		t.Fatalf("patch: %d", code)
+	}
+	if a.AutoHandOff {
+		t.Fatal("auto_handoff kept for an agent on an external runtime")
+	}
+}
+
+// A hand-off without a note (the agent ignored the request) waits for the human even with Auto
+// hand-off on.
+func TestAutoHandOffNeedsANote(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"auto_handoff": true}, nil)
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		return calls("add_comment", map[string]any{"content": "ignoring"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "No note", "assignee_agent_id": team["writer"].ID}, &task)
+	runAll(e)
+	var runs []store.AgentRun
+	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
+	got, _ := e.store.GetTask(ctx, task.ID)
+	if len(runs) != 1 || got.Status != store.TaskWaitingHuman || strings.Contains(taskMessages(t, e, task.ID.String()), "automatic hand-off") {
+		t.Fatalf("a hand-off without a note must wait: %d runs, %s", len(runs), got.Status)
+	}
+}

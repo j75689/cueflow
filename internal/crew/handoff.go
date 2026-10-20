@@ -69,7 +69,7 @@ func (c *Crew) handOffOutcome(ctx context.Context, task *store.Task, a *store.Ag
 		if _, size, ok := c.handOffNote(ctx, task); ok {
 			c.say(ctx, task.ID, a, "message", fmt.Sprintf("Hand-off note saved as %s (%s).", handOffFile, humanBytes(size)),
 				map[string]any{"handoff": true, "file": handOffFile})
-			return &outcome{kind: "handoff", text: fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off. "+
+			return &outcome{kind: "handoff", noted: true, text: fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off. "+
 				"Review its note (%s; reply with corrections if anything is off), then reply to continue in a fresh run that starts from the note.",
 				pct, handOffFile)}
 		}
@@ -171,4 +171,62 @@ func (c *Crew) afterTurn(ctx context.Context, h *handOff, env *runEnv, run *stor
 		return &llm.Message{Role: llm.RoleUser, Content: handOffRequest(run)}, nil
 	}
 	return nil, nil
+}
+
+// maxAutoHandOffs caps the hand-offs in a row that continue without a human; the next waits for one.
+const maxAutoHandOffs = 3
+
+// autoHandOff reports whether a hand-off continues in a fresh run on its own, and the one message for
+// the thread either way. Only a hand-off with a saved note by an agent with AutoHandOff (which the
+// store clears for external runtimes), and only up to maxAutoHandOffs in a row. The streak is read
+// from the task's recorded runs: it counts the latest runs that continued on their own
+// ("handoff_auto"). A hand-off that waited ("handoff") ends it, since whatever moved the task on
+// after that was a human; so does any other outcome, or a human message since a run started.
+func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) (bool, string) {
+	if a == nil || !a.AutoHandOff || !out.noted || run == nil {
+		return false, out.text
+	}
+	runs, err := c.store.ListAgentRuns(ctx, task.ID)
+	if err != nil {
+		c.logger.Warn("count automatic hand-offs; waiting for the human", "task", task.ID, "err", err)
+		return false, out.text
+	}
+	lastHuman, spoke, err := c.store.LastHumanMessageAt(ctx, task.ID)
+	if err != nil {
+		c.logger.Warn("count automatic hand-offs; waiting for the human", "task", task.ID, "err", err)
+		return false, out.text
+	}
+	streak := 1              // this run
+	for _, r := range runs { // newest first
+		if r.ID == run.ID || r.FinishedAt == nil {
+			continue
+		}
+		if r.Outcome != outcomeAutoHandOff || spoke && lastHuman.After(r.StartedAt) {
+			break
+		}
+		streak++
+	}
+	if streak > maxAutoHandOffs {
+		return false, out.text + fmt.Sprintf(" This is the %d%s hand-off in a row, so it waits for you this time.", streak, ordinal(streak))
+	}
+	return true, fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off and continues in a fresh run "+
+		"that starts from %s (automatic hand-off %d of %d in a row; the agent's Auto hand-off setting). Comment any time to steer it.",
+		contextPct(run), handOffFile, streak, maxAutoHandOffs)
+}
+
+// outcomeAutoHandOff is the outcome recorded for a hand-off that continued without waiting.
+const outcomeAutoHandOff = "handoff_auto"
+
+func ordinal(n int) string {
+	switch {
+	case n%100 >= 11 && n%100 <= 13:
+		return "th"
+	case n%10 == 1:
+		return "st"
+	case n%10 == 2:
+		return "nd"
+	case n%10 == 3:
+		return "rd"
+	}
+	return "th"
 }
