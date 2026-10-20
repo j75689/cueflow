@@ -6,7 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type Role string
@@ -107,3 +112,57 @@ func IsOverflowText(body string) bool {
 	}
 	return false
 }
+
+// CallTimeout bounds one model call. A long answer (a whole document at high effort) takes minutes,
+// so connectors don't use the shared HTTP client's short overall timeout for model calls; this is
+// the backstop instead.
+const CallTimeout = 10 * time.Minute
+
+// ResponseHeaderTimeout is how long a streaming model call may wait for the server to start
+// answering (it has to read the whole prompt first). With an SDK's 3 retries, 4 waits stay within
+// CallTimeout.
+const ResponseHeaderTimeout = 2 * time.Minute
+
+// HTTPClient returns a client for model calls built from the shared one: no overall timeout (that
+// would cut a long answer off mid-stream; callers bound the call with CallTimeout), and, when its
+// transport is a plain *http.Transport, a limit on waiting for the response headers. It is built once
+// per shared client and timeout, so every connector instance (one per run) shares one connection pool.
+func HTTPClient(shared *http.Client, headerTimeout time.Duration) *http.Client {
+	key := httpClientKey{shared, headerTimeout}
+	httpClients.Lock()
+	defer httpClients.Unlock()
+	if c, ok := httpClients.m[key]; ok {
+		return c
+	}
+	c := &http.Client{}
+	if shared != nil {
+		*c = *shared
+	}
+	c.Timeout = 0
+	base := c.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if headerTimeout > 0 {
+		if t, ok := base.(*http.Transport); ok {
+			t = t.Clone()
+			t.ResponseHeaderTimeout = headerTimeout
+			c.Transport = t
+		} else {
+			slog.Warn("llm: the HTTP transport isn't an *http.Transport, so model calls have no response header timeout (only the call timeout)",
+				"transport", fmt.Sprintf("%T", base))
+		}
+	}
+	httpClients.m[key] = c
+	return c
+}
+
+type httpClientKey struct {
+	shared  *http.Client
+	timeout time.Duration
+}
+
+var httpClients = struct {
+	sync.Mutex
+	m map[httpClientKey]*http.Client
+}{m: map[httpClientKey]*http.Client{}}

@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,7 +156,7 @@ func newClient(cfg connector.Config, env connector.Env, model string) *Client {
 }
 
 func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance, error) {
-	opts := []option.RequestOption{option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3)}
+	opts := []option.RequestOption{option.WithHTTPClient(llm.HTTPClient(env.HTTPClient, llm.ResponseHeaderTimeout)), option.WithMaxRetries(3)}
 	c := newClient(cfg, env, modelOf(cfg, defaultModel))
 	switch {
 	case cfg.String("api_key") != "":
@@ -196,7 +198,7 @@ func newBedrock(cfg connector.Config, env connector.Env) (connector.Instance, er
 	c := newClient(cfg, env, model)
 	// The fallback middleware must be registered before the platform transform.
 	mw, state := clientFallback(cfg, model, "anthropic."+clientFallbackModel)
-	opts := append(mw, option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3))
+	opts := append(mw, option.WithHTTPClient(llm.HTTPClient(env.HTTPClient, llm.ResponseHeaderTimeout)), option.WithMaxRetries(3))
 	mc, err := bedrock.NewMantleClient(context.Background(), bedrock.MantleClientConfig{
 		APIKey:             cfg.String("api_key"),
 		AWSAccessKey:       cfg.String("aws_access_key_id"),
@@ -237,7 +239,9 @@ func newVertex(cfg connector.Config, env connector.Env) (connector.Instance, err
 	model := modelOf(cfg, defaultModel)
 	c := newClient(cfg, env, model)
 	mw, state := clientFallback(cfg, model, clientFallbackModel)
-	opts := append(mw, option.WithMaxRetries(3), vertex.WithCredentials(ctx, region, cfg.String("project_id"), creds))
+	// The model-call client goes before WithCredentials, which wraps it with Google auth.
+	opts := append(mw, option.WithHTTPClient(llm.HTTPClient(env.HTTPClient, llm.ResponseHeaderTimeout)), option.WithMaxRetries(3),
+		vertex.WithCredentials(ctx, region, cfg.String("project_id"), creds))
 	client := sdk.NewClient(opts...)
 	c.messages = &client.Beta.Messages
 	c.callOpts = state
@@ -385,9 +389,20 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
 	}
 
-	resp, err := c.messages.New(ctx, params, c.callOpts...)
+	// Streamed: a long answer arrives as it is written instead of in one response that can take
+	// longer than any sensible timeout for waiting on headers.
+	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
+	defer cancel()
+	resp, err := c.stream(callCtx, params)
 	if err != nil {
+		if callCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			return nil, fmt.Errorf("anthropic: no complete answer within %s: %w", llm.CallTimeout, err)
+		}
 		var apiErr *sdk.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusOK {
+			// An error event inside the stream: there is no HTTP failure to report.
+			return nil, fmt.Errorf("anthropic: the answer stream failed: %s: %s", apiErr.Type(), apiErr.RawJSON())
+		}
 		if errors.As(err, &apiErr) {
 			if caching && rejectsCacheControl(apiErr) {
 				// A model or gateway without prompt caching: carry on without it rather than fail every run.
@@ -435,6 +450,70 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
 			OutputTokens: resp.Usage.OutputTokens, CacheReadTokens: resp.Usage.CacheReadInputTokens,
 			CacheWriteTokens: resp.Usage.CacheCreationInputTokens}}, nil
+}
+
+// errStreamCut is a stream that ended before message_stop: the connection dropped mid-answer.
+var errStreamCut = errors.New("the response stream ended before the message was complete")
+
+// streamRetries is how often a stream that failed after it started is tried again (the SDK retries
+// only a failed response, by status: a stream answers 200 and reports an overload as an event).
+const streamRetries = 3
+
+// stream sends one request as a stream and puts the message back together, retrying a stream that
+// broke off or reported a retryable error event. ctx bounds every attempt together.
+func (c *Client) stream(ctx context.Context, params sdk.BetaMessageNewParams) (*sdk.BetaMessage, error) {
+	for attempt := 0; ; attempt++ {
+		msg, err := c.streamOnce(ctx, params)
+		if err == nil || attempt == streamRetries || !retryableStreamError(err) || ctx.Err() != nil {
+			return msg, err
+		}
+		wait := time.Duration(1<<attempt) * time.Second
+		c.logger.Warn("anthropic: the answer stream failed; trying again", "model", c.model, "attempt", attempt+1, "wait", wait, "err", err)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
+}
+
+func (c *Client) streamOnce(ctx context.Context, params sdk.BetaMessageNewParams) (*sdk.BetaMessage, error) {
+	s := c.messages.NewStreaming(ctx, params, c.callOpts...)
+	defer s.Close()
+	var msg sdk.BetaMessage
+	done := false
+	for s.Next() {
+		ev := s.Current()
+		if err := msg.Accumulate(ev); err != nil {
+			return nil, err
+		}
+		if ev.Type == "message_stop" {
+			done = true
+		}
+	}
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	if !done {
+		// Half an answer must not pass for a whole one: its text would become the task's result, and
+		// a cut-off tool call would run with empty arguments.
+		return nil, errStreamCut
+	}
+	return &msg, nil
+}
+
+// retryableStreamError reports a stream that broke off, or an overload or server error the API sent
+// as an event in a stream it had answered with 200.
+func retryableStreamError(err error) bool {
+	if errors.Is(err, errStreamCut) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var apiErr *sdk.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusOK {
+		return false
+	}
+	t := string(apiErr.Type())
+	return t == "overloaded_error" || t == "api_error"
 }
 
 // cacheUserTurns sets cache breakpoints on the last block of the two newest user turns. The newest

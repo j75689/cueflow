@@ -321,6 +321,10 @@ type Env struct {
 	State      StateStore
 }
 
+// defaultHTTPClient is the client of instances built without one. It is shared, so that the clients
+// derived from it (llm.HTTPClient) are too.
+var defaultHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 type Factory func(cfg Config, env Env) (Instance, error)
 
 type registration struct {
@@ -387,7 +391,7 @@ func Build(typ string, cfg Config, env Env) (Instance, error) {
 		env.Logger = slog.Default()
 	}
 	if env.HTTPClient == nil {
-		env.HTTPClient = &http.Client{Timeout: 60 * time.Second}
+		env.HTTPClient = defaultHTTPClient
 	}
 	env.Logger = env.Logger.With("connector", env.Name, "type", typ)
 	inst, err := r.factory(cfg, env)

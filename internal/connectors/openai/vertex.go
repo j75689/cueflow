@@ -10,6 +10,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/llm"
 )
 
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
@@ -90,7 +91,7 @@ func newVertexGemini(cfg connector.Config, env connector.Env) (connector.Instanc
 		temperature: cfg.String("temperature"),
 		maxTokens:   cfg.Int("max_tokens", 8000),
 		headers:     map[string]string{},
-		http:        env.HTTPClient,
+		http:        llm.HTTPClient(env.HTTPClient, 0),
 		tokens:      oauth2.ReuseTokenSource(nil, creds.TokenSource),
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
