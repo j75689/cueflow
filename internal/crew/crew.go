@@ -535,12 +535,19 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	}
 	res, err := t.run(ctx, env, call.Arguments)
 	isErr := err != nil
+	data := map[string]any{"tool": call.Name, "is_error": isErr}
 	if isErr {
 		res = "error: " + err.Error()
+	} else if t.saveLarge {
+		// Before the result reaches the model: what it sees is the stub, from the first time on.
+		if stub, name, ok := c.saveLargeResult(ctx, env.task.ID, env.agent.Slug, call.Name, call.Arguments, res); ok {
+			res = stub
+			data["file"] = name
+		}
 	}
 	res = clipToolResult(res)
 	if !quietTools[call.Name] {
-		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), map[string]any{"tool": call.Name, "is_error": isErr})
+		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
 	}
 	return res, isErr
 }

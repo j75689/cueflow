@@ -63,6 +63,9 @@ type ToolSpec struct {
 	Schema      map[string]any
 	Capability  string
 	Run         ToolFunc
+	// SaveLargeResults marks a tool that returns outside content: a long result is saved as a task
+	// file and the model gets its start. Leave it off for tools that report CueFlow's own state.
+	SaveLargeResults bool
 }
 
 // BriefFunc adds a section to the opening message of every run of a task (what a module has
@@ -94,7 +97,7 @@ func RegisterTool(t ToolSpec) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	registry.tools = append(registry.tools, tool{name: t.Name, description: t.Description, schema: t.Schema,
-		capability: t.Capability, run: func(ctx context.Context, e *runEnv, args json.RawMessage) (string, error) {
+		capability: t.Capability, saveLarge: t.SaveLargeResults, run: func(ctx context.Context, e *runEnv, args json.RawMessage) (string, error) {
 			return t.Run(ctx, e.run(), args)
 		}})
 }

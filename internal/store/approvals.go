@@ -13,28 +13,32 @@ import (
 
 // ToolApproval is an agent's call to an "ask" tool, waiting for or decided by a human.
 type ToolApproval struct {
-	ID          uuid.UUID       `json:"id"`
-	TaskID      uuid.UUID       `json:"task_id"`
-	AgentID     *uuid.UUID      `json:"agent_id"`
-	ConnectorID *uuid.UUID      `json:"connector_id"`
-	ServerName  string          `json:"server_name"`
-	Tool        string          `json:"tool"`
-	Arguments   json.RawMessage `json:"arguments"`
-	Status      string          `json:"status"` // pending | approved | rejected
-	Result      string          `json:"result"`
-	IsError     bool            `json:"is_error"`
-	Note        string          `json:"note"`
-	CreatedAt   time.Time       `json:"created_at"`
-	DecidedAt   *time.Time      `json:"decided_at"`
+	ID          uuid.UUID  `json:"id"`
+	TaskID      uuid.UUID  `json:"task_id"`
+	AgentID     *uuid.UUID `json:"agent_id"`
+	ConnectorID *uuid.UUID `json:"connector_id"`
+	ServerName  string     `json:"server_name"`
+	Tool        string     `json:"tool"`
+	// CalledAs is the name the agent called the tool by (sanitized and deduplicated by the crew).
+	CalledAs string `json:"called_as"`
+	// ResultFile is the task file a long result was saved to, or "".
+	ResultFile string          `json:"result_file"`
+	Arguments  json.RawMessage `json:"arguments"`
+	Status     string          `json:"status"` // pending | approved | rejected
+	Result     string          `json:"result"`
+	IsError    bool            `json:"is_error"`
+	Note       string          `json:"note"`
+	CreatedAt  time.Time       `json:"created_at"`
+	DecidedAt  *time.Time      `json:"decided_at"`
 }
 
 const approvalColumns = `id, task_id, agent_id, connector_id, server_name, tool, arguments, status, result, is_error,
-	note, created_at, decided_at`
+	note, created_at, decided_at, called_as, result_file`
 
 func scanApproval(row pgx.Row) (*ToolApproval, error) {
 	var a ToolApproval
 	if err := row.Scan(&a.ID, &a.TaskID, &a.AgentID, &a.ConnectorID, &a.ServerName, &a.Tool, &a.Arguments, &a.Status,
-		&a.Result, &a.IsError, &a.Note, &a.CreatedAt, &a.DecidedAt); err != nil {
+		&a.Result, &a.IsError, &a.Note, &a.CreatedAt, &a.DecidedAt, &a.CalledAs, &a.ResultFile); err != nil {
 		return nil, NotFound(err)
 	}
 	return &a, nil
@@ -44,9 +48,9 @@ func (s *Store) CreateToolApproval(ctx context.Context, a *ToolApproval) (*ToolA
 	if len(a.Arguments) == 0 {
 		a.Arguments = json.RawMessage(`{}`)
 	}
-	return scanApproval(s.pool.QueryRow(ctx, `INSERT INTO tool_approvals (task_id, agent_id, connector_id, server_name, tool, arguments)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+approvalColumns,
-		a.TaskID, a.AgentID, a.ConnectorID, a.ServerName, a.Tool, a.Arguments))
+	return scanApproval(s.pool.QueryRow(ctx, `INSERT INTO tool_approvals (task_id, agent_id, connector_id, server_name, tool, arguments, called_as)
+		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING `+approvalColumns,
+		a.TaskID, a.AgentID, a.ConnectorID, a.ServerName, a.Tool, a.Arguments, a.CalledAs))
 }
 
 func (s *Store) GetToolApproval(ctx context.Context, id uuid.UUID) (*ToolApproval, error) {
@@ -81,8 +85,10 @@ func (s *Store) ClaimToolApproval(ctx context.Context, id uuid.UUID, status, not
 }
 
 // SetToolApprovalResult records what an approved call returned.
-func (s *Store) SetToolApprovalResult(ctx context.Context, id uuid.UUID, result string, isError bool) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE tool_approvals SET result=$2, is_error=$3 WHERE id=$1`, id, result, isError)
+// SetToolApprovalResult records what an approved call returned; file is the task file a long result
+// was saved to, or "".
+func (s *Store) SetToolApprovalResult(ctx context.Context, id uuid.UUID, result string, isError bool, file string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE tool_approvals SET result=$2, is_error=$3, result_file=$4 WHERE id=$1`, id, result, isError, file)
 	if err != nil {
 		return err
 	}

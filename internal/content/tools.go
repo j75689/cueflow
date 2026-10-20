@@ -45,7 +45,7 @@ func registerTools() {
 
 var contentTools = []crew.ToolSpec{
 	{Name: "search_materials", Capability: "sources", Description: "Search items already collected from RSS feeds and mailboxes.",
-		Schema: crew.Obj(map[string]any{"query": crew.Str("Keyword (blank = latest)"), "days": crew.Integer("Look back this many days (default 7)"), "limit": crew.Integer("Max items (default 10)")}), Run: toolSearchMaterials},
+		Schema: crew.Obj(map[string]any{"query": crew.Str("Keyword (blank = latest)"), "days": crew.Integer("Look back this many days (default 7)"), "limit": crew.Integer("Max items (default 10)")}), Run: toolSearchMaterials, SaveLargeResults: true},
 	{Name: "fetch_sources", Capability: "sources", Description: "Pull the latest items from your source connectors (RSS, IMAP) right now.",
 		Schema: crew.Obj(map[string]any{}), Run: toolFetchSources},
 }

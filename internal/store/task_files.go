@@ -77,6 +77,26 @@ const maxShortField = 64
 // leaves the old file untouched. The old bytes are deleted after the commit. A file's id therefore
 // changes when it is replaced; refer to files by task and name.
 func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*TaskFile, error) {
+	return s.writeTaskFile(ctx, taskID, name, mimeType, data, createdBy, true)
+}
+
+// ErrTaskFileExists is returned by CreateTaskFile when the task already has a file of that name.
+var ErrTaskFileExists = errors.New("the task already has a file of that name")
+
+// CreateTaskFile is WriteTaskFile that never replaces: if the task has a file of that name it
+// returns ErrTaskFileExists and writes nothing.
+func (s *Store) CreateTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*TaskFile, error) {
+	return s.writeTaskFile(ctx, taskID, name, mimeType, data, createdBy, false)
+}
+
+// CountTaskFiles counts the task's own files whose names start with prefix.
+func (s *Store) CountTaskFiles(ctx context.Context, taskID uuid.UUID, prefix string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM task_files WHERE task_id=$1 AND starts_with(name, $2)`, taskID, prefix).Scan(&n)
+	return n, err
+}
+
+func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string, replace bool) (*TaskFile, error) {
 	if err := ValidTaskFileName(name); err != nil {
 		return nil, err
 	}
@@ -92,6 +112,16 @@ func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 	for field, v := range map[string]string{"MIME type": mimeType, "author": createdBy} {
 		if !utf8.ValidString(v) || utf8.RuneCountInString(v) > maxShortField {
 			return nil, Invalid(fmt.Sprintf("a file's %s must be valid UTF-8 of at most %d characters", field, maxShortField))
+		}
+	}
+	if !replace {
+		// A taken name is the common case for CreateTaskFile's callers: answer it before uploading.
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM task_files WHERE task_id=$1 AND name=$2)`, taskID, name).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, ErrTaskFileExists
 		}
 	}
 	id := uuid.New()
@@ -110,14 +140,25 @@ func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 		case !errors.Is(err, pgx.ErrNoRows):
 			return err
 		}
-		var stored string
-		return tx.QueryRow(ctx, `INSERT INTO task_files (id, task_id, name, mime_type, size_bytes, data, storage, created_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-			ON CONFLICT (task_id, name) DO UPDATE SET id=EXCLUDED.id, mime_type=EXCLUDED.mime_type,
+		if old != nil && !replace {
+			return ErrTaskFileExists
+		}
+		onConflict := `DO UPDATE SET id=EXCLUDED.id, mime_type=EXCLUDED.mime_type,
 				size_bytes=EXCLUDED.size_bytes, data=EXCLUDED.data, storage=EXCLUDED.storage,
-				created_by=EXCLUDED.created_by, updated_at=NOW()
+				created_by=EXCLUDED.created_by, updated_at=NOW()`
+		if !replace {
+			onConflict = `DO NOTHING` // a create racing this one won
+		}
+		var stored string
+		err = tx.QueryRow(ctx, `INSERT INTO task_files (id, task_id, name, mime_type, size_bytes, data, storage, created_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (task_id, name) `+onConflict+`
 			RETURNING `+taskFileColumns+`, storage`,
 			id, taskID, name, mimeType, len(data), row, kind, createdBy).Scan(f.scanDest(&stored)...)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTaskFileExists
+		}
+		return err
 	})
 	if err != nil {
 		_ = s.dropBytes(ctx, kind, id)

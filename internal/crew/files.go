@@ -1,6 +1,7 @@
 package crew
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -231,4 +232,65 @@ func humanBytes(n int64) string {
 	default:
 		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
 	}
+}
+
+const (
+	// saveResultOver is the length above which a tool result is saved as a task file and the model
+	// gets its start plus where to read the rest. Below it reading the result inline is cheaper than
+	// a read_file round trip.
+	saveResultOver = 8000
+	// savedResultHead is how much of a saved result the model sees inline.
+	savedResultHead = 2000
+	// savedResultArgs caps the arguments quoted in a saved result's first line.
+	savedResultArgs = 200
+)
+
+// saveLargeResult keeps a long result of a tool marked saveLarge out of the conversation: it saves it as a file of the
+// run's own task, named results/<tool>-<n>.txt with n counting that tool's saved results in the task,
+// and returns what the model gets instead (where the file is and its start). The file starts with a
+// line naming the tool and its arguments, which is what the brief's Files list shows. ok is false
+// when the result stays inline: short enough, not text, or the save failed (logged; the caller
+// clips it as before).
+func (c *Crew) saveLargeResult(ctx context.Context, taskID uuid.UUID, author, toolName string, args json.RawMessage, result string) (stub, name string, ok bool) {
+	total := utf8.RuneCountInString(result)
+	if total <= saveResultOver || !utf8.ValidString(result) {
+		return "", "", false
+	}
+	header := fmt.Sprintf("# Result of %s %s\n\n", toolName, clip(compactJSON(args), savedResultArgs))
+	if len(header)+len(result) > store.MaxTaskFileBytes {
+		return "", "", false // too big to keep; clipped inline as before
+	}
+	data := []byte(header + result)
+	base := strings.Trim(unsafeName.ReplaceAllString(strings.ToLower(toolName), "_"), "_")
+	if base == "" {
+		base = "tool"
+	}
+	prefix := "results/" + base + "-"
+	n, err := c.store.CountTaskFiles(ctx, taskID, prefix)
+	for attempt := 0; err == nil && attempt < 20; attempt++ {
+		name = fmt.Sprintf("%s%d.txt", prefix, n+1+attempt)
+		_, err = c.store.CreateTaskFile(ctx, taskID, name, "", data, author)
+		if errors.Is(err, store.ErrTaskFileExists) {
+			err = nil // taken (an earlier run, or one the agent wrote itself): try the next number
+			continue
+		}
+		if err == nil {
+			skip := utf8.RuneCountInString(header) + savedResultHead
+			stub = fmt.Sprintf("%s returned %d characters, saved as the file %s. The first %d are below; "+
+				"call read_file with name %q and offset %d for the rest.\n\n%s",
+				toolName, total, name, savedResultHead, name, skip, string(runeSlice([]byte(result), 0, savedResultHead)))
+			return stub, name, true
+		}
+	}
+	c.logger.Warn("save a large tool result as a task file; keeping it inline", "task", taskID, "tool", toolName, "err", err)
+	return "", "", false
+}
+
+// compactJSON renders tool arguments on one line.
+func compactJSON(raw json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, raw) != nil {
+		return strings.Join(strings.Fields(string(raw)), " ")
+	}
+	return b.String()
 }
