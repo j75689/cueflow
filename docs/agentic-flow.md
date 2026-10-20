@@ -251,7 +251,7 @@ target each time.
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
 | A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
-| Tool results a run carries back to the model each turn | 64,000 characters; past it the oldest results are cut to 2,000 with a note (the newest turn's stay whole), and the agent can call the tool again | `crew/tools.go` |
+| A run's history | Append-only: nothing already sent to the model is cut or rewritten (Claude's thinking blocks are bound to it), and Claude connectors cache it. A run that outgrows the model's context window stops with a message saying so; a reply starts a fresh run from the task and its thread | `crew/crew.go`, `connectors/anthropic` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |

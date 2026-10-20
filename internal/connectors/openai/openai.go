@@ -230,7 +230,11 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		return nil, err
 	}
 	if hresp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("llm: HTTP %d: %.400s", hresp.StatusCode, strings.TrimSpace(string(data)))
+		body := strings.TrimSpace(string(data))
+		if isContextOverflow(hresp.StatusCode, body) {
+			return nil, fmt.Errorf("llm: %w: HTTP %d: %.400s", llm.ErrContextOverflow, hresp.StatusCode, body)
+		}
+		return nil, fmt.Errorf("llm: HTTP %d: %.400s", hresp.StatusCode, body)
 	}
 	var out struct {
 		Choices []struct {
@@ -292,4 +296,23 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// isContextOverflow recognizes the ways OpenAI-compatible servers refuse a prompt longer than the
+// model's window: OpenAI and Azure (context_length_exceeded), vLLM and llama.cpp ("maximum context
+// length", "context length"), Gemini ("exceeds the maximum number of tokens").
+func isContextOverflow(status int, body string) bool {
+	if status == http.StatusRequestEntityTooLarge {
+		return true
+	}
+	if status != http.StatusBadRequest {
+		return false
+	}
+	b := strings.ToLower(body)
+	for _, s := range []string{"context_length_exceeded", "maximum context length", "context length", "exceeds the maximum number of tokens"} {
+		if strings.Contains(b, s) {
+			return true
+		}
+	}
+	return false
 }

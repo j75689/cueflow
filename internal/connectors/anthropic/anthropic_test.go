@@ -3,6 +3,7 @@ package anthropic_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	sdk "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/anthropic"
@@ -88,6 +91,76 @@ func TestAPIKey(t *testing.T) {
 	// Opus 5.5 gets the server-side refusal fallback on the Claude API by default.
 	if !strings.Contains(betas(c), "server-side-fallback-2026-07-01") || c.body["fallbacks"] != "default" {
 		t.Fatalf("fallback not requested: betas=%q fallbacks=%v", betas(c), c.body["fallbacks"])
+	}
+}
+
+// The append-only history is cached: a breakpoint on the system prompt (after the tools) and one on
+// the newest user turn. Replayed assistant turns get none, and the turn stored in ProviderState is
+// left untouched.
+func TestPromptCaching(t *testing.T) {
+	isolateEnv(t)
+	srv, last := fakeMessages(t)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant, Content: []sdk.BetaContentBlockParamUnion{
+		sdk.NewBetaThinkingBlock("sig", "plan"), sdk.NewBetaToolUseBlock("t1", map[string]any{}, "read"),
+	}}
+	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{
+		System: "sys",
+		Tools:  []llm.Tool{{Name: "read", Description: "d", Schema: map[string]any{"type": "object"}}},
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "brief"},
+			{Role: llm.RoleAssistant, ProviderState: stored},
+			{Role: llm.RoleTool, ToolCallID: "t1", Content: "a"},
+			{Role: llm.RoleTool, ToolCallID: "t2", Content: "b"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := last().body
+	hasCache := func(v any) bool { _, ok := v.(map[string]any)["cache_control"]; return ok }
+	if sys := body["system"].([]any); !hasCache(sys[0]) {
+		t.Fatalf("system prompt not cached: %v", sys)
+	}
+	if tools := body["tools"].([]any); hasCache(tools[0]) {
+		t.Fatal("the system breakpoint already covers the tools")
+	}
+	sent := body["messages"].([]any)
+	newest := sent[2].(map[string]any)["content"].([]any)
+	if !hasCache(newest[1]) || hasCache(newest[0]) {
+		t.Fatalf("want one breakpoint on the newest turn's last block: %v", newest)
+	}
+	for i, m := range sent[:2] {
+		for _, b := range m.(map[string]any)["content"].([]any) {
+			if hasCache(b) {
+				t.Fatalf("message %d carries a breakpoint", i)
+			}
+		}
+	}
+	if stored.Content[1].GetCacheControl().Type != "" {
+		t.Fatal("the stored assistant turn was changed")
+	}
+}
+
+// "prompt is too long" comes back as llm.ErrContextOverflow.
+func TestContextOverflowRecognized(t *testing.T) {
+	isolateEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1048213 tokens > 1000000 maximum"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+	if !errors.Is(err, llm.ErrContextOverflow) {
+		t.Fatalf("not recognized: %v", err)
 	}
 }
 

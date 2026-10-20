@@ -3,6 +3,7 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,6 +74,32 @@ func TestHTTPErrorSurfaced(t *testing.T) {
 	res, _ := inst.Test(context.Background())
 	if res.OK {
 		t.Fatal("expected test failure")
+	}
+}
+
+// A prompt longer than the model's window comes back as llm.ErrContextOverflow, so the crew can say so
+// plainly; other errors don't.
+func TestContextOverflowRecognized(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{400, `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}`, true},
+		{400, `{"error":"the input length exceeds the context length"}`, true},
+		{413, `request too large`, true},
+		{400, `{"error":"invalid tool schema"}`, false},
+		{401, `{"error":"bad key"}`, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, c.body, c.status)
+		}))
+		inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m", "api_key": "k"}, connector.Env{})
+		_, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+		srv.Close()
+		if got := errors.Is(err, llm.ErrContextOverflow); got != c.want {
+			t.Errorf("%d %s: overflow=%v, want %v (%v)", c.status, c.body, got, c.want, err)
+		}
 	}
 }
 

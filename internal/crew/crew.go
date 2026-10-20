@@ -408,11 +408,15 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
 	for run.Turns < a.MaxTurns {
-		trimToolHistory(msgs)
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
 		if err != nil {
 			if ctx.Err() != nil {
 				return &outcome{kind: "canceled"}
+			}
+			if errors.Is(err, llm.ErrContextOverflow) {
+				// The next run starts from the brief and the thread, not this run's history.
+				return &outcome{kind: "error", text: fmt.Sprintf("after %d turns the conversation no longer fits the model's context window. "+
+					"Reply to continue in a fresh run (it starts from the task and its thread), or split the work into subtasks. (%v)", run.Turns, err)}
 			}
 			return &outcome{kind: "error", text: err.Error()}
 		}

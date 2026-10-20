@@ -243,8 +243,11 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		MaxTokens: int64(maxTokens),
 		Messages:  toParams(req.Messages),
 	}
+	// Prompt caching. The history is append-only, so every request repeats the previous one and adds
+	// to the end: one breakpoint after the fixed prefix (tools, then system) and one on the newest
+	// user turn make each turn read everything before it from the cache.
 	if req.System != "" {
-		params.System = []sdk.BetaTextBlockParam{{Text: req.System}}
+		params.System = []sdk.BetaTextBlockParam{{Text: req.System, CacheControl: sdk.NewBetaCacheControlEphemeralParam()}}
 	}
 	if c.effort != "" {
 		params.OutputConfig = sdk.BetaOutputConfigParam{Effort: sdk.BetaOutputConfigEffort(c.effort)}
@@ -252,6 +255,10 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	for _, t := range req.Tools {
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
 	}
+	if req.System == "" && len(params.Tools) > 0 {
+		params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+	}
+	cacheNewestUserTurn(params.Messages)
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
 	if c.serverFallback {
 		params.Betas = append(params.Betas, sdk.AnthropicBetaServerSideFallback2026_07_01)
@@ -262,6 +269,9 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
+			if apiErr.StatusCode == 413 || apiErr.StatusCode == 400 && strings.Contains(apiErr.Error(), "prompt is too long") {
+				return nil, fmt.Errorf("anthropic: %w: HTTP %d: %s", llm.ErrContextOverflow, apiErr.StatusCode, apiErr.Error())
+			}
 			return nil, fmt.Errorf("anthropic: HTTP %d: %s", apiErr.StatusCode, apiErr.Error())
 		}
 		return nil, fmt.Errorf("anthropic: %w", err)
@@ -294,6 +304,21 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}, nil
+}
+
+// cacheNewestUserTurn sets a cache breakpoint on the last block of the newest user turn. User turns
+// are built afresh by toParams on every call; assistant turns replay blocks held in ProviderState,
+// which a breakpoint would write into.
+func cacheNewestUserTurn(msgs []sdk.BetaMessageParam) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != sdk.BetaMessageParamRoleUser || len(msgs[i].Content) == 0 {
+			continue
+		}
+		if cc := msgs[i].Content[len(msgs[i].Content)-1].GetCacheControl(); cc != nil {
+			*cc = sdk.NewBetaCacheControlEphemeralParam()
+		}
+		return
+	}
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

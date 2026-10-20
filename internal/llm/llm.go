@@ -5,6 +5,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 type Role string
@@ -63,3 +64,7 @@ type Chatter interface {
 	Chat(ctx context.Context, req Request) (*Response, error)
 	Model() string
 }
+
+// ErrContextOverflow is wrapped by a connector's Chat error when the request was refused for being
+// longer than the model's context window.
+var ErrContextOverflow = errors.New("the conversation is longer than the model's context window")
