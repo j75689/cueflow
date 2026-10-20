@@ -253,6 +253,10 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
 	}
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
+	if req.ToolHistoryBudget > 0 {
+		params.ContextManagement = clearOldToolResults(req.ToolHistoryBudget)
+		params.Betas = append(params.Betas, sdk.AnthropicBetaContextManagement2025_06_27)
+	}
 	if c.serverFallback {
 		params.Betas = append(params.Betas, sdk.AnthropicBetaServerSideFallback2026_07_01)
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
@@ -294,6 +298,22 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}, nil
+}
+
+// clearOldToolResults has the API shed old tool results once the prompt outgrows budget (characters
+// of tool results), instead of the client cutting them: a cut would change the turns a thinking block
+// is bound to and the API would reject the request. The history sent stays exactly as the model saw
+// it. The trigger counts the whole prompt, so it is the budget at about 3 characters a token plus
+// room for the system prompt and tools; clearing at least a few thousand tokens at a time keeps the
+// prompt cache from breaking every turn.
+func clearOldToolResults(budget int) sdk.BetaContextManagementConfigParam {
+	return sdk.BetaContextManagementConfigParam{Edits: []sdk.BetaContextManagementConfigEditUnionParam{{
+		OfClearToolUses20250919: &sdk.BetaClearToolUses20250919EditParam{
+			Trigger:      sdk.BetaClearToolUses20250919EditTriggerUnionParam{OfInputTokens: &sdk.BetaInputTokensTriggerParam{Value: int64(budget/3 + 16000)}},
+			Keep:         sdk.BetaToolUsesKeepParam{Value: 3},
+			ClearAtLeast: sdk.BetaInputTokensClearAtLeastParam{Value: 5000},
+		},
+	}}}
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

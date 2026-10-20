@@ -408,8 +408,8 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: c.buildBrief(ctx, task)}}
 	agentCtx := guard.WithAgent(ctx)
 	for run.Turns < a.MaxTurns {
-		trimToolHistory(msgs)
-		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
+		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools,
+			ToolHistoryBudget: toolHistoryBudget})
 		if err != nil {
 			if ctx.Err() != nil {
 				return &outcome{kind: "canceled"}

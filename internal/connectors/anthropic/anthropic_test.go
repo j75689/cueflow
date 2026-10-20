@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	sdk "github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/anthropic"
 	"github.com/j75689/cueflow/internal/llm"
@@ -88,6 +90,55 @@ func TestAPIKey(t *testing.T) {
 	// Opus 5.5 gets the server-side refusal fallback on the Claude API by default.
 	if !strings.Contains(betas(c), "server-side-fallback-2026-07-01") || c.body["fallbacks"] != "default" {
 		t.Fatalf("fallback not requested: betas=%q fallbacks=%v", betas(c), c.body["fallbacks"])
+	}
+}
+
+// A tool-history budget is handed to the API as context management. The client sends the earlier
+// turns exactly as the model saw them: cutting a tool result would invalidate the thinking block
+// after it.
+func TestToolHistoryBudgetClearsServerSide(t *testing.T) {
+	isolateEnv(t)
+	srv, last := fakeMessages(t)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 40000)
+	thought := sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant, Content: []sdk.BetaContentBlockParamUnion{
+		sdk.NewBetaThinkingBlock("sig-1", "read the file"),
+		sdk.NewBetaToolUseBlock("t1", map[string]any{}, "read"),
+	}}
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: "brief"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "t0", Name: "read", Arguments: json.RawMessage(`{}`)}}},
+		{Role: llm.RoleTool, ToolCallID: "t0", Content: long},
+		{Role: llm.RoleAssistant, ProviderState: thought},
+		{Role: llm.RoleTool, ToolCallID: "t1", Content: long},
+	}
+	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
+		t.Fatal(err)
+	}
+	c := last()
+	if !strings.Contains(betas(c), "context-management-2025-06-27") {
+		t.Fatalf("context management beta missing: %q", betas(c))
+	}
+	edits, _ := c.body["context_management"].(map[string]any)["edits"].([]any)
+	if len(edits) != 1 || edits[0].(map[string]any)["type"] != "clear_tool_uses_20250919" {
+		t.Fatalf("context_management: %v", c.body["context_management"])
+	}
+	sent := c.body["messages"].([]any)
+	first := sent[2].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if text := first["content"].([]any)[0].(map[string]any)["text"]; first["type"] != "tool_result" || text != long {
+		t.Fatal("an earlier tool result was changed before sending")
+	}
+	if b := sent[3].(map[string]any)["content"].([]any)[0].(map[string]any); b["type"] != "thinking" || b["signature"] != "sig-1" {
+		t.Fatalf("thinking block not replayed: %v", b)
+	}
+
+	// Without a budget, nothing is cleared.
+	chat(t, "anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL})
+	if c := last(); c.body["context_management"] != nil || strings.Contains(betas(c), "context-management") {
+		t.Fatal("context management sent without a budget")
 	}
 }
 

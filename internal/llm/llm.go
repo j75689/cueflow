@@ -45,6 +45,11 @@ type Request struct {
 	Messages  []Message
 	Tools     []Tool
 	MaxTokens int
+	// ToolHistoryBudget, when set, asks the connector to keep the tool results it sends back within
+	// about this many characters by shedding the oldest. How is the connector's call: most use
+	// TrimToolHistory; Anthropic has the API clear them, since its thinking blocks are bound to the
+	// turns before them and must not see those turns change.
+	ToolHistoryBudget int
 }
 
 type Usage struct {
