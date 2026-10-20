@@ -95,7 +95,9 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		apiKey:      cfg.String("api_key"),
 		temperature: cfg.String("temperature"),
 		maxTokens:   cfg.Int("max_tokens", 8000),
-		http:        env.HTTPClient,
+		// No overall timeout: the answer only arrives once it is complete, which can take minutes
+		// for a long one. Chat bounds each call with llm.CallTimeout.
+		http: llm.HTTPClient(env.HTTPClient, 0),
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
 	if provider == "openrouter" {
@@ -210,7 +212,9 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		return nil, err
 	}
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
+	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
+	defer cancel()
+	hreq, err := http.NewRequestWithContext(callCtx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}

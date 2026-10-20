@@ -154,7 +154,7 @@ func newClient(cfg connector.Config, env connector.Env, model string) *Client {
 }
 
 func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance, error) {
-	opts := []option.RequestOption{option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3)}
+	opts := []option.RequestOption{option.WithHTTPClient(llm.HTTPClient(env.HTTPClient, llm.ResponseHeaderTimeout)), option.WithMaxRetries(3)}
 	c := newClient(cfg, env, modelOf(cfg, defaultModel))
 	switch {
 	case cfg.String("api_key") != "":
@@ -196,7 +196,7 @@ func newBedrock(cfg connector.Config, env connector.Env) (connector.Instance, er
 	c := newClient(cfg, env, model)
 	// The fallback middleware must be registered before the platform transform.
 	mw, state := clientFallback(cfg, model, "anthropic."+clientFallbackModel)
-	opts := append(mw, option.WithHTTPClient(env.HTTPClient), option.WithMaxRetries(3))
+	opts := append(mw, option.WithHTTPClient(llm.HTTPClient(env.HTTPClient, llm.ResponseHeaderTimeout)), option.WithMaxRetries(3))
 	mc, err := bedrock.NewMantleClient(context.Background(), bedrock.MantleClientConfig{
 		APIKey:             cfg.String("api_key"),
 		AWSAccessKey:       cfg.String("aws_access_key_id"),
@@ -385,7 +385,9 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
 	}
 
-	resp, err := c.messages.New(ctx, params, c.callOpts...)
+	// Streamed: a long answer arrives as it is written instead of in one response that can take
+	// longer than any sensible timeout for waiting on headers.
+	resp, err := c.stream(ctx, params)
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
@@ -435,6 +437,27 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
 			OutputTokens: resp.Usage.OutputTokens, CacheReadTokens: resp.Usage.CacheReadInputTokens,
 			CacheWriteTokens: resp.Usage.CacheCreationInputTokens}}, nil
+}
+
+// stream sends one request as a stream and puts the message back together.
+func (c *Client) stream(ctx context.Context, params sdk.BetaMessageNewParams) (*sdk.BetaMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
+	defer cancel()
+	s := c.messages.NewStreaming(ctx, params, c.callOpts...)
+	defer s.Close()
+	var msg sdk.BetaMessage
+	for s.Next() {
+		if err := msg.Accumulate(s.Current()); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	if msg.ID == "" {
+		return nil, errors.New("the response stream ended before the message started")
+	}
+	return &msg, nil
 }
 
 // cacheUserTurns sets cache breakpoints on the last block of the two newest user turns. The newest

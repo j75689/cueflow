@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,9 +40,9 @@ func fakeMessages(t *testing.T) (*httptest.Server, func() captured) {
 		_ = json.Unmarshal(raw, &last.body)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+		writeMessage(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
 			"content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn","stop_sequence":null,
-			"usage":{"input_tokens":3,"output_tokens":1}}`))
+			"usage":{"input_tokens":3,"output_tokens":1}}`)
 	}))
 	t.Cleanup(srv.Close)
 	return srv, func() captured { mu.Lock(); defer mu.Unlock(); return last }
@@ -168,9 +169,9 @@ func TestUsageCountsCachedInput(t *testing.T) {
 	isolateEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+		writeMessage(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
 			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
-			"usage":{"input_tokens":2,"cache_read_input_tokens":90000,"cache_creation_input_tokens":4000,"output_tokens":7}}`))
+			"usage":{"input_tokens":2,"cache_read_input_tokens":90000,"cache_creation_input_tokens":4000,"output_tokens":7}}`)
 	}))
 	t.Cleanup(srv.Close)
 	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
@@ -223,9 +224,9 @@ func TestPromptCachingRejectedFallsBack(t *testing.T) {
 			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"system.0.cache_control: Extra inputs are not permitted"}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+		writeMessage(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
 			"content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn","stop_sequence":null,
-			"usage":{"input_tokens":3,"output_tokens":1}}`))
+			"usage":{"input_tokens":3,"output_tokens":1}}`)
 	}))
 	t.Cleanup(srv.Close)
 	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
@@ -537,5 +538,76 @@ func TestUserMessageAfterToolResultsJoinsTheirTurn(t *testing.T) {
 	blocks := sent[2].(map[string]any)["content"].([]any)
 	if len(blocks) != 2 || blocks[0].(map[string]any)["type"] != "tool_result" || blocks[1].(map[string]any)["text"] != "write the hand-off note" {
 		t.Fatalf("last turn: %v", blocks)
+	}
+}
+
+// writeMessage answers a streaming Messages request with msg (a whole message, as the non-streaming
+// API returns it) as the server would stream it: message_start, a start and stop per content block,
+// message_delta and message_stop.
+func writeMessage(w http.ResponseWriter, msg string) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(msg), &m); err != nil {
+		panic(err)
+	}
+	var blocks []json.RawMessage
+	_ = json.Unmarshal(m["content"], &blocks)
+	m["content"] = json.RawMessage(`[]`)
+	start, _ := json.Marshal(m)
+	w.Header().Set("Content-Type", "text/event-stream")
+	event := func(name, data string) { fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data) }
+	event("message_start", `{"type":"message_start","message":`+string(start)+`}`)
+	for i, b := range blocks {
+		event("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":%s}`, i, b))
+		event("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, i))
+	}
+	event("message_delta", fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":%s,"stop_sequence":null},"usage":%s}`, m["stop_reason"], m["usage"]))
+	event("message_stop", `{"type":"message_stop"}`)
+}
+
+// A long answer streams in pieces (text and tool input deltas) and is put back together, and the
+// shared HTTP client's overall timeout doesn't cut it off: what made a run writing a long document
+// fail with "Client.Timeout exceeded while awaiting headers".
+func TestStreamedAnswerOutlivesTheSharedClientTimeout(t *testing.T) {
+	isolateEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(raw), `"stream":true`) {
+			t.Errorf("request isn't streamed: %s", raw)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flush := w.(http.Flusher).Flush
+		event := func(name, data string) {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
+			flush()
+			time.Sleep(150 * time.Millisecond) // 6 events: 900 ms in all, past the 300 ms timeout
+		}
+		event("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"cache_read_input_tokens":3,"output_tokens":1}}}`)
+		event("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+		event("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Writing the "}}`)
+		event("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"plan."}}`)
+		fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprint(w, `event: content_block_start`+"\n"+`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"write_file","input":{}}}`+"\n\n")
+		event("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"name\":\"plan.md\","}}`)
+		fmt.Fprint(w, `event: content_block_delta`+"\n"+`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"content\":\"x\"}"}}`+"\n\n")
+		fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
+		event("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":40}}`)
+		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL, "refusal_fallback": false},
+		connector.Env{HTTPClient: &http.Client{Timeout: 300 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "go"}}})
+	if err != nil {
+		t.Fatalf("a long stream was cut off: %v", err)
+	}
+	if resp.Message.Content != "Writing the plan." || resp.StopReason != "tool_use" || len(resp.Message.ToolCalls) != 1 ||
+		string(resp.Message.ToolCalls[0].Arguments) != `{"name":"plan.md","content":"x"}` {
+		t.Fatalf("reassembled: %+v", resp)
+	}
+	if resp.Usage.InputTokens != 15 || resp.Usage.OutputTokens != 40 || resp.Usage.CacheReadTokens != 3 {
+		t.Fatalf("usage: %+v", resp.Usage)
 	}
 }

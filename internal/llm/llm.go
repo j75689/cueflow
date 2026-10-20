@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
+	"time"
 )
 
 type Role string
@@ -106,4 +108,34 @@ func IsOverflowText(body string) bool {
 		}
 	}
 	return false
+}
+
+// CallTimeout bounds one model call. A long answer (a whole document at high effort) takes minutes,
+// so connectors don't use the shared HTTP client's short overall timeout for model calls; this is
+// the backstop instead.
+const CallTimeout = 10 * time.Minute
+
+// ResponseHeaderTimeout is how long a streaming model call may wait for the server to start
+// answering (it has to read the whole prompt first).
+const ResponseHeaderTimeout = 3 * time.Minute
+
+// HTTPClient returns a client for model calls built from the shared one: no overall timeout (that
+// would cut a long answer off mid-stream; callers bound the call with CallTimeout), and, when its
+// transport is a plain *http.Transport, a limit on waiting for the response headers.
+func HTTPClient(shared *http.Client, headerTimeout time.Duration) *http.Client {
+	c := &http.Client{}
+	if shared != nil {
+		*c = *shared
+	}
+	c.Timeout = 0
+	base := c.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if t, ok := base.(*http.Transport); ok && headerTimeout > 0 {
+		t = t.Clone()
+		t.ResponseHeaderTimeout = headerTimeout
+		c.Transport = t
+	}
+	return c
 }
