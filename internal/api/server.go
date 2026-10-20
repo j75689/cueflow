@@ -112,6 +112,10 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/tasks/{id}/run", s.runTask)
 		r.Post("/tasks/{id}/cancel", s.cancelTask)
 		r.Get("/tasks/{id}/runs", s.taskRuns)
+		r.Get("/tasks/{id}/files", s.listTaskFiles)
+		r.Get("/tasks/{id}/files/content", s.taskFileContent)
+		r.Get("/tasks/{id}/files/download", s.downloadTaskFile)
+		r.Delete("/tasks/{id}/files", s.deleteTaskFile)
 		r.Get("/tasks/{id}/approvals", s.taskApprovals)
 		r.Post("/tasks/{id}/approvals/{approvalId}", s.decideApproval)
 

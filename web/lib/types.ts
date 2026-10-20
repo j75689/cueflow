@@ -506,6 +506,10 @@ export interface ToolApproval {
   task_id: string;
   server_name: string;
   tool: string;
+  /** The name the agent called the tool by. */
+  called_as: string;
+  /** The task file a long result was saved to, or "". */
+  result_file: string;
   arguments: unknown;
   status: "pending" | "approved" | "rejected";
   result: string;
@@ -730,4 +734,34 @@ export interface NewAgentToken {
   token: string;
   mcp_url: string;
   created_at: string;
+}
+
+/** A file of a task: the agent's working storage (GET /tasks/{id}/files). */
+export interface TaskFile {
+  id: string;
+  task_id: string;
+  task_number: number;
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  /** False for a file of a task above this one: readable here, changed only there. */
+  own: boolean;
+  /** Start of the first line; for a saved tool result, the tool and its arguments. */
+  description: string;
+}
+
+/** One page of a file's text (GET /tasks/{id}/files/content). */
+export interface TaskFilePage {
+  name: string;
+  task_id: string;
+  size_bytes: number;
+  mime_type: string;
+  offset: number;
+  /** Byte offset of the next page, or null at the end. */
+  next_offset: number | null;
+  text: string;
+  binary: boolean;
 }

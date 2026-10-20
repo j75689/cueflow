@@ -120,6 +120,7 @@ const SSE_EVENTS = [
   "task.updated",
   "task.deleted",
   "task.message",
+  "task.file",
   "agent.updated",
   "schedule.updated",
   "org.updated",

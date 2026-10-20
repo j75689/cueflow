@@ -33,6 +33,8 @@ import type {
   ToolPermission,
   ToolPermissionValue,
   Usage,
+  TaskFile,
+  TaskFilePage,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -245,6 +247,12 @@ export const api = {
   runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
   cancelTask: (id: string) => request<Task>("POST", `/tasks/${id}/cancel`),
   taskRuns: (id: string) => request<AgentRun[]>("GET", `/tasks/${id}/runs`),
+  // A task's files: its own and its ancestors' (own: false), addressed by task and name.
+  taskFiles: (id: string) => request<{ files: TaskFile[]; total: number }>("GET", `/tasks/${id}/files`),
+  taskFilePage: (id: string, name: string, offset = 0) =>
+    request<TaskFilePage>("GET", `/tasks/${id}/files/content`, undefined, { name, offset }),
+  deleteTaskFile: (id: string, name: string) => request<void>("DELETE", `/tasks/${id}/files`, undefined, { name }),
+  downloadTaskFile: (id: string, name: string) => downloadTaskFile(id, name),
 
   // usage
   usage: (q: { days: number; tz?: string }) =>
@@ -266,4 +274,24 @@ export function errorMessage(e: unknown): string {
 // eventsURL is the live-update stream for the current org: its events and the global ones.
 export function eventsURL(): string {
   return `${BASE}/events${buildQuery({ token: getToken(), org: currentOrg })}`;
+}
+
+// downloadTaskFile saves a task file. The API needs the token header, which a plain link can't send,
+// so the file is fetched and handed to the browser as a download.
+async function downloadTaskFile(id: string, name: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const q = buildQuery(currentOrg ? { org: currentOrg, name } : { name });
+  const res = await fetch(`${BASE}/tasks/${id}/files/download${q}`, { headers });
+  if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  if (!res.ok) throw new ApiError(res.status, "http_error", `${res.status} ${res.statusText}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.slice(name.lastIndexOf("/") + 1);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -296,3 +296,25 @@ func qualify(alias, cols string) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// ReadTaskFileRange returns up to limit bytes of the file name as taskID sees it (see OpenTaskFile),
+// starting at byte offset, plus the file. It seeks rather than reading what comes before.
+func (s *Store) ReadTaskFileRange(ctx context.Context, taskID uuid.UUID, name string, offset, limit int64) (*TaskFile, []byte, error) {
+	f, rc, err := s.OpenTaskFile(ctx, taskID, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rc.Close()
+	if offset > f.SizeBytes {
+		offset = f.SizeBytes
+	}
+	if _, err := rc.Seek(offset, io.SeekStart); err != nil {
+		return nil, nil, err
+	}
+	buf := make([]byte, min(limit, f.SizeBytes-offset))
+	n, err := io.ReadFull(rc, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, nil, err
+	}
+	return f, buf[:n], nil
+}

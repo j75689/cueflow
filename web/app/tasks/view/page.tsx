@@ -26,6 +26,7 @@ import { useDialog } from "@/components/dialog";
 import { useOrgFollow } from "@/components/org";
 import { PublishTarget } from "@/components/publish-target";
 import { useServerEvent, useToast } from "@/components/providers";
+import { FileLink, TaskFilesCard, TaskFilesProvider } from "@/components/task-files";
 import {
   Button,
   Card,
@@ -628,6 +629,11 @@ function ApprovalCard({
                     : "Approved · running…"}{" "}
                 {showResult ? "▾" : "▸"}
               </button>
+              {approval?.result_file && (
+                <span className="ml-2 text-fg-3">
+                  Saved whole as <FileLink name={approval.result_file} />
+                </span>
+              )}
               {showResult && (
                 <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-canvas p-2 font-mono text-[11px] whitespace-pre-wrap text-fg-2">
                   {approval?.result}
@@ -686,6 +692,11 @@ function MessageRow({ m }: { m: TaskMessage }) {
   if (m.kind === "tool_call" || m.kind === "tool_result") {
     const tool = String(m.data?.tool ?? "tool");
     const isErr = m.kind === "tool_result" && Boolean(m.data?.is_error);
+    // A long result was saved as a task file; the thread holds its start.
+    const savedFile =
+      m.kind === "tool_result" && typeof m.data?.file === "string"
+        ? m.data.file
+        : "";
     const summary =
       m.kind === "tool_call"
         ? argSummary(m.data?.arguments)
@@ -714,6 +725,11 @@ function MessageRow({ m }: { m: TaskMessage }) {
             {open ? "▾" : "▸"}
           </span>
         </button>
+        {savedFile && (
+          <p className="px-2 text-[11px] text-fg-3">
+            Saved whole as <FileLink name={savedFile} />
+          </p>
+        )}
         {open && (
           <pre className="mt-1 max-h-64 overflow-auto rounded bg-canvas p-2 text-[11px] leading-relaxed whitespace-pre-wrap text-fg-2">
             {detail}
@@ -1202,6 +1218,8 @@ function Sidebar({
         )}
       </Card>
 
+      <TaskFilesCard taskId={t.id} parentId={t.parent_id} />
+
       <NewTaskModal
         open={subOpen}
         onClose={() => setSubOpen(false)}
@@ -1216,7 +1234,9 @@ function Sidebar({
 export default function Page() {
   return (
     <Suspense fallback={<Loading />}>
-      <TaskView />
+      <TaskFilesProvider>
+        <TaskView />
+      </TaskFilesProvider>
     </Suspense>
   );
 }
