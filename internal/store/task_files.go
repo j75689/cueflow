@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/j75689/cueflow/internal/domain"
 )
@@ -160,18 +161,17 @@ func (s *Store) OpenTaskFile(ctx context.Context, taskID uuid.UUID, name string)
 	return f, rc, nil
 }
 
-// DeleteTaskFile removes one of the task's own files.
+// DeleteTaskFile removes one of the task's own files, in a transaction that commits only once its
+// bytes are gone (see DeleteTask).
 func (s *Store) DeleteTaskFile(ctx context.Context, taskID uuid.UUID, name string) error {
-	var id uuid.UUID
-	var kind string
-	err := s.pool.QueryRow(ctx, `DELETE FROM task_files WHERE task_id=$1 AND name=$2 RETURNING id, storage`, taskID, name).Scan(&id, &kind)
-	if err != nil {
-		return NotFound(err)
-	}
-	if err := s.dropBytes(ctx, kind, id); err != nil {
-		return fmt.Errorf("file %q removed, but its bytes could not be deleted: %w", name, err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var f storedBytes
+		err := tx.QueryRow(ctx, `DELETE FROM task_files WHERE task_id=$1 AND name=$2 RETURNING id, storage`, taskID, name).Scan(&f.ID, &f.Kind)
+		if err != nil {
+			return NotFound(err)
+		}
+		return s.dropAllBytes(ctx, []storedBytes{f})
+	})
 }
 
 // qualify prefixes every column in a comma-separated list with alias.

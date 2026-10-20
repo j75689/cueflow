@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -436,53 +435,32 @@ func (s *Store) SetTaskStatusIf(ctx context.Context, id uuid.UUID, from []TaskSt
 }
 
 // DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade
-// removes the file rows, but blobs outside the database would be left behind.
+// removes the file rows, but blobs outside the database would be left behind. It runs in one
+// transaction that commits only once every blob is gone, so a failed blob delete leaves the task in
+// place and the call can simply be retried (deleting a blob that is already gone succeeds).
 func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
-	type stored struct {
-		id   uuid.UUID
-		kind string
-	}
-	rows, err := s.pool.Query(ctx, `WITH RECURSIVE tree AS (
-			SELECT id, 0 AS depth FROM tasks WHERE id=$1
-			UNION ALL SELECT t.id, tr.depth+1 FROM tasks t JOIN tree tr ON t.parent_id=tr.id WHERE tr.depth < 20
-		) SELECT f.id, f.storage FROM task_files f JOIN tree ON tree.id = f.task_id WHERE f.storage <> 'db'`, id)
-	if err != nil {
-		return err
-	}
-	var files []stored
-	for rows.Next() {
-		var f stored
-		if err := rows.Scan(&f.id, &f.kind); err != nil {
-			rows.Close()
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Delete the file rows first, locking them, so a file written meanwhile waits on the task.
+		rows, err := tx.Query(ctx, `WITH RECURSIVE tree AS (
+				SELECT id, 0 AS depth FROM tasks WHERE id=$1
+				UNION ALL SELECT t.id, tr.depth+1 FROM tasks t JOIN tree tr ON t.parent_id=tr.id WHERE tr.depth < 20
+			) DELETE FROM task_files f USING tree WHERE f.task_id = tree.id RETURNING f.id, f.storage`, id)
+		if err != nil {
 			return err
 		}
-		files = append(files, f)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	tag, err := s.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
-	}
-	// After the rows: a failure here leaves an orphaned blob, never a row pointing at nothing.
-	var errs []error
-	for _, f := range files {
-		if _, err := s.blobFor(f.kind); err != nil {
-			continue // that backend is no longer configured; nothing this process can delete
+		files, err := pgx.CollectRows(rows, pgx.RowToStructByPos[storedBytes])
+		if err != nil {
+			return err
 		}
-		if err := s.dropBytes(ctx, f.kind, f.id); err != nil {
-			errs = append(errs, err)
+		tag, err := tx.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
+		if err != nil {
+			return err
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("task deleted, but %d of its files' bytes could not be removed: %w", len(errs), errors.Join(errs...))
-	}
-	return nil
+		if tag.RowsAffected() == 0 {
+			return domain.ErrNotFound
+		}
+		return s.dropAllBytes(ctx, files)
+	})
 }
 
 // TaskDepth counts ancestors (0 for a top-level task).

@@ -162,3 +162,65 @@ func TestTaskFilesInDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// failingDeletes is a blob backend whose deletes fail while fail is set.
+type failingDeletes struct {
+	blob.Store
+	fail bool
+}
+
+func (f *failingDeletes) Delete(ctx context.Context, id string) error {
+	if f.fail {
+		return errors.New("bucket unavailable")
+	}
+	return f.Store.Delete(ctx, id)
+}
+
+// A blob that can't be deleted rolls the whole delete back: the task and its file rows stay, nothing
+// points at missing bytes it shouldn't, and retrying once the backend is back finishes the job.
+func TestDeleteTaskRollsBackWhenBlobsFail(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	fs, err := blob.NewFile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flaky := &failingDeletes{Store: fs}
+	e.store.SetBlobs(flaky)
+	task, err := e.store.CreateTask(ctx, store.NewTask{Title: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, task.ID, "a.txt", "", []byte("keep me"), "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	flaky.fail = true
+	if err := e.store.DeleteTask(ctx, task.ID); err == nil {
+		t.Fatal("the delete reported success although a blob could not be deleted")
+	}
+	if _, err := e.store.GetTask(ctx, task.ID); err != nil {
+		t.Fatalf("the task is gone after a failed delete: %v", err)
+	}
+	if _, body, err := readTaskFile(t, e, task, "a.txt"); err != nil || body != "keep me" {
+		t.Fatalf("the file is gone after a failed delete: %q %v", body, err)
+	}
+	if err := e.store.DeleteTaskFile(ctx, task.ID, "a.txt"); err == nil {
+		t.Fatal("deleting one file reported success although its blob could not be deleted")
+	}
+	if _, _, err := readTaskFile(t, e, task, "a.txt"); err != nil {
+		t.Fatalf("the file row is gone after a failed file delete: %v", err)
+	}
+
+	flaky.fail = false
+	if err := e.store.DeleteTask(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("%d blobs left", len(left))
+	}
+	if _, err := e.store.GetTask(ctx, task.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("task still there: %v", err)
+	}
+}

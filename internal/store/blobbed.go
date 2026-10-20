@@ -70,6 +70,32 @@ func (s *Store) blobFor(kind string) (blob.Store, error) {
 	return nil, fmt.Errorf("bytes stored in %q but that backend is not configured (CUEFLOW_MEDIA_STORAGE)", kind)
 }
 
+// storedBytes names one row's bytes: its id and where they live.
+type storedBytes struct {
+	ID   uuid.UUID
+	Kind string
+}
+
+// dropAllBytes deletes the blobs of rows being deleted in a transaction; an error should roll it
+// back so no row is lost while its bytes remain. A backend that is no longer configured is skipped:
+// nothing this process can delete there, and refusing would make the rows impossible to remove.
+func (s *Store) dropAllBytes(ctx context.Context, files []storedBytes) error {
+	var errs []error
+	for _, f := range files {
+		if _, err := s.blobFor(f.Kind); f.Kind != blob.KindDB && err != nil {
+			continue
+		}
+		if err := s.dropBytes(ctx, f.Kind, f.ID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%d of %d files' bytes could not be deleted, so the rows were kept; try again: %w",
+			len(errs), len(files), errors.Join(errs...))
+	}
+	return nil
+}
+
 type nopCloser struct{ *bytes.Reader }
 
 func (nopCloser) Close() error { return nil }
