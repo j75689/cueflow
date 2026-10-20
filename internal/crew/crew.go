@@ -441,12 +441,19 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		msgs = append(msgs, resp.Message)
 
 		text := strings.TrimSpace(resp.Message.Content)
-		if len(resp.Message.ToolCalls) == 0 && h.asked && !env.wroteHandOff && text != "" {
-			// Asked for the note, it answered in text: that is the note.
-			if _, err := c.store.WriteTaskFile(ctx, task.ID, handOffFile, "", []byte(text), a.Slug); err == nil {
-				c.fileChanged(ctx, task.ID, handOffFile)
-				return c.handOffOutcome(ctx, task, a, run, true)
+		if len(resp.Message.ToolCalls) == 0 && h.asked {
+			// Asked for the note, it answered in text: that is the note. Either way the run hands off; it
+			// must not end as complete with the note as its result.
+			if text == "" {
+				return c.handOffOutcome(ctx, task, a, run, false)
 			}
+			if _, err := c.store.WriteTaskFile(ctx, task.ID, handOffFile, "", []byte(text), a.Slug); err != nil {
+				c.logger.Warn("save a hand-off note given as text", "task", task.ID, "err", err)
+				c.say(ctx, task.ID, a, "message", text, map[string]any{"handoff": true})
+				return c.handOffOutcome(ctx, task, a, run, false)
+			}
+			c.fileChanged(ctx, task.ID, handOffFile)
+			return c.handOffOutcome(ctx, task, a, run, true)
 		}
 		if len(resp.Message.ToolCalls) == 0 {
 			if text == "" {

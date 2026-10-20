@@ -787,10 +787,10 @@ function MessageRow({ m }: { m: TaskMessage }) {
         >
           {m.content}
         </div>
-        {handOff && (
+        {handOff && typeof m.data?.file === "string" && (
           <p className="mt-1 text-[11px] text-fg-3">
-            The next run starts from <FileLink name={String(m.data?.file ?? "handoff.md")} />. Reply
-            with corrections, or just to continue.
+            The next run starts from <FileLink name={m.data.file} />. Reply with corrections, or just
+            to continue.
           </p>
         )}
       </div>

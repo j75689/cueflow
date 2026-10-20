@@ -60,13 +60,21 @@ func TestHandOffAtContextThreshold(t *testing.T) {
 		return 900
 	})
 	runs := 0
+	// A long CJK note (60 KB): the brief quotes its start, cut at a character, with a note of the rest.
+	note := "Done: read the hooks. Next: write the plan.\n" + strings.Repeat("字", 20000)
+	quoted := 0
 	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
 		b := brief(req)
 		if strings.Contains(b, "## Hand-off from the previous run") {
-			if !strings.Contains(b, "Done: read the hooks. Next: write the plan.") {
-				t.Errorf("the fresh run's brief should carry the note:\n%s", b)
+			quoted++
+			if !strings.Contains(b, "Done: read the hooks. Next: write the plan.") || !strings.Contains(b, "truncated: showed the first 12000") {
+				t.Errorf("the fresh run's brief should carry the note:\n%.600s", b)
 			}
 			return calls("complete_task", map[string]any{"summary": "planned"})
+		}
+		if strings.Contains(b, "Looks right, go on.") && len(req.Messages) == 1 && runs > 1 {
+			// A later run, after the task moved on from the hand-off: no quote.
+			return calls("complete_task", map[string]any{"summary": "again"})
 		}
 		switch {
 		case len(req.Messages) == 1:
@@ -80,7 +88,7 @@ func TestHandOffAtContextThreshold(t *testing.T) {
 			if req.Messages[0].Content != b || req.Messages[len(req.Messages)-1].Role != llm.RoleUser {
 				t.Errorf("the request should be a new last message")
 			}
-			return calls("write_file", map[string]any{"name": "handoff.md", "content": "Done: read the hooks. Next: write the plan."})
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": note})
 		default:
 			return calls("add_comment", map[string]any{"content": "still reading"})
 		}
@@ -99,7 +107,9 @@ func TestHandOffAtContextThreshold(t *testing.T) {
 		t.Fatalf("runs: %+v", rs)
 	}
 	thread := taskMessages(t, e, task.ID.String())
-	if !strings.Contains(thread, "Hand-off note:") || !strings.Contains(thread, `"handoff": true`) && !strings.Contains(thread, `"handoff":true`) ||
+	// The thread gets a pointer, not a copy: the next brief quotes the note once.
+	if !strings.Contains(thread, "message:Hand-off note saved as handoff.md (58.6 KB). ") ||
+		!strings.Contains(thread, `"handoff": true`) && !strings.Contains(thread, `"handoff":true`) ||
 		!strings.Contains(thread, "so it handed off") {
 		t.Fatalf("thread:\n%s", thread)
 	}
@@ -110,8 +120,15 @@ func TestHandOffAtContextThreshold(t *testing.T) {
 	}
 	e.crew.RunPending(ctx, 10)
 	got, _ = e.store.GetTask(ctx, task.ID)
-	if got.Status != store.TaskReview || runs != 1 {
-		t.Fatalf("after the reply: %s, %d fresh starts", got.Status, runs)
+	if got.Status != store.TaskReview || runs != 1 || quoted != 1 {
+		t.Fatalf("after the reply: %s, %d fresh starts, quoted %d times", got.Status, runs, quoted)
+	}
+	// Another reply later: that run didn't hand off, so the old note isn't quoted again.
+	runs = 2
+	e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "One more thing."}, nil)
+	e.crew.RunPending(ctx, 10)
+	if quoted != 1 {
+		t.Fatalf("a later brief quoted the old note (%d times)", quoted)
 	}
 }
 
@@ -150,7 +167,7 @@ func TestHandOffWithoutNote(t *testing.T) {
 	if len(rs) != 1 || rs[0].Turns != 4 || asked != 1 {
 		t.Fatalf("runs: %+v, asked %d", rs, asked)
 	}
-	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "didn't write one") {
+	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "none was saved") {
 		t.Fatalf("thread:\n%s", thread)
 	}
 	if files, _, _ := e.store.ListTaskFiles(ctx, task.ID, 10); len(files) != 0 {
@@ -230,5 +247,62 @@ func TestHandOffNoteInTextAndCommentRequeues(t *testing.T) {
 	}
 	if files, _, _ := e.store.ListTaskFiles(ctx, task.ID, 10); len(files) != 1 || files[0].Name != "handoff.md" || string(files[0].Head) != "Left: the summary." {
 		t.Fatalf("the text answer should be the note: %+v", files)
+	}
+}
+
+// A first prompt just under the point doesn't make every fresh run hand off on its second turn: the
+// run hands off only once it has grown by a tenth of the window.
+func TestNoHandOffWithoutGrowth(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 790
+		}
+		return 820
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		if asksForHandOff(req) {
+			t.Error("asked for a hand-off after the context grew by 3% of the window")
+		}
+		if len(toolResults(req)) < 2 {
+			return calls("add_comment", map[string]any{"content": "working"})
+		}
+		return calls("complete_task", map[string]any{"summary": "done"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Near the edge", "assignee_agent_id": team["writer"].ID}, &task)
+	e.crew.RunPending(ctx, 10)
+	got, _ := e.store.GetTask(ctx, task.ID)
+	if got.Status != store.TaskReview {
+		t.Fatalf("the run should finish: %s", got.Status)
+	}
+	if thread := taskMessages(t, e, task.ID.String()); strings.Count(thread, "won't hand off") != 1 {
+		t.Fatalf("thread:\n%s", thread)
+	}
+}
+
+// A note the run wrote before it was asked doesn't count as the answer: the request needs a new one.
+func TestHandOffNeedsANoteWrittenAfterTheRequest(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		if len(req.Messages) == 1 {
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": "an old note"})
+		}
+		return calls("add_comment", map[string]any{"content": "busy"})
+	})
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Stale note", "assignee_agent_id": team["writer"].ID}, &task)
+	e.crew.RunPending(ctx, 10)
+	thread := taskMessages(t, e, task.ID.String())
+	if !strings.Contains(thread, "none was saved") || strings.Contains(thread, "Hand-off note saved") {
+		t.Fatalf("an earlier note was taken as the answer:\n%s", thread)
 	}
 }

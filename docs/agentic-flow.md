@@ -193,16 +193,18 @@ window. When the latest prompt reaches the hand-off point, 80% of a known window
 1. The crew adds one message at the end of the conversation asking the agent to write a hand-off note with
    `write_file` as `handoff.md` (what it did, the facts and decisions it confirmed, what is left, which task files to
    read first) and stop. Earlier turns are sent as they were.
-2. Once the note is saved, the run ends: the note is posted to the thread (marked *hand-off*) and the task waits for
-   the human. An agent that answers in text instead has written the note in that text; one that keeps calling
+2. Once the note is saved, the run ends: the thread gets a pointer to it (marked *hand-off*, opening the file) and
+   the task waits for the human. Only a note written after the request counts. An agent that answers in text instead has written the note in that text; one that keeps calling
    tools gets one more turn, then the run ends saying no note was written. The request still comes when the point is
    reached on the run's last allowed turn: the note's turns go past the limit.
 3. The human reviews it and replies, with corrections or just to continue. The fresh run's brief starts with a
    *Hand-off from the previous run* section quoting the note (`handoff.md` holds all of it), followed by the thread
-   as usual. Nothing of the old conversation is replayed.
+   as usual. Nothing of the old conversation is replayed. The note is quoted only in the run right after the
+   hand-off, not in every later brief.
 
-If a run's first prompt is already past the point (a large brief or note, a small window), a fresh run would start
-just as full, so the run says so once and carries on instead of handing off. Without a known window there is no
+A run hands off only once it has grown by a tenth of the window since its first prompt. If it reaches the point
+sooner (a large brief or note, a small window), a fresh run would start almost as full and hand off again, so the
+run says so once and carries on instead. Without a known window there is no
 hand-off; the run ends with a context-overflow message if it runs out.
 
 ## 7. Delegation and resumption
