@@ -258,7 +258,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if req.System == "" && len(params.Tools) > 0 {
 		params.Tools[len(params.Tools)-1].OfTool.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 	}
-	cacheNewestUserTurn(params.Messages)
+	cacheUserTurns(params.Messages)
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
 	if c.serverFallback {
 		params.Betas = append(params.Betas, sdk.AnthropicBetaServerSideFallback2026_07_01)
@@ -269,7 +269,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
-			if apiErr.StatusCode == 413 || apiErr.StatusCode == 400 && strings.Contains(apiErr.Error(), "prompt is too long") {
+			if isContextOverflow(apiErr) {
 				return nil, fmt.Errorf("anthropic: %w: HTTP %d: %s", llm.ErrContextOverflow, apiErr.StatusCode, apiErr.Error())
 			}
 			return nil, fmt.Errorf("anthropic: HTTP %d: %s", apiErr.StatusCode, apiErr.Error())
@@ -303,22 +303,39 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		return nil, fmt.Errorf("anthropic: request declined (refusal, category %q)", resp.StopDetails.Category)
 	}
 	return &llm.Response{Message: msg, StopReason: stop,
-		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}, nil
+		// input_tokens counts only what came after the last cache breakpoint; the cached part is
+		// reported separately.
+		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
+			OutputTokens: resp.Usage.OutputTokens}}, nil
 }
 
-// cacheNewestUserTurn sets a cache breakpoint on the last block of the newest user turn. User turns
-// are built afresh by toParams on every call; assistant turns replay blocks held in ProviderState,
-// which a breakpoint would write into.
-func cacheNewestUserTurn(msgs []sdk.BetaMessageParam) {
-	for i := len(msgs) - 1; i >= 0; i-- {
+// cacheUserTurns sets cache breakpoints on the last block of the two newest user turns. The newest
+// one writes this request's prefix; the one before it is where the previous request wrote its own, so
+// that entry is found however many blocks the latest turn added (the API only looks back about 20
+// blocks from a breakpoint for an earlier entry). With the system prompt that is 3 of the 4
+// breakpoints allowed. User turns are built afresh by toParams on every call; assistant turns replay
+// blocks held in ProviderState, which a breakpoint would write into.
+func cacheUserTurns(msgs []sdk.BetaMessageParam) {
+	marked := 0
+	for i := len(msgs) - 1; i >= 0 && marked < 2; i-- {
 		if msgs[i].Role != sdk.BetaMessageParamRoleUser || len(msgs[i].Content) == 0 {
 			continue
 		}
 		if cc := msgs[i].Content[len(msgs[i].Content)-1].GetCacheControl(); cc != nil {
 			*cc = sdk.NewBetaCacheControlEphemeralParam()
+			marked++
 		}
-		return
 	}
+}
+
+// isContextOverflow recognizes the refusal of a prompt longer than the model's window: "prompt is
+// too long" on the Claude API and Vertex, "Input is too long for requested model" on Bedrock.
+func isContextOverflow(err *sdk.Error) bool {
+	if err.StatusCode != 400 {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "input is too long")
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

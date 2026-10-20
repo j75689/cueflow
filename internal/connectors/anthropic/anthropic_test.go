@@ -95,8 +95,8 @@ func TestAPIKey(t *testing.T) {
 }
 
 // The append-only history is cached: a breakpoint on the system prompt (after the tools) and one on
-// the newest user turn. Replayed assistant turns get none, and the turn stored in ProviderState is
-// left untouched.
+// each of the two newest user turns. Replayed assistant turns get none, and the turn stored in
+// ProviderState is left untouched. Usage counts the cached part of the prompt.
 func TestPromptCaching(t *testing.T) {
 	isolateEnv(t)
 	srv, last := fakeMessages(t)
@@ -129,38 +129,87 @@ func TestPromptCaching(t *testing.T) {
 		t.Fatal("the system breakpoint already covers the tools")
 	}
 	sent := body["messages"].([]any)
-	newest := sent[2].(map[string]any)["content"].([]any)
-	if !hasCache(newest[1]) || hasCache(newest[0]) {
+	content := func(i int) []any { return sent[i].(map[string]any)["content"].([]any) }
+	if newest := content(2); !hasCache(newest[1]) || hasCache(newest[0]) {
 		t.Fatalf("want one breakpoint on the newest turn's last block: %v", newest)
 	}
-	for i, m := range sent[:2] {
-		for _, b := range m.(map[string]any)["content"].([]any) {
-			if hasCache(b) {
-				t.Fatalf("message %d carries a breakpoint", i)
-			}
+	if !hasCache(content(0)[0]) {
+		t.Fatal("the previous user turn should keep a breakpoint")
+	}
+	for _, b := range content(1) {
+		if hasCache(b) {
+			t.Fatal("a replayed assistant turn carries a breakpoint")
 		}
 	}
 	if stored.Content[1].GetCacheControl().Type != "" {
 		t.Fatal("the stored assistant turn was changed")
 	}
+
+	// Without a system prompt the fixed-prefix breakpoint goes on the last tool.
+	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{
+		Tools:    []llm.Tool{{Name: "a", Schema: map[string]any{"type": "object"}}, {Name: "b", Schema: map[string]any{"type": "object"}}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = last().body
+	if tools := body["tools"].([]any); hasCache(tools[0]) || !hasCache(tools[1]) {
+		t.Fatalf("want the breakpoint on the last tool only: %v", tools)
+	}
+	if body["system"] != nil {
+		t.Fatal("no system prompt was given")
+	}
 }
 
-// "prompt is too long" comes back as llm.ErrContextOverflow.
-func TestContextOverflowRecognized(t *testing.T) {
+func TestUsageCountsCachedInput(t *testing.T) {
 	isolateEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1048213 tokens > 1000000 maximum"}}`))
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":2,"cache_read_input_tokens":90000,"cache_creation_input_tokens":4000,"output_tokens":7}}`))
 	}))
 	t.Cleanup(srv.Close)
 	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
-	if !errors.Is(err, llm.ErrContextOverflow) {
-		t.Fatalf("not recognized: %v", err)
+	resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.InputTokens != 94002 || resp.Usage.OutputTokens != 7 {
+		t.Fatalf("usage: %+v", resp.Usage)
+	}
+}
+
+// The Claude API's and Bedrock's refusals of an over-long prompt come back as llm.ErrContextOverflow;
+// other 400s don't.
+func TestContextOverflowRecognized(t *testing.T) {
+	isolateEnv(t)
+	for _, c := range []struct {
+		body string
+		want bool
+	}{
+		{`{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1048213 tokens > 1000000 maximum"}}`, true},
+		{`{"message":"Input is too long for requested model."}`, true},
+		{`{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.name: invalid"}}`, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+		srv.Close()
+		if got := errors.Is(err, llm.ErrContextOverflow); got != c.want {
+			t.Errorf("%s: overflow=%v, want %v (%v)", c.body, got, c.want, err)
+		}
 	}
 }
 

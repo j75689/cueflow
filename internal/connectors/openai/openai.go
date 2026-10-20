@@ -298,21 +298,14 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-// isContextOverflow recognizes the ways OpenAI-compatible servers refuse a prompt longer than the
-// model's window: OpenAI and Azure (context_length_exceeded), vLLM and llama.cpp ("maximum context
-// length", "context length"), Gemini ("exceeds the maximum number of tokens").
+// isContextOverflow recognizes the error codes OpenAI-compatible servers use for a prompt longer than
+// the model's window: OpenAI and Azure (context_length_exceeded), Gemini ("exceeds the maximum
+// number of tokens"). Looser wording ("maximum context length") also covers a max_tokens setting
+// larger than the window, and a bare 413 is usually a proxy's body limit; those keep their own text.
 func isContextOverflow(status int, body string) bool {
-	if status == http.StatusRequestEntityTooLarge {
-		return true
-	}
 	if status != http.StatusBadRequest {
 		return false
 	}
 	b := strings.ToLower(body)
-	for _, s := range []string{"context_length_exceeded", "maximum context length", "context length", "exceeds the maximum number of tokens"} {
-		if strings.Contains(b, s) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(b, "context_length_exceeded") || strings.Contains(b, "exceeds the maximum number of tokens")
 }

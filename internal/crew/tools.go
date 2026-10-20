@@ -50,16 +50,16 @@ const (
 
 // clipToolResult cuts a result to maxToolResult and says how much was left out, so the agent knows
 // it has not seen the whole thing.
-func clipToolResult(s string) string { return clipNoted(s, maxToolResult, "") }
+func clipToolResult(s string) string { return clipNoted(s, maxToolResult) }
 
 // clipNoted cuts s to n characters and, when it does, ends it with how many were shown out of how
-// many, plus hint.
-func clipNoted(s string, n int, hint string) string {
+// many.
+func clipNoted(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
 	}
-	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", string(r[:n]), n, len(r), hint)
+	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters)", string(r[:n]), n, len(r))
 }
 
 // run is the module-facing view of this run.

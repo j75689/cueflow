@@ -19,3 +19,13 @@ func TestClipToolResult(t *testing.T) {
 		t.Fatalf("got ...%q", string(r[len(r)-80:]))
 	}
 }
+
+// An overflow on the first turn isn't fixed by a fresh run, so it doesn't suggest one.
+func TestOverflowMessage(t *testing.T) {
+	if m := overflowMessage(0); strings.Contains(m, "Reply to continue") || !strings.Contains(m, "max output tokens") {
+		t.Fatalf("turn 0: %s", m)
+	}
+	if m := overflowMessage(12); !strings.Contains(m, "after 12 turns") || !strings.Contains(m, "Reply to continue") {
+		t.Fatalf("turn 12: %s", m)
+	}
+}

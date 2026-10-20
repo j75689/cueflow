@@ -78,7 +78,7 @@ func TestHTTPErrorSurfaced(t *testing.T) {
 }
 
 // A prompt longer than the model's window comes back as llm.ErrContextOverflow, so the crew can say so
-// plainly; other errors don't.
+// plainly; other errors, including ones that only look similar, keep their own text.
 func TestContextOverflowRecognized(t *testing.T) {
 	for _, c := range []struct {
 		status int
@@ -86,8 +86,10 @@ func TestContextOverflowRecognized(t *testing.T) {
 		want   bool
 	}{
 		{400, `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}`, true},
-		{400, `{"error":"the input length exceeds the context length"}`, true},
-		{413, `request too large`, true},
+		{400, `{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."}}`, true},
+		// A max_tokens setting larger than the window, and a proxy's body limit: not an overflow.
+		{400, `{"object":"error","message":"This model's maximum context length is 8192 tokens. However, you requested 16250 tokens (250 in the messages, 16000 in the completion)."}`, false},
+		{413, `<html>413 Request Entity Too Large</html>`, false},
 		{400, `{"error":"invalid tool schema"}`, false},
 		{401, `{"error":"bad key"}`, false},
 	} {

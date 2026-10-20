@@ -49,6 +49,7 @@ type Request struct {
 }
 
 type Usage struct {
+	// InputTokens is the whole prompt, whether or not the provider served part of it from a cache.
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 }

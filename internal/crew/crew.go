@@ -414,9 +414,8 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 				return &outcome{kind: "canceled"}
 			}
 			if errors.Is(err, llm.ErrContextOverflow) {
-				// The next run starts from the brief and the thread, not this run's history.
-				return &outcome{kind: "error", text: fmt.Sprintf("after %d turns the conversation no longer fits the model's context window. "+
-					"Reply to continue in a fresh run (it starts from the task and its thread), or split the work into subtasks. (%v)", run.Turns, err)}
+				c.logger.Warn("context window exceeded", "task", task.ID, "turns", run.Turns, "err", err)
+				return &outcome{kind: "error", text: overflowMessage(run.Turns)}
 			}
 			return &outcome{kind: "error", text: err.Error()}
 		}
@@ -457,6 +456,19 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		}
 	}
 	return &outcome{kind: "limit"}
+}
+
+// overflowMessage explains a refusal for exceeding the model's context window. The provider's raw
+// error goes to the log. On the first turn nothing the run did is to blame (the brief, system prompt
+// and tools are already too big, or max_tokens doesn't fit the window), and a reply would only fail
+// the same way.
+func overflowMessage(turns int) string {
+	if turns == 0 {
+		return "the task's brief doesn't fit the model's context window. Shorten the description or the thread, use a model with a larger window, or lower the connector's max output tokens."
+	}
+	// The next run starts from the brief and the thread, not this run's history.
+	return fmt.Sprintf("after %d turns the conversation no longer fits the model's context window. "+
+		"Reply to continue in a fresh run (it starts from the task and its thread), or split the work into subtasks.", turns)
 }
 
 // quietTools write their own thread entries; logging their call/result would be noise.
