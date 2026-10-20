@@ -258,49 +258,93 @@ func (c *Client) Test(ctx context.Context) (*connector.TestResult, error) {
 }
 
 // windowCache remembers the Models API's answer per endpoint and model for the life of the process,
-// so asking costs one request per model, not one per run. A failed lookup is remembered for
-// windowRetry, so a broken endpoint isn't asked on every run either.
+// so asking costs one request per model, not one per run. Runs that ask while a lookup is in flight
+// wait for it instead of sending their own. A refusal (or an answer without a limit) is remembered
+// for windowRetry; a timeout isn't, so a slow moment doesn't hide the percentage for long.
 var windowCache = struct {
 	sync.Mutex
-	m map[string]windowEntry
-}{m: map[string]windowEntry{}}
+	m map[string]*windowLookup
+}{m: map[string]*windowLookup{}}
 
-type windowEntry struct {
+type windowLookup struct {
+	done   chan struct{} // closed when the lookup has finished
 	tokens int64
-	retry  time.Time // zero for an answer; when to ask again after a failure
+	retry  time.Time // zero for an answer; when to ask again after a refusal
 }
 
 const windowRetry = 10 * time.Minute
+
+// windowTimeout caps a lookup (a variable so tests can shorten it).
+var windowTimeout = 3 * time.Second
 
 // ContextWindow is the configured context_window, else the Models API's max_input_tokens for this
 // model (Claude API only), else 0.
 func (c *Client) ContextWindow(ctx context.Context) int64 {
 	if c.contextWindow > 0 || c.models == nil {
-		return c.contextWindow
+		return max(c.contextWindow, 0)
 	}
 	key := c.modelsKey + "|" + c.model
 	windowCache.Lock()
-	e, ok := windowCache.m[key]
-	windowCache.Unlock()
-	if ok && (e.retry.IsZero() || time.Now().Before(e.retry)) {
-		return e.tokens
+	l := windowCache.m[key]
+	if l != nil {
+		select {
+		case <-l.done:
+			if !l.retry.IsZero() && time.Now().After(l.retry) {
+				l = nil // refused a while ago: ask again
+			}
+		default: // in flight
+		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	mine := l == nil
+	if mine {
+		l = &windowLookup{done: make(chan struct{})}
+		windowCache.m[key] = l
+	}
+	windowCache.Unlock()
+	if mine {
+		c.lookUpWindow(ctx, key, l)
+		return l.tokens
+	}
+	select {
+	case <-l.done:
+		return l.tokens
+	case <-ctx.Done(): // given up waiting for another run's lookup
+		return 0
+	}
+}
+
+// lookUpWindow asks the Models API and settles l. It runs apart from the caller's context, so a run
+// that is cancelled meanwhile doesn't record a failure for every other run.
+func (c *Client) lookUpWindow(ctx context.Context, key string, l *windowLookup) {
+	defer close(l.done)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), windowTimeout)
 	defer cancel()
-	// One try: it only decides whether a percentage is shown, and a run waits on it to start.
+	// One try, with the same betas Chat sends (an OAuth token needs its beta here too): it only
+	// decides whether a percentage is shown, and a run waits on it to start.
 	opts := append(append([]option.RequestOption{}, c.callOpts...), option.WithMaxRetries(0))
-	info, err := c.models.Get(ctx, c.model, sdk.ModelGetParams{}, opts...)
-	e = windowEntry{}
-	if err != nil || info.MaxInputTokens <= 0 {
-		c.logger.Debug("anthropic: context window lookup failed; showing sizes without a percentage", "model", c.model, "err", err)
-		e.retry = time.Now().Add(windowRetry)
-	} else {
-		e.tokens = info.MaxInputTokens
+	for _, b := range c.betas {
+		opts = append(opts, option.WithHeaderAdd("anthropic-beta", string(b)))
 	}
-	windowCache.Lock()
-	windowCache.m[key] = e
-	windowCache.Unlock()
-	return e.tokens
+	info, err := c.models.Get(ctx, c.model, sdk.ModelGetParams{}, opts...)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		// Slow, not refused: forget it so the next run asks again.
+		c.logger.Warn("anthropic: context window lookup timed out; showing sizes without a percentage", "model", c.model, "err", err)
+		windowCache.Lock()
+		if windowCache.m[key] == l {
+			delete(windowCache.m, key)
+		}
+		windowCache.Unlock()
+	case err != nil:
+		c.logger.Warn("anthropic: context window lookup failed; showing sizes without a percentage (set Context window on the connector to skip it)",
+			"model", c.model, "err", err)
+		l.retry = time.Now().Add(windowRetry)
+	case info.MaxInputTokens <= 0:
+		c.logger.Warn("anthropic: the Models API gave no max_input_tokens; showing sizes without a percentage", "model", c.model)
+		l.retry = time.Now().Add(windowRetry)
+	default:
+		l.tokens = info.MaxInputTokens
+	}
 }
 
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {

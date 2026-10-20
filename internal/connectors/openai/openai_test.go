@@ -204,7 +204,7 @@ func TestAzureRequiresKeyAndDeployment(t *testing.T) {
 
 // The context window is what the operator configured; without one it is unknown (0), not a guess.
 func TestContextWindowConfigured(t *testing.T) {
-	for cfg, want := range map[string]int64{"": 0, "128000": 128000} {
+	for cfg, want := range map[string]int64{"": 0, "128000": 128000, "-5": 0} {
 		c := connector.Config{"provider": "ollama", "model": "qwen3"}
 		if cfg != "" {
 			c["context_window"] = cfg

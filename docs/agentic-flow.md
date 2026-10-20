@@ -250,7 +250,7 @@ target each time.
 | Item | Limit / behavior | Where |
 |---|---|---|
 | Turns per run | The role's `max_turns` (default 12, Chief 16, max 40) | `store/agents.go` |
-| How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); the task page shows each run's latest prompt as "Context 182k / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/crew.go` |
+| How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); the task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/crew.go` |
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |

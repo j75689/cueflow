@@ -105,7 +105,8 @@ func Load() (*Config, error) {
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
-	c.ContextHandOffAt, c.Warnings = envFraction("CUEFLOW_CONTEXT_HANDOFF", DefaultContextHandOffAt, c.Warnings)
+	warn := func(msg string) { c.Warnings = append(c.Warnings, msg) }
+	c.ContextHandOffAt = envFraction("CUEFLOW_CONTEXT_HANDOFF", DefaultContextHandOffAt, warn)
 	var err error
 	if c.Modules, err = parseModules(os.Getenv("CUEFLOW_MODULES")); err != nil {
 		return nil, err
@@ -220,18 +221,19 @@ func envBool(k string) bool {
 // DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
 const DefaultContextHandOffAt = 0.8
 
-// envFraction reads a number strictly between 0 and 1. Anything else falls back to def and adds a
-// warning, so a typo is visible at startup instead of silently changing behaviour.
-func envFraction(k string, def float64, warnings []string) (float64, []string) {
+// envFraction reads a number strictly between 0 and 1. Anything else falls back to def and is passed
+// to warn, so a typo is visible at startup instead of silently changing behaviour.
+func envFraction(k string, def float64, warn func(string)) float64 {
 	v := strings.TrimSpace(os.Getenv(k))
 	if v == "" {
-		return def, warnings
+		return def
 	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil || !(f > 0 && f < 1) {
-		return def, append(warnings, fmt.Sprintf("%s=%q must be a number between 0 and 1 (e.g. 0.8); using %g", k, v, def))
+		warn(fmt.Sprintf("%s=%q must be a number between 0 and 1 (e.g. 0.8); using %g", k, v, def))
+		return def
 	}
-	return f, warnings
+	return f
 }
 
 func envInt(k string, def int) int {

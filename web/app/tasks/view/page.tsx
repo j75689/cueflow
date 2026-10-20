@@ -1252,7 +1252,7 @@ const compactTokens = new Intl.NumberFormat("en", {
   maximumFractionDigits: 1,
 });
 
-/** "Context 182k / 1M (18%)": how full the run's latest prompt was, coloured from the hand-off point on. */
+/** "Context 182K / 1M (18%)": how full the run's latest prompt was, coloured from the hand-off point on. */
 function ContextSize({ run }: { run: AgentRun }) {
   const { meta } = useMeta();
   if (!run.context_tokens) return null;

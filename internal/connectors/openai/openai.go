@@ -152,8 +152,8 @@ type wireMessage struct {
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
-// ContextWindow is the configured context_window, 0 when not set.
-func (c *Client) ContextWindow(context.Context) int64 { return c.contextWindow }
+// ContextWindow is the configured context_window, 0 when not set (or not positive).
+func (c *Client) ContextWindow(context.Context) int64 { return max(c.contextWindow, 0) }
 
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	msgs := make([]wireMessage, 0, len(req.Messages)+1)

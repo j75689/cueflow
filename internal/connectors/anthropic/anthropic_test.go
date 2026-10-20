@@ -12,11 +12,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/j75689/cueflow/internal/connector"
-	_ "github.com/j75689/cueflow/internal/connectors/anthropic"
+	"github.com/j75689/cueflow/internal/connectors/anthropic"
 	"github.com/j75689/cueflow/internal/llm"
 )
 
@@ -412,5 +413,101 @@ func TestContextWindow(t *testing.T) {
 	before := lookups.Load()
 	if w := window(other); w != 0 || lookups.Load() != before {
 		t.Fatal("a failed lookup was retried at once")
+	}
+}
+
+// The lookup sends the OAuth beta an auth_token needs, concurrent first runs share one request, a
+// cancelled run doesn't record a failure for the others, a timeout isn't remembered, and a window
+// that isn't positive is unknown.
+func TestContextWindowLookupRobustness(t *testing.T) {
+	isolateEnv(t)
+	var lookups atomic.Int32
+	slow := atomic.Bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lookups.Add(1)
+		if slow.Load() {
+			time.Sleep(300 * time.Millisecond)
+		} else {
+			time.Sleep(50 * time.Millisecond) // long enough for concurrent callers to overlap
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !strings.Contains(strings.Join(r.Header.Values("Anthropic-Beta"), ","), "oauth-2025-04-20") {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"OAuth needs the beta"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"type":"model","id":"m","display_name":"m","created_at":"2026-01-01T00:00:00Z","max_input_tokens":500000,"max_tokens":1}`))
+	}))
+	t.Cleanup(srv.Close)
+	build := func(cfg connector.Config) llm.ContextWindower {
+		inst, err := connector.Build("anthropic", cfg, connector.Env{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inst.(llm.ContextWindower)
+	}
+	cfg := func(model string) connector.Config {
+		return connector.Config{"auth_token": "oauth-tok", "base_url": srv.URL, "model": model}
+	}
+
+	// A run cancelled before it asks: the lookup isn't cancelled with it, so the answer is recorded
+	// for everyone (not a failure), and the next run doesn't ask again.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if w := build(cfg("a")).ContextWindow(cancelled); w != 500000 {
+		t.Fatalf("a cancelled caller's lookup should still complete (the OAuth beta must be sent): %d", w)
+	}
+	if w := build(cfg("a")).ContextWindow(context.Background()); w != 500000 || lookups.Load() != 1 {
+		t.Fatalf("after a cancelled caller: %d with %d lookups", w, lookups.Load())
+	}
+	// A run that gives up while another run's lookup is in flight gets 0.
+	slow.Store(true)
+	go build(cfg("w")).ContextWindow(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	short, cancelShort := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancelShort()
+	if w := build(cfg("w")).ContextWindow(short); w != 0 {
+		t.Fatalf("a waiter that gives up: %d", w)
+	}
+	slow.Store(false)
+	time.Sleep(400 * time.Millisecond) // let that lookup finish before counting
+	base := lookups.Load()
+
+	// Ten runs starting at once send one request.
+	var wg sync.WaitGroup
+	got := make([]int64, 10)
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got[i] = build(cfg("b")).ContextWindow(context.Background())
+		}()
+	}
+	wg.Wait()
+	for _, w := range got {
+		if w != 500000 {
+			t.Fatalf("concurrent windows: %v", got)
+		}
+	}
+	if n := lookups.Load(); n != base+1 {
+		t.Fatalf("concurrent first runs sent %d lookups, want 1", n-base)
+	}
+
+	// A timeout is unknown now but asked again next time.
+	defer anthropic.SetWindowTimeout(100 * time.Millisecond)()
+	slow.Store(true)
+	if w := build(cfg("c")).ContextWindow(context.Background()); w != 0 {
+		t.Fatalf("a timed-out lookup: %d", w)
+	}
+	slow.Store(false)
+	if w := build(cfg("c")).ContextWindow(context.Background()); w != 500000 {
+		t.Fatalf("after a timeout the next run should ask again: %d", w)
+	}
+
+	// A negative setting is unknown, not a negative percentage, and asks nothing.
+	before := lookups.Load()
+	inst, _ := connector.Build("anthropic_bedrock", connector.Config{"region": "us-east-1", "api_key": "k", "context_window": -5}, connector.Env{})
+	if w := inst.(llm.ContextWindower).ContextWindow(context.Background()); w != 0 || lookups.Load() != before {
+		t.Fatalf("negative window: %d", w)
 	}
 }
