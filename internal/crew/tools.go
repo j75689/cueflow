@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/connector"
-	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/textutil"
 )
 
 type tool struct {
@@ -54,7 +54,7 @@ const (
 
 // clipToolResult cuts a result to maxToolResult and says how much was left out, so the agent knows
 // it has not seen the whole thing.
-func clipToolResult(s string) string { return llm.ClipNoted(s, maxToolResult, "") }
+func clipToolResult(s string) string { return textutil.ClipNoted(s, maxToolResult, "") }
 
 // run is the module-facing view of this run.
 func (e *runEnv) run() *Run {

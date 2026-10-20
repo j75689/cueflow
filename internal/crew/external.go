@@ -15,8 +15,8 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
-	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
+	"github.com/j75689/cueflow/internal/textutil"
 )
 
 // External tools come from the MCP tool servers attached to an agent. Each tool's permission
@@ -232,7 +232,7 @@ func (c *Crew) RunApproval(ctx context.Context, approvalID uuid.UUID) error {
 		text = "(no output)" // an empty result would read as "still running"
 	}
 	// The agent reads the result in the system message below; the full one is kept on the approval.
-	shown := llm.ClipNoted(text, 4000, "")
+	shown := textutil.ClipNoted(text, 4000, "")
 	text = clipToolResult(text)
 	_ = c.store.SetToolApprovalResult(ctx, approvalID, text, isErr)
 	outcome := "It ran and returned"

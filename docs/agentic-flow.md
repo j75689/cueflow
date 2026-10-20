@@ -251,7 +251,7 @@ target each time.
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
 | A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
-| Tool results a run carries back to the model each turn | 64,000 characters. Past it the connector cuts the oldest results to 2,000 with a note until they are under 32,000, so a cut lands every few turns rather than every turn; the newest turn's stay whole, and the agent can call the tool again. Claude connectors also drop the thinking blocks of the turns produced before a cut, which the API would otherwise reject | `crew/tools.go` (budget), `llm/history.go` |
+| Tool results a run carries back to the model each turn | 64,000 characters. Past it the connector cuts the oldest results until those that may be cut are under 32,000: a big one keeps its first 2,000 characters with a note, a smaller one becomes a short stub, and the newest turn's stay whole. The agent can call the tool again. With results well under 32,000 a cut lands every few turns; results near the 32,000 single-result limit fill half the budget each, so then it is every turn. Claude connectors also drop the thinking blocks of the turns produced before a cut, which the API would otherwise reject | `crew/tools.go` (budget), `llm/history.go` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |

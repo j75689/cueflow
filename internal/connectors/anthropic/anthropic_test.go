@@ -148,7 +148,7 @@ func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	// The newest turn's results push the history over: the newest assistant turn saw the result that
 	// is now cut, so it loses its thinking too. Its signature no longer matches, and checked against
 	// the live API, a tool-use turn without thinking is accepted while one with a stale block is not.
-	// A stale turn that was nothing but thinking keeps a placeholder text.
+	// A stale turn that was nothing but thinking is left out.
 	onlyThinking := llm.Message{Role: llm.RoleAssistant, ProviderState: sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant,
 		Content: []sdk.BetaContentBlockParamUnion{sdk.NewBetaThinkingBlock("sig-x", "hmm")}}}
 	msgs = []llm.Message{
@@ -164,8 +164,13 @@ func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	if got := types(len(sent) - 2); len(got) != 1 || got[0] != "tool_use" {
 		t.Fatalf("the newest assistant turn should lose its stale thinking: %v", got)
 	}
-	if b := blocks(3); len(b) != 1 || b[0].(map[string]any)["text"] != "(thinking omitted)" {
-		t.Fatalf("a thinking-only stale turn should become a placeholder: %v", b)
+	for i := range sent {
+		if b := sent[i].(map[string]any); b["role"] == "assistant" && blocks(i)[0].(map[string]any)["signature"] == "sig-x" {
+			t.Fatal("a thinking-only stale turn should be left out")
+		}
+	}
+	if len(sent) != 6 {
+		t.Fatalf("want 6 messages without the thinking-only turn, got %d", len(sent))
 	}
 }
 

@@ -70,11 +70,28 @@ func TestTrimToolHistory(t *testing.T) {
 	}
 }
 
-func TestClipNotedCountsCharacters(t *testing.T) {
-	if got := ClipNoted("字字字", 3, ""); got != "字字字" {
-		t.Fatalf("cut at the limit: %q", got)
+// Many medium results, each too small to keep a head of, are replaced by a stub once the run is over
+// budget, so the budget holds however the results are sized.
+func TestTrimToolHistoryStubsMediumResults(t *testing.T) {
+	const budget = 64000
+	msgs := []Message{{Role: RoleUser, Content: "brief"}}
+	for range 60 {
+		msgs = append(msgs, Message{Role: RoleAssistant}, Message{Role: RoleTool, Content: strings.Repeat("m", 3900)})
 	}
-	if got := ClipNoted("字字字字", 2, "!"); got != "字字… (truncated: showed the first 2 of 4 characters!)" {
-		t.Fatalf("got %q", got)
+	out, stale := TrimToolHistory(msgs, budget)
+	total, stubs := 0, 0
+	for _, m := range out {
+		if m.Role == RoleTool {
+			total += utf8.RuneCountInString(m.Content)
+			if m.Content == toolHistoryStub {
+				stubs++
+			}
+		}
+	}
+	if total > budget || stubs == 0 || stale == nil {
+		t.Fatalf("total %d, %d stubs", total, stubs)
+	}
+	if out[len(out)-1].Content != msgs[len(msgs)-1].Content {
+		t.Fatal("the newest result was cut")
 	}
 }

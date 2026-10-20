@@ -1,40 +1,29 @@
 package llm
 
 import (
-	"fmt"
 	"unicode/utf8"
+
+	"github.com/j75689/cueflow/internal/textutil"
 )
 
-// ToolHistoryKept is what TrimToolHistory leaves of a result it cuts. Results shorter than twice
-// that are left alone: cutting them saves little.
-const ToolHistoryKept = 2000
-
-// ClipNoted cuts s to n characters and, when it does, ends it with how many were shown out of how
-// many, plus hint.
-func ClipNoted(s string, n int, hint string) string {
-	if len(s) <= n {
-		return s
-	}
-	end, total := len(s), 0
-	for i := range s {
-		if total == n {
-			end = i
-		}
-		total++
-	}
-	if total <= n {
-		return s
-	}
-	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", s[:end], n, total, hint)
-}
+const (
+	// ToolHistoryKept is what TrimToolHistory leaves of a big result it cuts.
+	ToolHistoryKept = 2000
+	// toolHistoryStub replaces a cut result too small to be worth keeping a head of; results shorter
+	// than toolHistoryTiny are left alone.
+	toolHistoryStub = "(removed from the history to save room; call the tool again if you need it)"
+	toolHistoryTiny = 200
+)
 
 // TrimToolHistory is how a connector keeps Request.ToolHistoryBudget. It replays the run request by
 // request (each assistant message was produced from the messages before it): whenever the tool
-// results a request carries pass budget, the oldest are cut to ToolHistoryKept characters until they
-// are under half of it. Cutting to half rather than to the budget means a cut lands every few turns
-// instead of on every one. The newest turn's results are never cut. The result depends only on msgs,
-// so every request sends earlier turns exactly as the previous one did, except where a new cut lands.
-// msgs itself is not changed.
+// results a request carries pass budget, the oldest are cut until the results that may be cut (all
+// but the newest turn's, which are never cut) are under half of it. A result of at least twice
+// ToolHistoryKept keeps its first ToolHistoryKept characters; a smaller one is replaced by a short
+// stub. Cutting to half rather than to the budget means that, unless single results are near half
+// the budget themselves, a cut lands every few turns instead of on every one. The result depends only
+// on msgs, so every request sends earlier turns exactly as the previous one did, except where a new
+// cut lands. msgs itself is not changed.
 //
 // stale[i] is true for an assistant message that was produced before a cut landed among the turns it
 // had seen: what it was produced from has changed since. Connectors that bind state to the turns
@@ -50,14 +39,15 @@ func TrimToolHistory(msgs []Message, budget int) (out []Message, stale []bool) {
 		if total <= budget {
 			return
 		}
-		newest := end
+		newest, fixed := end, 0 // fixed: the newest turn's results, which are never cut
 		for newest > 0 && out[newest-1].Role == RoleTool {
 			newest--
+			fixed += utf8.RuneCountInString(out[newest].Content)
 		}
 		first := -1
-		for ; next < newest && total > budget/2; next++ {
+		for ; next < newest && total-fixed > budget/2; next++ {
 			n := utf8.RuneCountInString(out[next].Content)
-			if out[next].Role != RoleTool || n < 2*ToolHistoryKept {
+			if out[next].Role != RoleTool || n < toolHistoryTiny {
 				continue
 			}
 			if stale == nil {
@@ -67,7 +57,11 @@ func TrimToolHistory(msgs []Message, budget int) (out []Message, stale []bool) {
 			if first < 0 {
 				first = next
 			}
-			out[next].Content = ClipNoted(out[next].Content, ToolHistoryKept, "; cut from the history to save room, call the tool again if you need the rest")
+			if n >= 2*ToolHistoryKept {
+				out[next].Content = textutil.ClipNoted(out[next].Content, ToolHistoryKept, "; cut from the history to save room, call the tool again if you need the rest")
+			} else {
+				out[next].Content = toolHistoryStub
+			}
 			total -= n - utf8.RuneCountInString(out[next].Content)
 		}
 		for j := first + 1; first >= 0 && j < end; j++ {

@@ -63,3 +63,17 @@ func TestFitParts(t *testing.T) {
 		t.Fatalf("long part not split: %q", got)
 	}
 }
+
+func TestClipNoted(t *testing.T) {
+	if got := ClipNoted("字字字", 3, ""); got != "字字字" {
+		t.Fatalf("cut at the limit: %q", got)
+	}
+	if got := ClipNoted("字字字字", 2, "!"); got != "字字… (truncated: showed the first 2 of 4 characters!)" {
+		t.Fatalf("got %q", got)
+	}
+	for _, n := range []int{0, -3} {
+		if got := ClipNoted("abc", n, ""); got != "abc" {
+			t.Fatalf("n=%d should mean no limit: %q", n, got)
+		}
+	}
+}

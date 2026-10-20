@@ -347,6 +347,9 @@ func toParams(msgs []llm.Message, stale []bool) []sdk.BetaMessageParam {
 			if p, ok := m.ProviderState.(sdk.BetaMessageParam); ok {
 				if stale != nil && stale[i] {
 					p = withoutThinking(p)
+					if len(p.Content) == 0 {
+						continue // it was only thinking; the API joins the user turns around it
+					}
 				}
 				out = append(out, p)
 				continue
@@ -368,17 +371,12 @@ func toParams(msgs []llm.Message, stale []bool) []sdk.BetaMessageParam {
 	return out
 }
 
-// withoutThinking drops a turn's thinking blocks. A turn that was nothing but thinking keeps a
-// placeholder: the API refuses an assistant turn with no content, and its stale signature too.
 func withoutThinking(p sdk.BetaMessageParam) sdk.BetaMessageParam {
 	kept := make([]sdk.BetaContentBlockParamUnion, 0, len(p.Content))
 	for _, b := range p.Content {
 		if b.OfThinking == nil && b.OfRedactedThinking == nil {
 			kept = append(kept, b)
 		}
-	}
-	if len(kept) == 0 {
-		kept = append(kept, sdk.NewBetaTextBlock("(thinking omitted)"))
 	}
 	p.Content = kept
 	return p

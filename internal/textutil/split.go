@@ -2,6 +2,7 @@
 package textutil
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -168,6 +169,25 @@ func Clip(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// ClipNoted cuts s to n runes and, when it does, ends it with how many were shown out of how many,
+// plus hint, so a reader (often a model) knows it hasn't seen the whole text. n <= 0 means no limit.
+func ClipNoted(s string, n int, hint string) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	end, total := len(s), 0
+	for i := range s {
+		if total == n {
+			end = i
+		}
+		total++
+	}
+	if total <= n {
+		return s
+	}
+	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", s[:end], n, total, hint)
 }
 
 // FormatHashtags renders tags as "#a #b", adding the missing # and skipping blanks.
