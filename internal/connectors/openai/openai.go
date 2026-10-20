@@ -49,6 +49,7 @@ func init() {
 			{Key: "headers", Label: "Extra headers", Type: connector.FieldKV,
 				Help: "Sent with every request, e.g. a gateway key. OpenRouter defaults HTTP-Referer and X-Title to CueFlow"},
 			{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 8000},
+			contextWindowField,
 			{Key: "temperature", Label: "Temperature", Type: connector.FieldString, Help: "Optional, e.g. 0.7. Blank uses the server default."},
 		},
 		DefaultName: func(cfg connector.Config) string {
@@ -61,6 +62,12 @@ func init() {
 	}, New)
 }
 
+// contextWindowField is the model's input limit, for showing how full a run's context is. It
+// depends on the model (and, for local servers, on how they were started), not the provider, so
+// there is no default: blank shows the size without a percentage.
+var contextWindowField = connector.Field{Key: "context_window", Label: "Context window (tokens)", Type: connector.FieldNumber,
+	Help: "The model's input limit, e.g. 128000. Used to show how full a run's context is; blank shows the size only"}
+
 var providerLabels = map[string]string{
 	"openai": "OpenAI", "openrouter": "OpenRouter", "azure": "Azure OpenAI", "deepseek": "DeepSeek",
 	"ollama": "Ollama", "vllm": "vLLM", "localai": "LocalAI", "openai_compatible": "OpenAI-compatible",
@@ -70,6 +77,7 @@ type Client struct {
 	provider, baseURL, model, apiKey, temperature, apiVersion string
 	headers                                                   map[string]string
 	maxTokens                                                 int
+	contextWindow                                             int64
 	http                                                      *http.Client
 	// tokens, when set, supplies short-lived OAuth access tokens (Vertex AI).
 	tokens oauth2.TokenSource
@@ -89,6 +97,7 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		maxTokens:   cfg.Int("max_tokens", 8000),
 		http:        env.HTTPClient,
 	}
+	c.contextWindow = int64(cfg.Int("context_window", 0))
 	if provider == "openrouter" {
 		// App attribution recommended by OpenRouter; overridable via Extra headers.
 		c.headers["HTTP-Referer"] = "https://github.com/j75689/cueflow"
@@ -142,6 +151,9 @@ type wireMessage struct {
 	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
+
+// ContextWindow is the configured context_window, 0 when not set (or not positive).
+func (c *Client) ContextWindow(context.Context) int64 { return max(c.contextWindow, 0) }
 
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	msgs := make([]wireMessage, 0, len(req.Messages)+1)

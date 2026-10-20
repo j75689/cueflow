@@ -116,6 +116,7 @@ const SSE_EVENTS = [
   "deliverable.updated",
   "deliverable.deleted",
   "run.updated",
+  "run.context",
   "connector.updated",
   "task.updated",
   "task.deleted",

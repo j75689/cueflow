@@ -25,7 +25,7 @@ import { TagInput } from "@/components/inputs";
 import { useDialog } from "@/components/dialog";
 import { useOrgFollow } from "@/components/org";
 import { PublishTarget } from "@/components/publish-target";
-import { useServerEvent, useToast } from "@/components/providers";
+import { useMeta, useServerEvent, useToast } from "@/components/providers";
 import { FileLink, TaskFilesCard, TaskFilesProvider } from "@/components/task-files";
 import {
   Button,
@@ -51,6 +51,7 @@ import {
 } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
 import type {
+  AgentRun,
   Agent,
   TaskDetail,
   TaskMessage,
@@ -87,6 +88,10 @@ function TaskView() {
     if (!related) return;
     void task.reload();
     if (d.id === id) void runs.reload();
+  });
+  // A turn of this task's run finished: its context size moved.
+  useServerEvent("run.context", (d) => {
+    if (d.task_id === id) void runs.reload();
   });
 
   const patch = async (body: TaskPatch, okMsg?: string) => {
@@ -228,6 +233,7 @@ function TaskView() {
                         </span>
                       )}
                     </p>
+                    <ContextSize run={r} />
                     {(r.model || r.runtime === "acp") && (
                       <p className="flex min-w-0 items-center gap-1.5 text-fg-3">
                         {r.runtime === "acp" && <Pill>ACP</Pill>}
@@ -1238,5 +1244,42 @@ export default function Page() {
         <TaskView />
       </TaskFilesProvider>
     </Suspense>
+  );
+}
+
+const compactTokens = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/** "Context 182K / 1M (18%)": how full the run's latest prompt was, coloured from the hand-off point on. */
+function ContextSize({ run }: { run: AgentRun }) {
+  const { meta } = useMeta();
+  if (!run.context_tokens) return null;
+  const handOff = meta?.context_handoff_at ?? 0.8;
+  const size = compactTokens.format(run.context_tokens);
+  if (!run.context_window) {
+    return (
+      <p
+        className="text-fg-3"
+        title="The model's context window isn't known, so there is no percentage. Set it on the connector."
+      >
+        Context {size}
+      </p>
+    );
+  }
+  const share = run.context_tokens / run.context_window;
+  return (
+    <p
+      className={cx(
+        share >= handOff
+          ? "font-medium text-amber-700 dark:text-amber-400"
+          : "text-fg-3",
+      )}
+      title={`The latest prompt was ${run.context_tokens.toLocaleString()} of the model's ${run.context_window.toLocaleString()} tokens. Runs hand off to a fresh one at ${Math.round(handOff * 100)}%.`}
+    >
+      Context {size} / {compactTokens.format(run.context_window)} (
+      {Math.round(share * 100)}%)
+    </p>
   );
 }

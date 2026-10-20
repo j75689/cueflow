@@ -65,6 +65,13 @@ type Response struct {
 	Usage      Usage
 }
 
+// ContextWindower is implemented by connectors that know how many input tokens their model accepts.
+// ContextWindow returns 0 when it doesn't: a size is then shown without a percentage rather than
+// against a guess. Callers ask once per run; implementations cache any lookup.
+type ContextWindower interface {
+	ContextWindow(ctx context.Context) int64
+}
+
 // Chatter is implemented by every LLM connector.
 type Chatter interface {
 	Chat(ctx context.Context, req Request) (*Response, error)

@@ -267,6 +267,11 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		"task_statuses":      store.TaskStatuses,
 		"task_priorities":    store.TaskPriorities,
 	}
+	if s.Crew != nil {
+		// How full a run's context may get before it hands off (CUEFLOW_CONTEXT_HANDOFF); the task page
+		// colours the size from here.
+		out["context_handoff_at"] = s.Crew.ContextHandOffAt
+	}
 	for _, m := range s.Modules {
 		if p, ok := m.(MetaProvider); ok {
 			p.Meta(s, out)

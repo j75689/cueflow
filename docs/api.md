@@ -209,8 +209,11 @@ own host), `runner_pool` (a registered [Runner](#runners) launches it) or `exter
 "agent_capabilities":[{"id":"research","name":"Research","description":"...","tools":["web_search","read_url"]}, ...],
 "agent_roles":["manager","researcher","writer","editor","custom"],
 "task_statuses":["BACKLOG","TODO","IN_PROGRESS","BLOCKED","WAITING_HUMAN","REVIEW","DONE","CANCELED"],
-"task_priorities":["low","normal","high","urgent"]
+"task_priorities":["low","normal","high","urgent"],
+"context_handoff_at":0.8
 ```
+`context_handoff_at` is how full a run's context may get before it hands off to a fresh run
+(`CUEFLOW_CONTEXT_HANDOFF`, 0.8 by default); the task page colours a run's context size from there.
 Capabilities come from the core (`research`, `delegation`, `planning`, `memory`) and the mounted modules
 (`sources`, `post_deliverables`, `imaging`, `deliverables`). Every agent always has `add_comment`, `ask_human`,
 `complete_task`. No capability can publish or act: everything an agent produces waits for a human under Deliverables.
@@ -400,7 +403,10 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 
 `AgentRun` additionally carries `"connector_id":"uuid|null","model":"...","runtime":"builtin|acp"`, and
 `"cache_read_tokens"` / `"cache_write_tokens"` (the parts of its `input_tokens` read from and written to the
-prompt cache).
+prompt cache), and `"context_tokens"` / `"context_window"`: the prompt of the run's latest model call (how full its
+context is; `input_tokens` adds up every call) and the model's input limit, `0` when unknown. The window comes from the
+connector's Context window setting, or for Claude on the Claude API from the Models API (`max_input_tokens`, asked
+once per model per process).
 
 ---
 
@@ -476,6 +482,9 @@ Event names and `data` payloads:
 - `task.updated` → `{"id":"uuid","status":"IN_PROGRESS"}`
 - `task.deleted` → `{"id":"uuid"}`
 - `task.message` → `{"task_id":"uuid","id":"uuid"}`
+- `task.file` → `{"task_id":"uuid","name":"notes.md","action":"written|deleted"}`
+- `run.context` → `{"task_id":"uuid","run_id":"uuid","context_tokens":182000,"context_window":1000000}` (after each turn
+  of a built-in run)
 - `agent.updated` → `{"id":"uuid"}`
 - `org.updated` → `{"id":"uuid"}` (created, renamed or deleted)
 - `schedule.updated` → `{"id":"uuid"}`

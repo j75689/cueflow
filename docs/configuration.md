@@ -32,6 +32,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | Variable | Default | Purpose |
 |---|---|---|
 | `CUEFLOW_AGENT_CONCURRENCY` | `3` | Agent tasks that may run at the same time |
+| `CUEFLOW_CONTEXT_HANDOFF` | `0.8` | How full a run's context (latest prompt over the model's window) may get before the run hands off to a fresh one; the task page colours the size from here. A number between 0 and 1; anything else keeps 0.8 and logs a warning at startup |
 | `CUEFLOW_MODULES` | `content,deliverables` | Feature modules to mount, comma-separated (`all`, `none`, or any of `content`, `deliverables`; `content` needs `deliverables`). A module that is not mounted has no routes, agent tools, workers or cron; its tables stay, and the dashboard hides its pages (`/meta` lists what is mounted) |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | Let agents' `read_url` reach LAN/loopback addresses |
 

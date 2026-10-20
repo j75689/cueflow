@@ -246,6 +246,7 @@ sequenceDiagram
 | 項目 | 上限／行為 | 位置 |
 |---|---|---|
 | 每次執行回合數 | 角色設定 `max_turns`（預設 12，Chief 16，最高 40） | `store/agents.go` |
+| run 的 context 可以多滿 | 預設為模型上限的 80%（`CUEFLOW_CONTEXT_HANDOFF`）；任務頁會把每個 run 最新一次的 prompt 顯示成「Context 182K / 1M (18%)」，達到這個比例起變色，不知道模型上限時則不顯示百分比 | `config`、`crew/crew.go` |
 | 每次執行建立的子任務 + 獨立任務 | 8 | `crew/tools.go` |
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |
