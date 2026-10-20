@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/config"
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/guard"
@@ -35,8 +36,11 @@ type Crew struct {
 	fetcher *Fetcher
 
 	Concurrency int
-	Lease       time.Duration
-	Every       time.Duration
+	// ContextHandOffAt is how full a run's context may get (prompt over the model's window) before it
+	// hands off to a fresh run (CUEFLOW_CONTEXT_HANDOFF); the task page reads it from /meta.
+	ContextHandOffAt float64
+	Lease            time.Duration
+	Every            time.Duration
 	// ValidateSchedule checks cron expressions for agent-created schedules (set by main).
 	ValidateSchedule store.CronValidator
 	// OnSchedulesChanged reloads the scheduler after an agent creates/pauses a schedule.
@@ -64,7 +68,8 @@ type Crew struct {
 
 func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
-		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, Lease: 2 * time.Minute, Every: 2 * time.Second,
+		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
+		Lease: 2 * time.Minute, Every: 2 * time.Second,
 		running: map[uuid.UUID]context.CancelFunc{}, wake: make(chan struct{}, 1)}
 }
 
@@ -385,6 +390,9 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	}
 	defer hub.Close(model)
 	run.ConnectorID, run.Model, run.Runtime = &connID, model.Model(), "builtin"
+	if w, ok := model.(llm.ContextWindower); ok {
+		run.ContextWindow = w.ContextWindow(ctx)
+	}
 
 	team, _ := c.store.ListAgents(ctx, task.OrgID)
 	var memories []store.AgentMemory
@@ -425,6 +433,9 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		run.OutputTokens += resp.Usage.OutputTokens
 		run.CacheReadTokens += resp.Usage.CacheReadTokens
 		run.CacheWriteTokens += resp.Usage.CacheWriteTokens
+		// The history is append-only, so this call's prompt is how full the context is now.
+		run.ContextTokens = resp.Usage.InputTokens
+		c.recordContext(ctx, task, run)
 		msgs = append(msgs, resp.Message)
 
 		text := strings.TrimSpace(resp.Message.Content)
@@ -459,6 +470,17 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		}
 	}
 	return &outcome{kind: "limit"}
+}
+
+// recordContext stores the size of the run's latest prompt and tells the task's page.
+func (c *Crew) recordContext(ctx context.Context, task *store.Task, run *store.AgentRun) {
+	bg := context.WithoutCancel(ctx)
+	if err := c.store.SetRunContext(bg, run.ID, run.ContextTokens, run.ContextWindow); err != nil {
+		c.logger.Warn("record context size", "run", run.ID, "err", err)
+		return
+	}
+	c.broker.Publish(task.OrgID, "run.context", map[string]any{"task_id": task.ID, "run_id": run.ID,
+		"context_tokens": run.ContextTokens, "context_window": run.ContextWindow})
 }
 
 // overflowMessage explains a refusal for exceeding the model's context window. The provider's raw

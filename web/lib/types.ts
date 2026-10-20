@@ -127,6 +127,8 @@ export interface Meta {
   connector_types: ConnectorSpec[];
   agent_capabilities?: AgentCapability[];
   agent_roles?: AgentRole[];
+  /** How full a run's context (prompt over the model's window) may get before it hands off (CUEFLOW_CONTEXT_HANDOFF). */
+  context_handoff_at?: number;
   task_statuses?: TaskStatus[];
   task_priorities?: TaskPriority[];
 }
@@ -547,6 +549,10 @@ export interface AgentRun {
   error: string | null;
   started_at: string;
   finished_at: string | null;
+  /** The prompt of the run's latest model call: how full its context is (input_tokens adds up every call). */
+  context_tokens: number;
+  /** The model's input limit; 0 when unknown (the size is shown without a percentage). */
+  context_window: number;
   /** LLM connector (built-in) or runtime connector (ACP) used by this run. */
   connector_id?: string | null;
   model?: string;

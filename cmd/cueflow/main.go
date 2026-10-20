@@ -133,6 +133,9 @@ func serve() error {
 	}
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
+	for _, w := range cfg.Warnings {
+		logger.Warn("config: " + w)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -196,6 +199,7 @@ func serve() error {
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
 	team.Concurrency = cfg.AgentConcurrency
+	team.ContextHandOffAt = cfg.ContextHandOffAt
 	team.MCPBaseURL = localBaseURL(cfg.Addr)
 	team.ValidateSchedule = scheduler.ValidateSchedule
 	team.OnSchedulesChanged = func(ctx context.Context) { _ = sched.Reload(ctx) }

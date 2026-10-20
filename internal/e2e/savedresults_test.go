@@ -100,6 +100,13 @@ func TestLargeToolResultsSavedAsFiles(t *testing.T) {
 	if got, err := e.store.GetTask(ctx, task.ID); err != nil || got.Status != store.TaskReview {
 		t.Fatalf("the run should have finished: %v %v", got.Status, err)
 	}
+	// The run records its latest prompt (the script reports 100 input tokens per call) against the
+	// model's window, while input_tokens keeps adding up every call.
+	var runs []store.AgentRun
+	e.do("GET", "/tasks/"+task.ID.String()+"/runs", nil, &runs)
+	if len(runs) != 1 || runs[0].ContextTokens != 100 || runs[0].ContextWindow != 1000 || runs[0].InputTokens != 300 {
+		t.Fatalf("run context: %+v", runs)
+	}
 
 	files, _, _ := e.store.ListTaskFiles(ctx, task.ID, 10)
 	if len(files) != 2 || files[0].Name != "results/dump_text-1.txt" || files[1].Name != "results/dump_text-2.txt" {

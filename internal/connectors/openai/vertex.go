@@ -34,6 +34,7 @@ func init() {
 			{Key: "service_account_json", Label: "Service account key (JSON)", Type: connector.FieldText, Secret: true,
 				Help: "Blank uses Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS, gcloud application-default login, metadata server)"},
 			{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 8000},
+			contextWindowField,
 			{Key: "temperature", Label: "Temperature", Type: connector.FieldString, Help: "Optional, e.g. 0.7"},
 			{Key: "base_url", Label: "Endpoint override", Type: connector.FieldString,
 				Help: "Optional, e.g. a Private Service Connect endpoint. Must end in .../endpoints/openapi"},
@@ -92,6 +93,7 @@ func newVertexGemini(cfg connector.Config, env connector.Env) (connector.Instanc
 		http:        env.HTTPClient,
 		tokens:      oauth2.ReuseTokenSource(nil, creds.TokenSource),
 	}
+	c.contextWindow = int64(cfg.Int("context_window", 0))
 	// gcloud user credentials have no project of their own; Vertex needs the billing/quota
 	// project named explicitly.
 	if credentialType(creds) == "authorized_user" {

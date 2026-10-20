@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -49,6 +51,8 @@ func commonFields(modelDefault, modelHelp string) []connector.Field {
 		{Key: "max_tokens", Label: "Max output tokens", Type: connector.FieldNumber, Default: 16000},
 		{Key: "refusal_fallback", Label: "Refusal fallback", Type: connector.FieldBool, Default: true,
 			Help: "If a request is declined by a safety classifier, re-serve it with a fallback model"},
+		{Key: "context_window", Label: "Context window (tokens)", Type: connector.FieldNumber,
+			Help: "The model's input limit, to show how full a run's context is. Blank: looked up from the Claude API's Models endpoint (on Bedrock and Vertex, or when the lookup fails, the size is shown without a percentage)"},
 		{Key: "prompt_caching", Label: "Prompt caching", Type: connector.FieldBool, Default: true,
 			Help: "Cache the agent's conversation between turns (cheaper, faster). Turn off for a model or gateway that rejects cache_control"},
 	}
@@ -123,6 +127,10 @@ type Client struct {
 	// rejects cache_control (see Chat).
 	promptCaching atomic.Bool
 	logger        *slog.Logger
+	// contextWindow is the configured limit; 0 asks models (first-party only) once per process.
+	contextWindow int64
+	models        *sdk.ModelService
+	modelsKey     string // which endpoint models talks to, for the lookup cache
 }
 
 func modelOf(cfg connector.Config, def string) string {
@@ -136,7 +144,8 @@ func modelOf(cfg connector.Config, def string) string {
 func baseModel(m string) string { return strings.TrimPrefix(m, "anthropic.") }
 
 func newClient(cfg connector.Config, env connector.Env, model string) *Client {
-	c := &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000), logger: env.Logger}
+	c := &Client{model: model, effort: cfg.String("effort"), maxTokens: cfg.Int("max_tokens", 16000), logger: env.Logger,
+		contextWindow: int64(cfg.Int("context_window", 0))}
 	if c.logger == nil {
 		c.logger = slog.Default()
 	}
@@ -163,6 +172,8 @@ func newFirstParty(cfg connector.Config, env connector.Env) (connector.Instance,
 	}
 	client := sdk.NewClient(opts...)
 	c.messages = &client.Beta.Messages
+	c.models = &client.Models
+	c.modelsKey = cfg.String("base_url") // the window is the model's, whichever credentials ask
 	c.serverFallback = cfg.Bool("refusal_fallback") && fallbackModels[c.model]
 	return c, nil
 }
@@ -244,6 +255,52 @@ func (c *Client) Test(ctx context.Context) (*connector.TestResult, error) {
 		return &connector.TestResult{OK: false, Message: err.Error()}, nil
 	}
 	return &connector.TestResult{OK: true, Message: fmt.Sprintf("%s replied: %.60s", c.model, strings.TrimSpace(resp.Message.Content))}, nil
+}
+
+// windowCache remembers the Models API's answer per endpoint and model for the life of the process,
+// so asking costs one request per model, not one per run. A failed lookup is remembered for
+// windowRetry, so a broken endpoint isn't asked on every run either.
+var windowCache = struct {
+	sync.Mutex
+	m map[string]windowEntry
+}{m: map[string]windowEntry{}}
+
+type windowEntry struct {
+	tokens int64
+	retry  time.Time // zero for an answer; when to ask again after a failure
+}
+
+const windowRetry = 10 * time.Minute
+
+// ContextWindow is the configured context_window, else the Models API's max_input_tokens for this
+// model (Claude API only), else 0.
+func (c *Client) ContextWindow(ctx context.Context) int64 {
+	if c.contextWindow > 0 || c.models == nil {
+		return c.contextWindow
+	}
+	key := c.modelsKey + "|" + c.model
+	windowCache.Lock()
+	e, ok := windowCache.m[key]
+	windowCache.Unlock()
+	if ok && (e.retry.IsZero() || time.Now().Before(e.retry)) {
+		return e.tokens
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// One try: it only decides whether a percentage is shown, and a run waits on it to start.
+	opts := append(append([]option.RequestOption{}, c.callOpts...), option.WithMaxRetries(0))
+	info, err := c.models.Get(ctx, c.model, sdk.ModelGetParams{}, opts...)
+	e = windowEntry{}
+	if err != nil || info.MaxInputTokens <= 0 {
+		c.logger.Debug("anthropic: context window lookup failed; showing sizes without a percentage", "model", c.model, "err", err)
+		e.retry = time.Now().Add(windowRetry)
+	} else {
+		e.tokens = info.MaxInputTokens
+	}
+	windowCache.Lock()
+	windowCache.m[key] = e
+	windowCache.Unlock()
+	return e.tokens
 }
 
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {

@@ -125,3 +125,20 @@ func TestDirectURLDefaultsToPublicAndFeedsMedia(t *testing.T) {
 		t.Errorf("an explicit media URL wins: %q", c.MediaBaseURL)
 	}
 }
+
+// CUEFLOW_CONTEXT_HANDOFF takes a fraction between 0 and 1; anything else keeps the default and
+// leaves a warning for startup.
+func TestContextHandOff(t *testing.T) {
+	for v, want := range map[string]float64{"": 0.8, "0.6": 0.6, "0.95": 0.95, "0": 0.8, "1": 0.8, "80": 0.8, "-0.2": 0.8, "abc": 0.8} {
+		base(t)
+		t.Setenv("CUEFLOW_CONTEXT_HANDOFF", v)
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := v == "" || v == "0.6" || v == "0.95"
+		if c.ContextHandOffAt != want || valid != (len(c.Warnings) == 0) {
+			t.Errorf("%q: %v, warnings %v", v, c.ContextHandOffAt, c.Warnings)
+		}
+	}
+}

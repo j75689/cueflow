@@ -201,3 +201,20 @@ func TestAzureRequiresKeyAndDeployment(t *testing.T) {
 		t.Fatal("azure without a deployment name should fail")
 	}
 }
+
+// The context window is what the operator configured; without one it is unknown (0), not a guess.
+func TestContextWindowConfigured(t *testing.T) {
+	for cfg, want := range map[string]int64{"": 0, "128000": 128000} {
+		c := connector.Config{"provider": "ollama", "model": "qwen3"}
+		if cfg != "" {
+			c["context_window"] = cfg
+		}
+		inst, err := connector.Build("openai", c, connector.Env{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := inst.(llm.ContextWindower).ContextWindow(context.Background()); got != want {
+			t.Errorf("context_window %q: %d", cfg, got)
+		}
+	}
+}

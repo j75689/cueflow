@@ -28,6 +28,9 @@ var (
 )
 
 func (scriptLLM) Model() string { return "script" }
+
+// ContextWindow makes the script model report a window, so runs record a percentage.
+func (scriptLLM) ContextWindow(context.Context) int64 { return 1000 }
 func (scriptLLM) Test(context.Context) (*connector.TestResult, error) {
 	return &connector.TestResult{OK: true}, nil
 }

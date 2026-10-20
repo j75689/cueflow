@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
@@ -361,5 +362,55 @@ func TestVertexValidation(t *testing.T) {
 	_, err := connector.Build("anthropic_vertex", connector.Config{"project_id": "p", "service_account_json": "{not json"}, connector.Env{})
 	if err == nil || !strings.Contains(err.Error(), "vertex: credentials") {
 		t.Fatalf("bad key should fail clearly: %v", err)
+	}
+}
+
+// The context window comes from the Models API once per model and process (not per run), a
+// configured value wins, and a failed lookup is 0 (no percentage) and isn't retried at once.
+func TestContextWindow(t *testing.T) {
+	isolateEnv(t)
+	var lookups atomic.Int32
+	fail := atomic.Bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1/models/") {
+			http.NotFound(w, r)
+			return
+		}
+		lookups.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"down"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"type":"model","id":"claude-opus-5-5","display_name":"Opus","created_at":"2026-01-01T00:00:00Z",
+			"max_input_tokens":1000000,"max_tokens":128000}`))
+	}))
+	t.Cleanup(srv.Close)
+	window := func(cfg connector.Config) int64 {
+		inst, err := connector.Build("anthropic", cfg, connector.Env{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inst.(llm.ContextWindower).ContextWindow(context.Background())
+	}
+	cfg := connector.Config{"api_key": "sk-test", "base_url": srv.URL}
+	if w := window(cfg); w != 1000000 {
+		t.Fatalf("window: %d", w)
+	}
+	if w := window(cfg); w != 1000000 || lookups.Load() != 1 {
+		t.Fatalf("a second instance should use the cache: %d after %d lookups", w, lookups.Load())
+	}
+	if w := window(connector.Config{"api_key": "sk-test", "base_url": srv.URL, "context_window": 200000}); w != 200000 || lookups.Load() != 1 {
+		t.Fatalf("configured window: %d", w)
+	}
+	fail.Store(true)
+	other := connector.Config{"api_key": "sk-test", "base_url": srv.URL, "model": "claude-sonnet-5-5"}
+	if w := window(other); w != 0 {
+		t.Fatalf("a failed lookup should be unknown: %d", w)
+	}
+	before := lookups.Load()
+	if w := window(other); w != 0 || lookups.Load() != before {
+		t.Fatal("a failed lookup was retried at once")
 	}
 }

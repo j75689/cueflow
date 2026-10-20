@@ -40,6 +40,11 @@ type Config struct {
 	DisableScheduler bool
 	// AgentConcurrency is how many agent tasks may run at once.
 	AgentConcurrency int
+	// ContextHandOffAt is how full a run's context (prompt over the model's window) may get before the
+	// run hands off to a fresh one; the task page colours the size from here. Between 0 and 1.
+	ContextHandOffAt float64
+	// Warnings are settings that were invalid and replaced by their default, for main to log.
+	Warnings []string
 	// Modules are the feature modules to mount (CUEFLOW_MODULES, comma-separated). Default: all of
 	// them. A module that is not mounted has no routes, tools, workers or cron; its tables stay.
 	Modules []string
@@ -100,6 +105,7 @@ func Load() (*Config, error) {
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
+	c.ContextHandOffAt, c.Warnings = envFraction("CUEFLOW_CONTEXT_HANDOFF", DefaultContextHandOffAt, c.Warnings)
 	var err error
 	if c.Modules, err = parseModules(os.Getenv("CUEFLOW_MODULES")); err != nil {
 		return nil, err
@@ -209,6 +215,23 @@ func envDuration(k string, def time.Duration) time.Duration {
 func envBool(k string) bool {
 	b, _ := strconv.ParseBool(os.Getenv(k))
 	return b
+}
+
+// DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
+const DefaultContextHandOffAt = 0.8
+
+// envFraction reads a number strictly between 0 and 1. Anything else falls back to def and adds a
+// warning, so a typo is visible at startup instead of silently changing behaviour.
+func envFraction(k string, def float64, warnings []string) (float64, []string) {
+	v := strings.TrimSpace(os.Getenv(k))
+	if v == "" {
+		return def, warnings
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || !(f > 0 && f < 1) {
+		return def, append(warnings, fmt.Sprintf("%s=%q must be a number between 0 and 1 (e.g. 0.8); using %g", k, v, def))
+	}
+	return f, warnings
 }
 
 func envInt(k string, def int) int {
