@@ -247,7 +247,7 @@ sequenceDiagram
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |
 | 餵回模型的單一工具結果 | 32,000 字，超過時附註截掉多少（顯示在對話串時截斷為 2,000 字） | `crew/crew.go` |
-| 一次 run 每回合帶回模型的工具結果總量 | 64,000 字。超過時 connector 把最舊的結果截成 2,000 字並附註，直到總量低於 32,000 字，所以每隔幾輪才截一次，不會每輪都截；最新一回合的保持完整，agent 需要時可再呼叫一次工具。Claude connector 另外會拿掉截斷前產生的回合的 thinking block，否則 API 會拒絕 | `llm/history.go` |
+| 一次 run 每回合帶回模型的工具結果總量 | 64,000 字。超過時 connector 把最舊的結果截成 2,000 字並附註，直到總量低於 32,000 字，所以每隔幾輪才截一次，不會每輪都截；最新一回合的保持完整，agent 需要時可再呼叫一次工具。Claude connector 另外會拿掉截斷前產生的回合的 thinking block，否則 API 會拒絕 | `crew/tools.go`（上限）、`llm/history.go` |
 | 任務簡報帶入的對話 | 最近 60 則 | `crew/prompt.go` |
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |

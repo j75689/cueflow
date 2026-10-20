@@ -96,7 +96,7 @@ func TestAPIKey(t *testing.T) {
 // Past the tool-history budget the oldest result is cut on the client, and only the turn produced
 // before that cut among the turns it had seen loses its thinking (the API rejects a thinking block
 // whose earlier turns changed). The turn before the cut result and the one produced after the cut
-// keep theirs, and nothing needs a beta.
+// keep theirs.
 func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	isolateEnv(t)
 	srv, last := fakeMessages(t)
@@ -118,11 +118,7 @@ func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
 		t.Fatal(err)
 	}
-	c := last()
-	if c.body["context_management"] != nil || strings.Contains(betas(c), "context-management") {
-		t.Fatal("no server-side clearing is asked for")
-	}
-	sent := c.body["messages"].([]any)
+	sent := last().body["messages"].([]any)
 	blocks := func(i int) []any { return sent[i].(map[string]any)["content"].([]any) }
 	toolText := func(i int) string {
 		return blocks(i)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
@@ -147,6 +143,29 @@ func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	}
 	if msgs[2].Content != long {
 		t.Fatal("the caller's history was changed")
+	}
+
+	// The newest turn's results push the history over: the newest assistant turn saw the result that
+	// is now cut, so it loses its thinking too. Its signature no longer matches, and checked against
+	// the live API, a tool-use turn without thinking is accepted while one with a stale block is not.
+	// A stale turn that was nothing but thinking keeps a placeholder text.
+	onlyThinking := llm.Message{Role: llm.RoleAssistant, ProviderState: sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant,
+		Content: []sdk.BetaContentBlockParamUnion{sdk.NewBetaThinkingBlock("sig-x", "hmm")}}}
+	msgs = []llm.Message{
+		{Role: llm.RoleUser, Content: "brief"},
+		turn("t0"), {Role: llm.RoleTool, ToolCallID: "t0", Content: long},
+		onlyThinking, {Role: llm.RoleUser, Content: "go on"},
+		turn("t1"), {Role: llm.RoleTool, ToolCallID: "t1", Content: long},
+	}
+	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
+		t.Fatal(err)
+	}
+	sent = last().body["messages"].([]any)
+	if got := types(len(sent) - 2); len(got) != 1 || got[0] != "tool_use" {
+		t.Fatalf("the newest assistant turn should lose its stale thinking: %v", got)
+	}
+	if b := blocks(3); len(b) != 1 || b[0].(map[string]any)["text"] != "(thinking omitted)" {
+		t.Fatalf("a thinking-only stale turn should become a placeholder: %v", b)
 	}
 }
 

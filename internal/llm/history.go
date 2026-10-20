@@ -15,17 +15,15 @@ func ClipNoted(s string, n int, hint string) string {
 	if len(s) <= n {
 		return s
 	}
-	total := utf8.RuneCountInString(s)
+	end, total := len(s), 0
+	for i := range s {
+		if total == n {
+			end = i
+		}
+		total++
+	}
 	if total <= n {
 		return s
-	}
-	end, k := len(s), 0
-	for i := range s {
-		if k == n {
-			end = i
-			break
-		}
-		k++
 	}
 	return fmt.Sprintf("%s… (truncated: showed the first %d of %d characters%s)", s[:end], n, total, hint)
 }
