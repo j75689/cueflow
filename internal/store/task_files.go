@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/domain"
 )
 
@@ -140,25 +141,75 @@ const lineageSQL = `WITH RECURSIVE lineage AS (
 	UNION ALL SELECT t.id, t.parent_id, l.depth+1 FROM tasks t JOIN lineage l ON t.id=l.parent_id WHERE l.depth < 20
 ) `
 
-// ListTaskFiles returns the files taskID can read: its own and its ancestors', by name. A name that
-// several of them have resolves to the nearest one, as OpenTaskFile does; TaskID tells whose it is.
-func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID) ([]*TaskFile, error) {
-	rows, err := s.pool.Query(ctx, lineageSQL+`SELECT DISTINCT ON (f.name) `+qualify("f", taskFileColumns)+`, f.storage
-		FROM task_files f JOIN lineage l ON l.id = f.task_id ORDER BY f.name, l.depth`, taskID)
+// TaskFileHeadBytes is how much of each file ListTaskFiles returns in Head.
+const TaskFileHeadBytes = 400
+
+// ListedTaskFile is a file as ListTaskFiles returns it: with the number of the task it belongs to
+// and the start of its bytes, so a listing never has to open the files.
+type ListedTaskFile struct {
+	TaskFile
+	TaskNumber int64  `json:"task_number"`
+	Head       []byte `json:"-"`
+}
+
+// ListTaskFiles returns up to limit of the files taskID can read, by name: its own and its
+// ancestors'. A name that several of them have resolves to the nearest one, as OpenTaskFile does;
+// TaskID and TaskNumber tell whose it is. total is how many there are in all.
+func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) (files []*ListedTaskFile, total int, err error) {
+	rows, err := s.pool.Query(ctx, lineageSQL+`SELECT *, count(*) OVER () FROM (
+			SELECT DISTINCT ON (f.name) `+qualify("f", taskFileColumns)+`, f.storage, t.number,
+				CASE WHEN f.storage = 'db' THEN substring(f.data FROM 1 FOR $3) END
+			FROM task_files f JOIN lineage l ON l.id = f.task_id JOIN tasks t ON t.id = f.task_id
+			ORDER BY f.name, l.depth
+		) visible ORDER BY name LIMIT $2`, taskID, limit, TaskFileHeadBytes)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	defer rows.Close()
-	out := []*TaskFile{}
+	type pending struct {
+		f    *ListedTaskFile
+		kind string
+	}
+	var blobs []pending
+	files = []*ListedTaskFile{}
 	for rows.Next() {
-		f := &TaskFile{}
+		f := &ListedTaskFile{}
 		var kind string
-		if err := rows.Scan(f.scanDest(&kind)...); err != nil {
-			return nil, err
+		if err := rows.Scan(append(f.scanDest(&kind), &f.TaskNumber, &f.Head, &total)...); err != nil {
+			rows.Close()
+			return nil, 0, err
 		}
-		out = append(out, f)
+		files = append(files, f)
+		if kind != blob.KindDB {
+			blobs = append(blobs, pending{f, kind})
+		}
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	// Blobs: read just the head of each. A blob that can't be opened lists without one.
+	for _, p := range blobs {
+		rc, err := s.openBytes(ctx, p.kind, p.f.ID, nil)
+		if err != nil {
+			continue
+		}
+		head := make([]byte, TaskFileHeadBytes)
+		n, _ := io.ReadFull(rc, head)
+		rc.Close()
+		p.f.Head = head[:n]
+	}
+	return files, total, nil
+}
+
+// AncestorTaskFile reports the nearest ancestor of taskID (not the task itself) that has a file
+// named name, by number; ok is false when none has.
+func (s *Store) AncestorTaskFile(ctx context.Context, taskID uuid.UUID, name string) (number int64, ok bool, err error) {
+	err = s.pool.QueryRow(ctx, lineageSQL+`SELECT t.number FROM task_files f JOIN lineage l ON l.id = f.task_id
+		JOIN tasks t ON t.id = f.task_id WHERE f.name=$2 AND l.depth > 0 ORDER BY l.depth LIMIT 1`, taskID, name).Scan(&number)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	return number, err == nil, err
 }
 
 // OpenTaskFile opens the file name as taskID sees it: its own, or else the nearest ancestor's. The

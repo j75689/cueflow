@@ -100,9 +100,14 @@ func TestTaskFiles(t *testing.T) {
 	if _, _, err := readTaskFile(t, e, parent, "results/hook-1.txt"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("parent read child's file: %v", err)
 	}
-	list, err := e.store.ListTaskFiles(ctx, child.ID)
-	if err != nil || len(list) != 2 || list[0].Name != "notes.md" || list[0].TaskID != child.ID || list[1].Name != "results/hook-1.txt" {
-		t.Fatalf("list: %v %v", list, err)
+	list, total, err := e.store.ListTaskFiles(ctx, child.ID, 10)
+	if err != nil || total != 2 || len(list) != 2 || list[0].Name != "notes.md" || list[0].TaskID != child.ID || list[1].Name != "results/hook-1.txt" ||
+		string(list[0].Head) != "child's" || list[0].TaskNumber != child.Number {
+		t.Fatalf("list: %+v %d %v", list, total, err)
+	}
+	// The limit caps the rows, not the total.
+	if one, total, err := e.store.ListTaskFiles(ctx, child.ID, 1); err != nil || len(one) != 1 || total != 2 {
+		t.Fatalf("limited list: %d of %d (%v)", len(one), total, err)
 	}
 
 	// Bad input is a validation error (400), never a database error (500), and writes no bytes.
