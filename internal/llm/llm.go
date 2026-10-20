@@ -46,16 +46,9 @@ type Request struct {
 	Tools     []Tool
 	MaxTokens int
 	// ToolHistoryBudget is how many characters of tool results the caller wants carried back to the
-	// model. Only a HistoryShedder reads it; for any other connector the caller trims the history
-	// itself (TrimToolHistory) before Chat.
+	// model; 0 means no limit. Every connector applies it in Chat, normally with TrimToolHistory, and
+	// drops whatever provider state a cut invalidates (see TrimToolHistory's stale).
 	ToolHistoryBudget int
-}
-
-// HistoryShedder is implemented by connectors that keep Request.ToolHistoryBudget themselves and
-// must receive the history exactly as the model saw it. Claude's thinking blocks are bound to the
-// turns before them, so a client-side cut would make the API reject the request.
-type HistoryShedder interface {
-	ShedsToolHistory()
 }
 
 type Usage struct {

@@ -251,7 +251,7 @@ target each time.
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
 | A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
-| Tool results a run carries back to the model each turn | About 64,000 characters, and the agent can call a tool again for what was shed. Most connectors: past it the loop cuts the oldest results to 2,000 with a note; the newest turn's stay whole. Claude connectors: the history is sent as the model saw it and the API clears old results once the prompt passes the budget plus the rest of the prompt (estimated at 3 characters a token); the newest turn's results are kept. Where the endpoint turns that down, the connector cuts as the loop does and drops the thinking blocks after the cut | `crew/crew.go`, `llm/history.go`, `connectors/anthropic` |
+| Tool results a run carries back to the model each turn | 64,000 characters. Past it the connector cuts the oldest results to 2,000 with a note until they are under 32,000, so a cut lands every few turns rather than every turn; the newest turn's stay whole, and the agent can call the tool again. Claude connectors also drop the thinking blocks of the turns produced before a cut, which the API would otherwise reject | `llm/history.go` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |

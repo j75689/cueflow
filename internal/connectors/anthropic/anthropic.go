@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
-	"unicode/utf8"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -117,14 +115,7 @@ type Client struct {
 	maxTokens int
 	// serverFallback uses the Claude API's server-side fallback routing.
 	serverFallback bool
-	// noServerClear is set once the endpoint has turned down server-side clearing of old tool results
-	// (see Chat); the connector then sheds them itself.
-	noServerClear atomic.Bool
 }
-
-// ShedsToolHistory marks the connector as an llm.HistoryShedder: crew must not cut the history it
-// sends, or the thinking blocks after the cut stop matching the turns before them.
-func (c *Client) ShedsToolHistory() {}
 
 func modelOf(cfg connector.Config, def string) string {
 	if m := cfg.String("model"); m != "" {
@@ -250,12 +241,7 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	params := sdk.BetaMessageNewParams{
 		Model:     c.model,
 		MaxTokens: int64(maxTokens),
-	}
-	serverClear := req.ToolHistoryBudget > 0 && !c.noServerClear.Load()
-	if req.ToolHistoryBudget > 0 && !serverClear {
-		params.Messages = toParams(trimDroppingThinking(req.Messages, req.ToolHistoryBudget))
-	} else {
-		params.Messages = toParams(req.Messages)
+		Messages:  toParams(llm.TrimToolHistory(req.Messages, req.ToolHistoryBudget)),
 	}
 	if req.System != "" {
 		params.System = []sdk.BetaTextBlockParam{{Text: req.System}}
@@ -267,10 +253,6 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		params.Tools = append(params.Tools, sdk.BetaToolUnionParam{OfTool: toolParam(t)})
 	}
 	params.Betas = append([]sdk.AnthropicBeta{}, c.betas...)
-	if serverClear {
-		params.ContextManagement = clearOldToolResults(req)
-		params.Betas = append(params.Betas, sdk.AnthropicBetaContextManagement2025_06_27)
-	}
 	if c.serverFallback {
 		params.Betas = append(params.Betas, sdk.AnthropicBetaServerSideFallback2026_07_01)
 		params.Fallbacks = sdk.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
@@ -280,10 +262,6 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
-			if serverClear && turnsDownServerClear(apiErr) {
-				c.noServerClear.Store(true)
-				return c.Chat(ctx, req)
-			}
 			return nil, fmt.Errorf("anthropic: HTTP %d: %s", apiErr.StatusCode, apiErr.Error())
 		}
 		return nil, fmt.Errorf("anthropic: %w", err)
@@ -318,88 +296,6 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		Usage: llm.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}, nil
 }
 
-// charsPerToken turns the character budget into tokens for the API's trigger. It is a rough
-// average for mixed code and prose; the trigger only needs to land near the budget.
-const charsPerToken = 3
-
-// clearOldToolResults has the API shed old tool results instead of the client cutting them: a cut
-// would change the turns a thinking block is bound to and the API would reject the request. The
-// trigger counts the whole prompt, so it is the budget plus this request's other content (system
-// prompt, tool schemas, messages), in tokens. The newest turn's results are always kept, however
-// many tools it called.
-func clearOldToolResults(req llm.Request) sdk.BetaContextManagementConfigParam {
-	other := utf8.RuneCountInString(req.System)
-	for _, t := range req.Tools {
-		schema, _ := json.Marshal(t.Schema)
-		other += utf8.RuneCountInString(t.Name) + utf8.RuneCountInString(t.Description) + len(schema)
-	}
-	newest := 0 // tool results after the last assistant turn
-	for _, m := range req.Messages {
-		if m.Role == llm.RoleTool {
-			newest++
-			continue
-		}
-		newest = 0
-		other += utf8.RuneCountInString(m.Content)
-		for _, tc := range m.ToolCalls {
-			other += len(tc.Arguments)
-		}
-	}
-	return sdk.BetaContextManagementConfigParam{Edits: []sdk.BetaContextManagementConfigEditUnionParam{{
-		OfClearToolUses20250919: &sdk.BetaClearToolUses20250919EditParam{
-			Trigger: sdk.BetaClearToolUses20250919EditTriggerUnionParam{OfInputTokens: &sdk.BetaInputTokensTriggerParam{
-				Value: int64((other + req.ToolHistoryBudget) / charsPerToken)}},
-			Keep: sdk.BetaToolUsesKeepParam{Value: int64(max(newest, 1))},
-		},
-	}}}
-}
-
-// turnsDownServerClear tells whether the API (or a gateway in front of it) refused the request
-// over context management, or let the prompt grow too long because it ignored it.
-func turnsDownServerClear(err *sdk.Error) bool {
-	if err.StatusCode != 400 {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "context_management") || strings.Contains(msg, "context-management") ||
-		strings.Contains(msg, "prompt is too long")
-}
-
-// trimDroppingThinking sheds old tool results on the client, for endpoints without server-side
-// clearing: the oldest results are cut as for any other connector, and every assistant turn after the
-// first cut loses its thinking blocks, which no longer match the turns before them. The API accepts
-// a turn without its thinking; it refuses one whose thinking was bound to different content.
-func trimDroppingThinking(msgs []llm.Message, budget int) []llm.Message {
-	cut := llm.TrimToolHistory(msgs, budget)
-	first := -1
-	for i := range cut {
-		if cut[i].Content != msgs[i].Content {
-			first = i
-			break
-		}
-	}
-	if first < 0 {
-		return cut
-	}
-	for i := first + 1; i < len(cut); i++ {
-		p, ok := cut[i].ProviderState.(sdk.BetaMessageParam)
-		if !ok {
-			continue
-		}
-		var kept []sdk.BetaContentBlockParamUnion
-		for _, b := range p.Content {
-			if b.OfThinking == nil && b.OfRedactedThinking == nil {
-				kept = append(kept, b)
-			}
-		}
-		if len(kept) > 0 && len(kept) < len(p.Content) {
-			p.Content = kept
-			cut[i].ProviderState = p
-		}
-	}
-	return cut
-}
-
 func toolParam(t llm.Tool) *sdk.BetaToolParam {
 	schema := sdk.BetaToolInputSchemaParam{ExtraFields: map[string]any{}}
 	for k, v := range t.Schema {
@@ -425,9 +321,11 @@ func toolParam(t llm.Tool) *sdk.BetaToolParam {
 }
 
 // toParams converts neutral messages. Assistant turns produced by this provider are replayed
-// verbatim from ProviderState (keeps thinking blocks intact); consecutive tool results are merged
-// into one user turn as the API requires.
-func toParams(msgs []llm.Message) []sdk.BetaMessageParam {
+// verbatim from ProviderState (keeps thinking blocks intact), except that a stale turn (one produced
+// before an earlier tool result was cut, see llm.TrimToolHistory) loses its thinking blocks: they are
+// bound to the turns before them, and the API rejects a block whose turns have changed but accepts a
+// turn without it. Consecutive tool results are merged into one user turn as the API requires.
+func toParams(msgs []llm.Message, stale []bool) []sdk.BetaMessageParam {
 	var out []sdk.BetaMessageParam
 	var pending []sdk.BetaContentBlockParamUnion
 	flush := func() {
@@ -436,7 +334,7 @@ func toParams(msgs []llm.Message) []sdk.BetaMessageParam {
 			pending = nil
 		}
 	}
-	for _, m := range msgs {
+	for i, m := range msgs {
 		switch m.Role {
 		case llm.RoleTool:
 			content := m.Content
@@ -447,6 +345,9 @@ func toParams(msgs []llm.Message) []sdk.BetaMessageParam {
 		case llm.RoleAssistant:
 			flush()
 			if p, ok := m.ProviderState.(sdk.BetaMessageParam); ok {
+				if stale != nil && stale[i] {
+					p = withoutThinking(p)
+				}
 				out = append(out, p)
 				continue
 			}
@@ -465,4 +366,17 @@ func toParams(msgs []llm.Message) []sdk.BetaMessageParam {
 	}
 	flush()
 	return out
+}
+
+func withoutThinking(p sdk.BetaMessageParam) sdk.BetaMessageParam {
+	kept := make([]sdk.BetaContentBlockParamUnion, 0, len(p.Content))
+	for _, b := range p.Content {
+		if b.OfThinking == nil && b.OfRedactedThinking == nil {
+			kept = append(kept, b)
+		}
+	}
+	if len(kept) > 0 {
+		p.Content = kept
+	}
+	return p
 }

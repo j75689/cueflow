@@ -247,7 +247,7 @@ sequenceDiagram
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |
 | 餵回模型的單一工具結果 | 32,000 字，超過時附註截掉多少（顯示在對話串時截斷為 2,000 字） | `crew/crew.go` |
-| 一次 run 每回合帶回模型的工具結果總量 | 約 64,000 字，被捨棄的部分 agent 可以再呼叫一次工具取得。多數 connector：超過時由迴圈把最舊的結果截成 2,000 字並附註，最新一回合的保持完整。Claude connector：歷史照模型看到的原樣送出，prompt 超過「上限加上其他內容」（以 3 字約 1 token 估算）時由 API 清掉舊結果，最新一回合的結果會保留；端點不支援時，改由 connector 照迴圈的方式截斷，並拿掉截斷處之後的 thinking block | `crew/crew.go`、`llm/history.go`、`connectors/anthropic` |
+| 一次 run 每回合帶回模型的工具結果總量 | 64,000 字。超過時 connector 把最舊的結果截成 2,000 字並附註，直到總量低於 32,000 字，所以每隔幾輪才截一次，不會每輪都截；最新一回合的保持完整，agent 需要時可再呼叫一次工具。Claude connector 另外會拿掉截斷前產生的回合的 thinking block，否則 API 會拒絕 | `llm/history.go` |
 | 任務簡報帶入的對話 | 最近 60 則 | `crew/prompt.go` |
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |

@@ -93,92 +93,13 @@ func TestAPIKey(t *testing.T) {
 	}
 }
 
-// A tool-history budget is handed to the API as context management. The client sends the earlier
-// turns exactly as the model saw them: cutting a tool result would invalidate the thinking block
-// after it.
-func TestToolHistoryBudgetClearsServerSide(t *testing.T) {
+// Past the tool-history budget the oldest result is cut on the client, and only the turn produced
+// before that cut among the turns it had seen loses its thinking (the API rejects a thinking block
+// whose earlier turns changed). The turn before the cut result and the one produced after the cut
+// keep theirs, and nothing needs a beta.
+func TestToolHistoryBudgetDropsOnlyStaleThinking(t *testing.T) {
 	isolateEnv(t)
 	srv, last := fakeMessages(t)
-	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	long := strings.Repeat("x", 40000)
-	thought := sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant, Content: []sdk.BetaContentBlockParamUnion{
-		sdk.NewBetaThinkingBlock("sig-1", "read the file"),
-		sdk.NewBetaToolUseBlock("t1", map[string]any{}, "read"),
-	}}
-	msgs := []llm.Message{
-		{Role: llm.RoleUser, Content: "brief"},
-		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "t0", Name: "read", Arguments: json.RawMessage(`{}`)}}},
-		{Role: llm.RoleTool, ToolCallID: "t0", Content: long},
-		{Role: llm.RoleAssistant, ProviderState: thought},
-		{Role: llm.RoleTool, ToolCallID: "t1", Content: long},
-		{Role: llm.RoleTool, ToolCallID: "t2", Content: "a"},
-		{Role: llm.RoleTool, ToolCallID: "t3", Content: "b"},
-		{Role: llm.RoleTool, ToolCallID: "t4", Content: "c"},
-	}
-	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
-		t.Fatal(err)
-	}
-	c := last()
-	if !strings.Contains(betas(c), "context-management-2025-06-27") {
-		t.Fatalf("context management beta missing: %q", betas(c))
-	}
-	edits, _ := c.body["context_management"].(map[string]any)["edits"].([]any)
-	if len(edits) != 1 || edits[0].(map[string]any)["type"] != "clear_tool_uses_20250919" {
-		t.Fatalf("context_management: %v", c.body["context_management"])
-	}
-	edit := edits[0].(map[string]any)
-	// The newest turn called four tools: all four results are kept.
-	if keep := edit["keep"].(map[string]any)["value"]; keep != 4.0 {
-		t.Fatalf("keep: %v", keep)
-	}
-	// The trigger is the budget plus the rest of the prompt ("brief", the tool-call arguments), in tokens.
-	if trig := edit["trigger"].(map[string]any)["value"]; trig != float64((len("brief")+len("{}")+64000)/3) {
-		t.Fatalf("trigger: %v", trig)
-	}
-	sent := c.body["messages"].([]any)
-	first := sent[2].(map[string]any)["content"].([]any)[0].(map[string]any)
-	if text := first["content"].([]any)[0].(map[string]any)["text"]; first["type"] != "tool_result" || text != long {
-		t.Fatal("an earlier tool result was changed before sending")
-	}
-	if b := sent[3].(map[string]any)["content"].([]any)[0].(map[string]any); b["type"] != "thinking" || b["signature"] != "sig-1" {
-		t.Fatalf("thinking block not replayed: %v", b)
-	}
-
-	// Without a budget, nothing is cleared.
-	chat(t, "anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL})
-	if c := last(); c.body["context_management"] != nil || strings.Contains(betas(c), "context-management") {
-		t.Fatal("context management sent without a budget")
-	}
-}
-
-// An endpoint that turns down context management (a gateway, or one that ignores it and lets the
-// prompt grow too long) gets the history cut on the client instead, with the thinking blocks after
-// the cut dropped so the API doesn't reject them. The connector stops asking for server clearing.
-func TestToolHistoryFallsBackToClientCut(t *testing.T) {
-	isolateEnv(t)
-	var mu sync.Mutex
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		mu.Lock()
-		bodies = append(bodies, body)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		if body["context_management"] != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"context_management: Extra inputs are not permitted"}}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
-			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
-			"usage":{"input_tokens":3,"output_tokens":1}}`))
-	}))
-	t.Cleanup(srv.Close)
 	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL}, connector.Env{})
 	if err != nil {
 		t.Fatal(err)
@@ -192,26 +113,37 @@ func TestToolHistoryFallsBackToClientCut(t *testing.T) {
 		{Role: llm.RoleUser, Content: "brief"},
 		turn("t0"), {Role: llm.RoleTool, ToolCallID: "t0", Content: long},
 		turn("t1"), {Role: llm.RoleTool, ToolCallID: "t1", Content: long},
+		turn("t2"), {Role: llm.RoleTool, ToolCallID: "t2", Content: "small"},
 	}
-	req := llm.Request{Messages: msgs, ToolHistoryBudget: 64000}
-	for range 2 {
-		if _, err := inst.(connector.LLM).Chat(context.Background(), req); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: msgs, ToolHistoryBudget: 64000}); err != nil {
+		t.Fatal(err)
 	}
-	if len(bodies) != 3 || bodies[0]["context_management"] == nil || bodies[2]["context_management"] != nil {
-		t.Fatalf("want one refused request, then two without context management; got %d requests", len(bodies))
+	c := last()
+	if c.body["context_management"] != nil || strings.Contains(betas(c), "context-management") {
+		t.Fatal("no server-side clearing is asked for")
 	}
-	sent := bodies[1]["messages"].([]any)
+	sent := c.body["messages"].([]any)
 	blocks := func(i int) []any { return sent[i].(map[string]any)["content"].([]any) }
-	if text := blocks(2)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string); !strings.Contains(text, "cut from the history") {
-		t.Fatal("the old result was not cut")
+	toolText := func(i int) string {
+		return blocks(i)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
 	}
-	if blocks(1)[0].(map[string]any)["type"] != "thinking" {
-		t.Fatal("the thinking before the cut should stay")
+	if !strings.Contains(toolText(2), "cut from the history") || toolText(4) != long {
+		t.Fatal("want the oldest result cut and the next one whole")
 	}
-	if b := blocks(3); len(b) != 1 || b[0].(map[string]any)["type"] != "tool_use" {
-		t.Fatalf("the thinking after the cut should be dropped: %v", b)
+	types := func(i int) (out []string) {
+		for _, b := range blocks(i) {
+			out = append(out, b.(map[string]any)["type"].(string))
+		}
+		return out
+	}
+	if got := types(1); got[0] != "thinking" {
+		t.Fatalf("the turn before the cut result keeps its thinking: %v", got)
+	}
+	if got := types(3); len(got) != 1 || got[0] != "tool_use" {
+		t.Fatalf("the stale turn loses its thinking: %v", got)
+	}
+	if got := types(5); got[0] != "thinking" || blocks(5)[0].(map[string]any)["signature"] != "sig-t2" {
+		t.Fatalf("the turn produced after the cut keeps its thinking: %v", got)
 	}
 	if msgs[2].Content != long {
 		t.Fatal("the caller's history was changed")
