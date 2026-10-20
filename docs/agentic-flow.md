@@ -60,6 +60,9 @@ The default names and instructions are in English; the language agents write in 
 | (all agents) | `add_comment` | Post a progress update to the thread |
 | | `ask_human` | Ask a question and pause until a human replies (ends the run) |
 | | `complete_task` | Report the result and finish (ends the run) |
+| | `write_file` | Save text as a file of this task (creates or replaces it); files stay out of the conversation until read |
+| | `read_file` | Read a file of this task or of a task above it, up to 30,000 characters from a character offset; says the file's length so the agent can page |
+| | `list_files` | List the files this task can read: its own and those of the tasks above it (at most 100, then a count) |
 | research | `web_search` | Search via SearXNG / Tavily |
 | | `read_url` | Read a public web page (internal networks blocked, see §10) |
 | sources | `search_materials` | Search material already collected from RSS / mail (the agent's Sources, or all when none are picked) |
@@ -253,6 +256,9 @@ target each time.
 | A single tool result fed back to the model | 32,000 characters, with a note saying how many were cut (truncated to 2,000 when shown in the thread) | `crew/crew.go` |
 | A run's history | Append-only, on every connector: nothing already sent to the model is cut or rewritten (Claude's thinking blocks are bound to it), and there is no budget below the model's own window. Claude connectors cache it (Prompt caching, on by default; if the endpoint rejects `cache_control`, the connector retries without it and logs a warning); other connectors re-send the whole history each turn, cached only if the provider does so on its own. A run that outgrows the window stops with a message saying so; a reply starts a fresh run from the task and its thread | `crew/crew.go`, `connectors/anthropic` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
+| Files in the task brief | Up to 30 (name, size, which task, start of the first line; never the contents), then a count; `list_files` shows up to 100 | `crew/files.go` |
+| One `read_file` call | 30,000 characters | `crew/files.go` |
+| One task file | 8 MB | `store/task_files.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
 | Parallel tasks | 3 (`CUEFLOW_AGENT_CONCURRENCY`) | `config` |

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -477,6 +478,15 @@ func overflowMessage(turns int) string {
 		"If this happens early, lower the connector's max output tokens or use a model with a larger window.", turns)
 }
 
+// loggedArgs shortens the arguments of tools whose input can be long before they go into the thread
+// (stored, broadcast and replayed into every later brief). The tool itself gets them whole.
+var loggedArgs = map[string]func(map[string]any) map[string]any{
+	"write_file": func(m map[string]any) map[string]any {
+		content, _ := m["content"].(string)
+		return map[string]any{"name": m["name"], "characters": utf8.RuneCountInString(content), "content": clip(content, 2000)}
+	},
+}
+
 // quietTools write their own thread entries; logging their call/result would be noise.
 var quietTools = map[string]bool{"add_comment": true, "ask_human": true, "complete_task": true}
 
@@ -516,6 +526,11 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	if !quietTools[call.Name] {
 		var args any = map[string]any{}
 		_ = json.Unmarshal(call.Arguments, &args)
+		if shorten := loggedArgs[call.Name]; shorten != nil {
+			if m, ok := args.(map[string]any); ok {
+				args = shorten(m)
+			}
+		}
 		c.say(ctx, env.task.ID, env.agent, "tool_call", "", map[string]any{"tool": call.Name, "arguments": args})
 	}
 	res, err := t.run(ctx, env, call.Arguments)

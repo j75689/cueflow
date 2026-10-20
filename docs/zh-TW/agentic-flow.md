@@ -59,6 +59,9 @@ flowchart LR
 | （全體） | `add_comment` | 在對話串發進度 |
 | | `ask_human` | 提問並暫停，等人回覆（終止本次執行） |
 | | `complete_task` | 回報成果並結束（終止本次執行） |
+| | `write_file` | 把文字存成這個任務的檔案（新建或取代）；檔案在被讀取前不會進入對話 |
+| | `read_file` | 讀這個任務或其上層任務的檔案，從某個字元位置起最多 30,000 字；會告知檔案總長度，讓 agent 分段讀 |
+| | `list_files` | 列出這個任務能讀的檔案：自己的與上層任務的（最多 100 個，其餘只顯示數量） |
 | research | `web_search` | 透過 SearXNG / Tavily 搜尋 |
 | | `read_url` | 讀公開網頁（擋內網，見 §10） |
 | sources | `search_materials` | 搜尋 RSS / 信件已收集的素材（agent 勾選的來源，沒勾就是全部） |
@@ -249,6 +252,9 @@ sequenceDiagram
 | 餵回模型的單一工具結果 | 32,000 字，超過時附註截掉多少（顯示在對話串時截斷為 2,000 字） | `crew/crew.go` |
 | 一次 run 的對話歷史 | 所有 connector 都只往後加：已送給模型的內容不會被截斷或改寫（Claude 的 thinking block 綁定這些內容），除了模型本身的 context 上限外沒有其他限制。Claude connector 會快取它（Prompt caching，預設開啟；端點不接受 `cache_control` 時，connector 會不帶它重試並記一筆警告）；其他 connector 每輪都重送完整歷史，除非 provider 自己有快取。run 超過 context 上限時會停下並說明原因；回覆後會從任務和對話串重新開始一個新的 run | `crew/crew.go`、`connectors/anthropic` |
 | 任務簡報帶入的對話 | 最近 60 則 | `crew/prompt.go` |
+| 任務簡報列出的檔案 | 最多 30 個（名稱、大小、屬於哪個任務、第一行開頭；不含內容），其餘只顯示數量；`list_files` 最多列出 100 個 | `crew/files.go` |
+| 單次 `read_file` | 30,000 字 | `crew/files.go` |
+| 單一任務檔案 | 8 MB | `store/task_files.go` |
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |
 | 並行任務 | 3（`CUEFLOW_AGENT_CONCURRENCY`） | `config` |
