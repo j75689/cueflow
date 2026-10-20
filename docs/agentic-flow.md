@@ -298,7 +298,7 @@ target each time.
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
 | Parallel tasks | 3 (`CUEFLOW_AGENT_CONCURRENCY`) | `config` |
-| One model call | 10 minutes; Claude connectors stream the answer (and may wait 3 minutes for it to start), so a long one isn't cut off by the 90-second timeout other connector requests have | `llm/llm.go`, `connectors/anthropic` |
+| One model call | 10 minutes; Claude connectors stream the answer (and may wait 2 minutes for it to start; a stream that breaks off or reports an overload is tried again), so a long one isn't cut off by the 90-second timeout other connector requests have | `llm/llm.go`, `connectors/anthropic` |
 | Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN` | `crew/crew.go` |
 | `read_url` | http(s) only; blocks loopback / private / link-local / CGNAT / multicast at dial time; at most 5 redirects; 2 MB, 8,000 characters, 30 seconds; bypasses the system proxy (`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` relaxes this) | `crew/fetch.go` |
 | Publishing | Impossible for any agent, see §4 | `guard`, `connector` |

@@ -39,7 +39,6 @@ func fakeMessages(t *testing.T) (*httptest.Server, func() captured) {
 		last = captured{path: r.URL.Path, query: r.URL.RawQuery, header: r.Header.Clone()}
 		_ = json.Unmarshal(raw, &last.body)
 		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
 		writeMessage(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
 			"content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn","stop_sequence":null,
 			"usage":{"input_tokens":3,"output_tokens":1}}`)
@@ -168,7 +167,6 @@ func TestPromptCaching(t *testing.T) {
 func TestUsageCountsCachedInput(t *testing.T) {
 	isolateEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		writeMessage(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
 			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
 			"usage":{"input_tokens":2,"cache_read_input_tokens":90000,"cache_creation_input_tokens":4000,"output_tokens":7}}`)
@@ -609,5 +607,54 @@ func TestStreamedAnswerOutlivesTheSharedClientTimeout(t *testing.T) {
 	}
 	if resp.Usage.InputTokens != 15 || resp.Usage.OutputTokens != 40 || resp.Usage.CacheReadTokens != 3 {
 		t.Fatalf("usage: %+v", resp.Usage)
+	}
+}
+
+// A stream that ends before message_stop is an error, not a shorter answer; it is tried again, and
+// so is an overload the API reports as an event inside a 200 stream. Other event errors aren't, and
+// they don't read as an HTTP failure.
+func TestStreamCutOrOverloadedIsRetried(t *testing.T) {
+	isolateEnv(t)
+	var calls atomic.Int32
+	mode := atomic.Value{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		start := `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`
+		switch m := mode.Load().(string); {
+		case m == "cut" && n == 1:
+			fmt.Fprintf(w, "event: message_start\ndata: %s\n\n", start)
+			fmt.Fprint(w, `event: content_block_start`+"\n"+`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"half an ans"}}`+"\n\n")
+			return // the connection drops
+		case m == "overloaded" && n == 1:
+			fmt.Fprint(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n")
+			return
+		case m == "invalid":
+			fmt.Fprint(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad\"}}\n\n")
+			return
+		}
+		writeMessage(w, `{"id":"msg_2","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"whole answer"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":2}}`)
+	}))
+	t.Cleanup(srv.Close)
+	inst, err := connector.Build("anthropic", connector.Config{"api_key": "sk-test", "base_url": srv.URL, "refusal_fallback": false}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := func() (*llm.Response, error) {
+		return inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "go"}}})
+	}
+	for _, m := range []string{"cut", "overloaded"} {
+		calls.Store(0)
+		mode.Store(m)
+		resp, err := chat()
+		if err != nil || resp.Message.Content != "whole answer" || calls.Load() != 2 {
+			t.Fatalf("%s: %v %+v after %d calls", m, err, resp, calls.Load())
+		}
+	}
+	calls.Store(0)
+	mode.Store("invalid")
+	_, err = chat()
+	if err == nil || calls.Load() != 1 || strings.Contains(err.Error(), "HTTP 200") || !strings.Contains(err.Error(), "invalid_request_error") {
+		t.Fatalf("invalid event error: %v after %d calls", err, calls.Load())
 	}
 }
