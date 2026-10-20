@@ -109,11 +109,9 @@ func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID
 // RunningAgentRun is the open run of a task for an agent, if any.
 func (s *Store) RunningAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
 	var r AgentRun
-	err := s.pool.QueryRow(ctx, `SELECT id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
-		error, connector_id, model, runtime, started_at, finished_at FROM agent_runs
+	err := s.pool.QueryRow(ctx, `SELECT `+agentRunColumns+` FROM agent_runs
 		WHERE task_id=$1 AND agent_id=$2 AND status='RUNNING' ORDER BY started_at DESC LIMIT 1`, taskID, agentID).
-		Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens,
-			&r.OutputTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt)
+		Scan(r.scanDest()...)
 	if err != nil {
 		return nil, NotFound(err)
 	}

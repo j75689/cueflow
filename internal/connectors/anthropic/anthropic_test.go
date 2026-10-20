@@ -215,6 +215,8 @@ func TestContextOverflowRecognized(t *testing.T) {
 		{`{"type":"error","error":{"type":"invalid_request_error","message":"input length and max_tokens exceed context limit: 990000 + 16000 > 1000000, decrease input length or max_tokens and try again"}}`, true},
 		{`{"message":"Input is too long for requested model."}`, true},
 		{`{"type":"error","error":{"type":"invalid_request_error","message":"tools.0.name: invalid"}}`, false},
+		// A gateway's own error page is not the API's body, even if it says something similar.
+		{`<html><body>400: input is too long for this proxy</body></html>`, false},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

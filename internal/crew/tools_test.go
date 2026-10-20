@@ -26,7 +26,8 @@ func TestOverflowMessage(t *testing.T) {
 		!strings.Contains(m, "memories") || !strings.Contains(m, "tools") {
 		t.Fatalf("turn 0: %s", m)
 	}
-	if m := overflowMessage(12); !strings.Contains(m, "after 12 turns") || !strings.Contains(m, "Reply to continue") {
+	if m := overflowMessage(12); !strings.Contains(m, "after 12 turns") || !strings.Contains(m, "Reply to continue") ||
+		!strings.Contains(m, "max output tokens") {
 		t.Fatalf("turn 12: %s", m)
 	}
 }

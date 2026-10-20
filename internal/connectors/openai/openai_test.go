@@ -90,6 +90,9 @@ func TestContextOverflowRecognized(t *testing.T) {
 		// DeepSeek, vLLM and OpenRouter. (The same words for a max_tokens larger than the window are
 		// told apart by the crew: that one fails on the first turn.)
 		{400, `{"object":"error","message":"This model's maximum context length is 65536 tokens. However, you requested 70000 tokens (65000 in the messages, 5000 in the completion)."}`, true},
+		// Ollama answers 500.
+		{500, `{"error":"context length exceeded"}`, true},
+		{500, `{"error":"internal error"}`, false},
 		// A proxy's body limit: not an overflow.
 		{413, `<html>413 Request Entity Too Large</html>`, false},
 		{400, `{"error":"invalid tool schema"}`, false},

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type Role string
@@ -73,3 +74,29 @@ type Chatter interface {
 // ErrContextOverflow is wrapped by a connector's Chat error when the request was refused for being
 // longer than the model's context window.
 var ErrContextOverflow = errors.New("the conversation is longer than the model's context window")
+
+// overflowPhrases are how providers word the refusal of a prompt that doesn't fit the model's window
+// (some count max_tokens on top of the prompt).
+var overflowPhrases = []string{
+	"prompt is too long",                   // Claude API, Vertex
+	"exceed context limit",                 // Claude API: input length and max_tokens exceed context limit
+	"input is too long",                    // Bedrock: Input is too long for requested model
+	"context_length_exceeded",              // OpenAI, Azure (error code)
+	"input exceeds the context window",     // OpenAI
+	"maximum context length",               // DeepSeek, vLLM, OpenRouter
+	"exceeds the maximum number of tokens", // Gemini
+	"context length exceeded",              // Ollama
+}
+
+// IsOverflowText tells whether a provider's error body reports a prompt that doesn't fit the model's
+// context window. Connectors check the status code themselves and pass only the response body, not
+// a formatted error that also carries the URL.
+func IsOverflowText(body string) bool {
+	b := strings.ToLower(body)
+	for _, p := range overflowPhrases {
+		if strings.Contains(b, p) {
+			return true
+		}
+	}
+	return false
+}

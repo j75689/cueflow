@@ -303,18 +303,8 @@ func firstNonEmpty(v ...string) string {
 }
 
 // isContextOverflow recognizes how OpenAI-compatible servers refuse a prompt that doesn't fit the
-// model's window: OpenAI and Azure (context_length_exceeded), DeepSeek, vLLM and OpenRouter
-// ("maximum context length"), Gemini ("exceeds the maximum number of tokens"). A bare 413 is usually
-// a proxy's body limit and keeps its own text.
+// model's window: a 400 (Ollama answers 500) whose body says so. A bare 413 is usually a proxy's
+// body limit and keeps its own text.
 func isContextOverflow(status int, body string) bool {
-	if status != http.StatusBadRequest {
-		return false
-	}
-	b := strings.ToLower(body)
-	for _, s := range []string{"context_length_exceeded", "maximum context length", "exceeds the maximum number of tokens"} {
-		if strings.Contains(b, s) {
-			return true
-		}
-	}
-	return false
+	return (status == http.StatusBadRequest || status == http.StatusInternalServerError) && llm.IsOverflowText(body)
 }

@@ -384,8 +384,9 @@ now; `tz` (IANA, default UTC) sets the day boundaries for `daily`.
 - Every list is sorted by `input_tokens + output_tokens` descending (`daily` by date ascending, every day of
   the window present, zero-filled). `top_tasks` has at most 10 rows.
 - `input_tokens` is the whole prompt of every model call, whether or not the provider served it from its
-  prompt cache. `totals.cache_read_tokens` and `totals.cache_write_tokens` are the parts of it read from
-  and written to the cache, which providers bill at different rates (Claude: about 0.1× and 1.25×), so a
+  prompt cache. Every row (totals, `daily` and each `by_*` and `top_tasks` row) also carries
+  `cache_read_tokens` and `cache_write_tokens` (omitted above for brevity): the parts of it read from and
+  written to the cache, which providers bill at different rates (Claude: about 0.1× and 1.25×), so a
   long cached run reports many input tokens but costs far less than the same count uncached.
 - `unreported_runs`: finished runs that reported no token usage (e.g. external ACP agents that don't report
   usage), so totals may undercount.

@@ -338,17 +338,11 @@ func cacheUserTurns(msgs []sdk.BetaMessageParam) {
 	}
 }
 
-// isContextOverflow recognizes the refusal of a prompt that doesn't fit the model's window: "prompt is
-// too long" and, when the prompt fits but not with max_tokens on top, "input length and max_tokens
-// exceed context limit" on the Claude API and Vertex; "Input is too long for requested model" on
-// Bedrock.
+// isContextOverflow recognizes the refusal of a prompt that doesn't fit the model's window. It reads
+// only a JSON error body, so the request URL or a gateway's own HTML error page can't match by accident.
 func isContextOverflow(err *sdk.Error) bool {
-	if err.StatusCode != 400 {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "exceed context limit") ||
-		strings.Contains(msg, "input is too long")
+	body := err.RawJSON()
+	return err.StatusCode == 400 && json.Valid([]byte(body)) && llm.IsOverflowText(body)
 }
 
 func toolParam(t llm.Tool) *sdk.BetaToolParam {

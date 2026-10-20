@@ -623,6 +623,15 @@ type AgentRun struct {
 	FinishedAt  *time.Time `json:"finished_at"`
 }
 
+// agentRunColumns and scanDest keep every query that loads an AgentRun reading the same columns.
+const agentRunColumns = `id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
+	cache_read_tokens, cache_write_tokens, error, connector_id, model, runtime, started_at, finished_at`
+
+func (r *AgentRun) scanDest() []any {
+	return []any{&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens, &r.OutputTokens,
+		&r.CacheReadTokens, &r.CacheWriteTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt}
+}
+
 func (s *Store) StartAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
 	r := &AgentRun{TaskID: taskID, AgentID: &agentID, Status: "RUNNING", Runtime: "builtin"}
 	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (task_id, agent_id, org_id)
@@ -645,9 +654,7 @@ func (s *Store) FinishAgentRun(ctx context.Context, r *AgentRun) error {
 }
 
 func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRun, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
-		cache_read_tokens, cache_write_tokens, error, connector_id, model, runtime, started_at, finished_at
-		FROM agent_runs WHERE task_id=$1
+	rows, err := s.pool.Query(ctx, `SELECT `+agentRunColumns+` FROM agent_runs WHERE task_id=$1
 		ORDER BY started_at DESC LIMIT 50`, taskID)
 	if err != nil {
 		return nil, err
@@ -656,8 +663,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRu
 	out := []*AgentRun{}
 	for rows.Next() {
 		var r AgentRun
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens,
-			&r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt); err != nil {
+		if err := rows.Scan(r.scanDest()...); err != nil {
 			return nil, err
 		}
 		out = append(out, &r)
