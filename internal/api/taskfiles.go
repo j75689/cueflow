@@ -3,9 +3,8 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
+	"mime"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -27,8 +26,7 @@ const (
 
 // taskFileJSON is a file as the API shows it.
 type taskFileJSON struct {
-	store.TaskFile
-	TaskNumber int64 `json:"task_number"`
+	*store.ListedTaskFile
 	// Own is false for a file of an ancestor task, which this task can read but not change.
 	Own bool `json:"own"`
 	// Description is the start of the file's first line (for a saved tool result, the tool and its
@@ -48,8 +46,7 @@ func (s *Server) listTaskFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]taskFileJSON, 0, len(files))
 	for _, f := range files {
-		out = append(out, taskFileJSON{TaskFile: f.TaskFile, TaskNumber: f.TaskNumber, Own: f.TaskID == task.ID,
-			Description: firstLine(f.Head, 200)})
+		out = append(out, taskFileJSON{ListedTaskFile: f, Own: f.TaskID == task.ID, Description: firstLine(f.Head, 200)})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"files": out, "total": total})
 }
@@ -69,12 +66,13 @@ func (s *Server) taskFileContent(w http.ResponseWriter, r *http.Request) {
 	if err != nil || offset < 0 {
 		offset = 0
 	}
-	// A few bytes more than a page, so a character cut at the end can be completed.
-	f, data, err := s.Store.ReadTaskFileRange(r.Context(), task.ID, name, offset, filePageBytes+utf8.UTFMax)
+	// A character more than a page at each end: one to skip into at the start, one to complete at the end.
+	f, data, err := s.Store.ReadTaskFileRange(r.Context(), task.ID, name, offset, filePageBytes+2*utf8.UTFMax)
 	if err != nil {
 		s.Fail(w, err)
 		return
 	}
+	offset = min(offset, f.SizeBytes)
 	// Start on a character: skip continuation bytes an offset may have landed in.
 	for len(data) > 0 && offset > 0 && !utf8.RuneStart(data[0]) {
 		data, offset = data[1:], offset+1
@@ -97,8 +95,8 @@ func (s *Server) taskFileContent(w http.ResponseWriter, r *http.Request) {
 		"mime_type": f.MimeType, "offset": offset, "next_offset": next, "text": text, "binary": binary})
 }
 
-// downloadTaskFile streams a file as an attachment, sized from size_bytes; it is never read into
-// memory here.
+// downloadTaskFile streams a file as an attachment. ServeContent sizes it from the stream and
+// answers Range requests.
 func (s *Server) downloadTaskFile(w http.ResponseWriter, r *http.Request) {
 	task, ok := s.fileTask(w, r)
 	if !ok {
@@ -118,13 +116,10 @@ func (s *Server) downloadTaskFile(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	// Always a download: a file's content is the agent's, and must not run as a page of this site.
 	h.Set("Content-Type", "application/octet-stream")
-	h.Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(base))
-	h.Set("Content-Length", strconv.FormatInt(f.SizeBytes, 10))
+	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": base}))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "private, no-store")
-	if _, err := io.Copy(w, rc); err != nil {
-		s.Logger.Warn("stream task file", "task", task.ID, "file", f.Name, "err", err)
-	}
+	http.ServeContent(w, r, "", f.UpdatedAt, rc)
 }
 
 // deleteTaskFile removes one of the task's own files. An ancestor's file is refused: this task can

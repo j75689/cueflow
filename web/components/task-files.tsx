@@ -9,6 +9,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -75,28 +76,15 @@ export function fmtBytes(n: number): string {
 }
 
 /** The Files card for the task's sidebar. */
-export function TaskFilesCard({
-  taskId,
-  parentId,
-}: {
-  taskId: string;
-  parentId?: string | null;
-}) {
+export function TaskFilesCard({ taskId }: { taskId: string }) {
   const toast = useToast();
   const dialog = useDialog();
   const open = useContext(FileViewerCtx);
   const files = useAsync(() => api.taskFiles(taskId), [taskId]);
   const list = files.data?.files ?? [];
-  // A file of this task or of one above it changed: those are the ones this card shows (the parent
-  // counts even before it has files; tasks further up once one of their files is listed).
-  const owners = new Set([
-    taskId,
-    ...(parentId ? [parentId] : []),
-    ...list.map((f) => f.task_id),
-  ]);
-  useServerEvent("task.file", (d) => {
-    if (d.resync || owners.has(String(d.task_id))) void files.reload();
-  });
+  // Any file in the org changed: reload, since a task far above this one may have written its
+  // first. The stream is scoped to the org, and a listing is one query.
+  useServerEvent("task.file", () => void files.reload());
 
   const remove = async (f: TaskFile) => {
     if (
@@ -211,32 +199,37 @@ function FileViewer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Each load gets a number; an answer that arrives after another file was opened (or the viewer
+  // closed) is dropped instead of landing under the wrong file.
+  const seq = useRef(0);
   const load = useCallback(
     async (offset: number) => {
       if (!name) return;
+      const mine = ++seq.current;
       setLoading(true);
       setError(null);
       try {
         const page = await api.taskFilePage(taskId, name, offset);
+        if (mine !== seq.current) return;
         setPages((ps) => (offset === 0 ? [page] : [...ps, page]));
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (mine === seq.current)
+          setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (mine === seq.current) setLoading(false);
       }
     },
     [taskId, name],
   );
   useEffect(() => {
+    seq.current++;
     setPages([]);
+    setLoading(false);
     if (name) void load(0);
   }, [name, load]);
 
   const last = pages[pages.length - 1];
-  const shown = pages.reduce(
-    (n, p) => n + new TextEncoder().encode(p.text).length,
-    0,
-  );
+  const shown = last ? (last.next_offset ?? last.size_bytes) : 0;
   return (
     <Modal
       open={name !== null}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -96,6 +97,48 @@ func TestTaskFilesAPI(t *testing.T) {
 	e.do("GET", "/tasks/"+child.ID.String()+"/files/content"+q("results/read_url-1.txt")+"&offset="+strconv.Itoa(len(header)+4), nil, &mid)
 	if !strings.HasPrefix(mid.Text, "字") || mid.Offset != len(header)+6 {
 		t.Fatalf("mid-character offset: starts at %d with %q", mid.Offset, mid.Text[:6])
+	}
+
+	// An offset three bytes into a 4-byte character and a 4-byte character across the page end: the
+	// page still starts and ends on characters (the slack covers both ends) and is text.
+	edge := "😀" + strings.Repeat("a", 64<<10-1) + "😀" + "tail"
+	if _, err := e.store.WriteTaskFile(ctx, child.ID, "edge.txt", "", []byte(edge), "reader"); err != nil {
+		t.Fatal(err)
+	}
+	var edgePage struct {
+		Text       string `json:"text"`
+		Binary     bool   `json:"binary"`
+		Offset     int    `json:"offset"`
+		NextOffset *int   `json:"next_offset"`
+	}
+	e.do("GET", "/tasks/"+child.ID.String()+"/files/content"+q("edge.txt")+"&offset=1", nil, &edgePage)
+	if edgePage.Binary || edgePage.Offset != 4 || !strings.HasSuffix(edgePage.Text, "a😀") || edgePage.NextOffset == nil ||
+		*edgePage.NextOffset != len(edge)-len("tail") {
+		t.Fatalf("edge page: binary=%v offset=%d next=%v ends %q", edgePage.Binary, edgePage.Offset, edgePage.NextOffset, edgePage.Text[len(edgePage.Text)-8:])
+	}
+	// An offset past the end is clamped to it.
+	e.do("GET", "/tasks/"+child.ID.String()+"/files/content"+q("edge.txt")+"&offset=999999999", nil, &edgePage)
+	if edgePage.Offset != len(edge) || edgePage.Text != "" || edgePage.NextOffset != nil {
+		t.Fatalf("past the end: %+v", edgePage)
+	}
+
+	// The same pages from a blob backend: a seek there, a substring of the row above.
+	fs, err := blob.NewFile(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.store.SetBlobs(fs)
+	if _, err := e.store.WriteTaskFile(ctx, child.ID, "edge-blob.txt", "", []byte(edge), "reader"); err != nil {
+		t.Fatal(err)
+	}
+	var blobPage struct {
+		Text       string `json:"text"`
+		Offset     int    `json:"offset"`
+		NextOffset *int   `json:"next_offset"`
+	}
+	e.do("GET", "/tasks/"+child.ID.String()+"/files/content"+q("edge-blob.txt")+"&offset=1", nil, &blobPage)
+	if blobPage.Text != edge[4:len(edge)-len("tail")] || blobPage.Offset != 4 || blobPage.NextOffset == nil {
+		t.Fatalf("blob page differs: offset %d, %d bytes", blobPage.Offset, len(blobPage.Text))
 	}
 
 	// Download: an attachment of the right length, never served as a page.

@@ -101,7 +101,8 @@ function buildQuery(q?: Query): string {
   return s ? `?${s}` : "";
 }
 
-async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
+// fetchApi sends one API request with the token and the current org, and opens the token prompt on 401.
+async function fetchApi(method: string, path: string, body?: unknown, query?: Query): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -123,6 +124,11 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   if (res.status === 401) {
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   }
+  return res;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
+  const res = await fetchApi(method, path, body, query);
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
@@ -279,17 +285,17 @@ export function eventsURL(): string {
 // downloadTaskFile saves a task file. The API needs the token header, which a plain link can't send,
 // so the file is fetched and handed to the browser as a download.
 async function downloadTaskFile(id: string, name: string): Promise<void> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const q = buildQuery(currentOrg ? { org: currentOrg, name } : { name });
-  const res = await fetch(`${BASE}/tasks/${id}/files/download${q}`, { headers });
-  if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  const res = await fetchApi("GET", `/tasks/${id}/files/download`, undefined, { name });
   if (!res.ok) throw new ApiError(res.status, "http_error", `${res.status} ${res.statusText}`);
-  const url = URL.createObjectURL(await res.blob());
+  saveBlob(await res.blob(), name.slice(name.lastIndexOf("/") + 1));
+}
+
+/** saveBlob hands bytes to the browser as a download named filename. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = name.slice(name.lastIndexOf("/") + 1);
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();

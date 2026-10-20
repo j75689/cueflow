@@ -1218,7 +1218,7 @@ function Sidebar({
         )}
       </Card>
 
-      <TaskFilesCard taskId={t.id} parentId={t.parent_id} />
+      <TaskFilesCard taskId={t.id} />
 
       <NewTaskModal
         open={subOpen}

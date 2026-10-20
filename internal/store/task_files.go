@@ -256,13 +256,9 @@ func (s *Store) AncestorTaskFile(ctx context.Context, taskID uuid.UUID, name str
 // OpenTaskFile opens the file name as taskID sees it: its own, or else the nearest ancestor's. The
 // caller closes the stream; it is seekable, for reading a range.
 func (s *Store) OpenTaskFile(ctx context.Context, taskID uuid.UUID, name string) (*TaskFile, io.ReadSeekCloser, error) {
-	f := &TaskFile{}
-	var kind string
-	err := s.pool.QueryRow(ctx, lineageSQL+`SELECT `+qualify("f", taskFileColumns)+`, f.storage
-		FROM task_files f JOIN lineage l ON l.id = f.task_id WHERE f.name=$2 ORDER BY l.depth LIMIT 1`,
-		taskID, name).Scan(f.scanDest(&kind)...)
+	f, kind, err := s.findTaskFile(ctx, taskID, name)
 	if err != nil {
-		return nil, nil, NotFound(err)
+		return nil, nil, err
 	}
 	rc, err := s.openBytes(ctx, kind, f.ID, func() ([]byte, error) {
 		var data []byte
@@ -297,21 +293,44 @@ func qualify(alias, cols string) string {
 	return strings.Join(parts, ", ")
 }
 
+// findTaskFile resolves name as taskID sees it (its own file, else the nearest ancestor's) and says
+// where its bytes are.
+func (s *Store) findTaskFile(ctx context.Context, taskID uuid.UUID, name string) (*TaskFile, string, error) {
+	f := &TaskFile{}
+	var kind string
+	err := s.pool.QueryRow(ctx, lineageSQL+`SELECT `+qualify("f", taskFileColumns)+`, f.storage
+		FROM task_files f JOIN lineage l ON l.id = f.task_id WHERE f.name=$2 ORDER BY l.depth LIMIT 1`,
+		taskID, name).Scan(f.scanDest(&kind)...)
+	if err != nil {
+		return nil, "", NotFound(err)
+	}
+	return f, kind, nil
+}
+
 // ReadTaskFileRange returns up to limit bytes of the file name as taskID sees it (see OpenTaskFile),
-// starting at byte offset, plus the file. It seeks rather than reading what comes before.
+// starting at byte offset, plus the file. Only that range is read: a substring of the row for bytes
+// in the database, a seek on a blob.
 func (s *Store) ReadTaskFileRange(ctx context.Context, taskID uuid.UUID, name string, offset, limit int64) (*TaskFile, []byte, error) {
-	f, rc, err := s.OpenTaskFile(ctx, taskID, name)
+	f, kind, err := s.findTaskFile(ctx, taskID, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset = min(max(offset, 0), f.SizeBytes)
+	limit = min(limit, f.SizeBytes-offset)
+	if kind == blob.KindDB {
+		var data []byte
+		err := s.pool.QueryRow(ctx, `SELECT substring(data FROM $2 FOR $3) FROM task_files WHERE id=$1`, f.ID, offset+1, limit).Scan(&data)
+		return f, data, NotFound(err)
+	}
+	rc, err := s.openBytes(ctx, kind, f.ID, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rc.Close()
-	if offset > f.SizeBytes {
-		offset = f.SizeBytes
-	}
 	if _, err := rc.Seek(offset, io.SeekStart); err != nil {
 		return nil, nil, err
 	}
-	buf := make([]byte, min(limit, f.SizeBytes-offset))
+	buf := make([]byte, limit)
 	n, err := io.ReadFull(rc, buf)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, nil, err
