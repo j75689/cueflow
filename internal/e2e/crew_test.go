@@ -25,6 +25,9 @@ var (
 	scriptMu sync.Mutex
 	script   func(t *testing.T, req llm.Request) llm.Message
 	scriptT  *testing.T
+	// scriptPrompt, when set, is the prompt size (input tokens) the script model reports for a
+	// request; 100 otherwise. The model's window is 1000 (ContextWindow).
+	scriptPrompt func(req llm.Request) int64
 )
 
 func (scriptLLM) Model() string { return "script" }
@@ -47,7 +50,13 @@ func (scriptLLM) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if len(msg.ToolCalls) > 0 {
 		stop = "tool_use"
 	}
-	return &llm.Response{Message: msg, StopReason: stop, Usage: llm.Usage{InputTokens: 100, OutputTokens: 10}}, nil
+	in := int64(100)
+	scriptMu.Lock()
+	if scriptPrompt != nil {
+		in = scriptPrompt(req)
+	}
+	scriptMu.Unlock()
+	return &llm.Response{Message: msg, StopReason: stop, Usage: llm.Usage{InputTokens: in, OutputTokens: 10}}, nil
 }
 
 func init() {

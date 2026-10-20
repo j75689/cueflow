@@ -527,7 +527,12 @@ func toParams(msgs []llm.Message) []sdk.BetaMessageParam {
 			}
 			out = append(out, sdk.BetaMessageParam{Role: sdk.BetaMessageParamRoleAssistant, Content: blocks})
 		default:
-			flush()
+			if len(pending) > 0 {
+				// A user message right after tool results (the crew's hand-off request) joins their turn:
+				// the API wants user and assistant turns to alternate.
+				pending = append(pending, sdk.NewBetaTextBlock(m.Content))
+				continue
+			}
 			out = append(out, sdk.NewBetaUserMessage(sdk.NewBetaTextBlock(m.Content)))
 		}
 	}

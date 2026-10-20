@@ -64,6 +64,9 @@ func toolWriteFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 		return "", err
 	}
 	e.c.fileChanged(ctx, e.task.ID, f.Name)
+	if f.Name == handOffFile {
+		e.wroteHandOff = true
+	}
 	msg := fmt.Sprintf("Saved %s (%d characters).", f.Name, utf8.RuneCountInString(a.Content))
 	if n, ok, _ := e.c.store.AncestorTaskFile(ctx, e.task.ID, f.Name); ok {
 		msg += fmt.Sprintf(" Task #%d has a file of the same name; read_file now returns yours, and theirs is unchanged.", n)

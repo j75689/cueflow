@@ -134,6 +134,7 @@ export function TaskFilesCard({ taskId }: { taskId: string }) {
                 >
                   {f.name}
                 </button>
+                {f.name === "handoff.md" && f.own && <Pill>hand-off</Pill>}
                 {!f.own && <Pill>from #{f.task_number}</Pill>}
                 <button
                   type="button"

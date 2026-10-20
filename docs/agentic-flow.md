@@ -160,7 +160,7 @@ sequenceDiagram
 Every run **rebuilds its context from scratch** instead of replaying the previous run's raw LLM messages:
 
 - **System prompt**: general working rules + role description + delegation rules and team roster (with the delegation capability) + scheduling rules (with planning) + the role's instructions + the latest 30 memories + the current time.
-- **Task brief (the first user message)**: task title, priority, labels, due date, description, parent task, all subtasks and their results, drafts already created, and the latest 60 thread messages (tool results compressed to 500 characters).
+- **Task brief (the first user message)**: task title, priority, labels, due date, description, parent task, all subtasks and their results, the previous run's hand-off note if it handed off (§6.3), the task's files (names and first lines, not contents), drafts already created, and the latest 60 thread messages (tool results compressed to 500 characters).
 
 Benefits:
 - Provider-agnostic: no need to persist each LLM vendor's native message format; a task can switch LLM or agent midway and carry on.
@@ -176,11 +176,36 @@ Benefits:
 | `ask_human` | `question` | `WAITING_HUMAN` | SUCCEEDED |
 | `wait_for_subtasks` | system message | `BLOCKED` (straight back to `TODO` if the subtasks have in fact all finished) | SUCCEEDED |
 | Turns exhausted | system message (reply to continue or raise the limit) | `WAITING_HUMAN` | FAILED |
+| Context reached the hand-off point (§6.3) | the hand-off note (marked) and a system message | `WAITING_HUMAN` | SUCCEEDED |
+| Context window exceeded | system message (what to shrink, or reply to continue in a fresh run) | `WAITING_HUMAN` | FAILED |
 | LLM / configuration error | system message (with the error) | `WAITING_HUMAN` | FAILED |
 | Stopped by a human | "Stopped." | `WAITING_HUMAN` | CANCELED |
 | Process restart, lease expired | system message (explaining the interruption) | `WAITING_HUMAN` | FAILED |
 
-**A human comments during a run**: the runner does not interrupt the in-flight LLM call. When the run ends it checks whether any human message arrived after the run started. If so, it does not apply the completion status; it moves the task back to `TODO` and reruns immediately so the new comment is handled (except when the run was stopped or failed).
+**A human comments during a run**: the runner does not interrupt the in-flight LLM call. When the run ends it checks whether any human message arrived after the run started. If so, it does not apply the completion status; it moves the task back to `TODO` and reruns immediately so the new comment is handled (except when the run was stopped or failed, or a context overflow on its first turn, which a rerun would only repeat).
+
+### 6.3 Hand-off when the context fills up
+
+A run's history is append-only (nothing sent to the model is cut), so a long run grows until it nears the model's
+window. When the latest prompt reaches the hand-off point, 80% of a known window by default
+(`CUEFLOW_CONTEXT_HANDOFF`):
+
+1. The crew adds one message at the end of the conversation asking the agent to write a hand-off note with
+   `write_file` as `handoff.md` (what it did, the facts and decisions it confirmed, what is left, which task files to
+   read first) and stop. Earlier turns are sent as they were.
+2. Once the note is saved, the run ends: the thread gets a pointer to it (marked *hand-off*, opening the file) and
+   the task waits for the human. Only a note written after the request counts. An agent that answers in text instead has written the note in that text; one that keeps calling
+   tools gets one more turn, then the run ends saying no note was written. The request still comes when the point is
+   reached on the run's last allowed turn: the note's turns go past the limit.
+3. The human reviews it and replies, with corrections or just to continue. The fresh run's brief starts with a
+   *Hand-off from the previous run* section quoting the note (`handoff.md` holds all of it), followed by the thread
+   as usual. Nothing of the old conversation is replayed. The note is quoted only in the run right after the
+   hand-off, not in every later brief.
+
+A run hands off only once it has grown by a tenth of the window since its first prompt. If it reaches the point
+sooner (a large brief or note, a small window), a fresh run would start almost as full and hand off again, so the
+run says so once and carries on instead. Without a known window there is no
+hand-off; the run ends with a context-overflow message if it runs out.
 
 ## 7. Delegation and resumption
 
@@ -250,7 +275,8 @@ target each time.
 | Item | Limit / behavior | Where |
 |---|---|---|
 | Turns per run | The role's `max_turns` (default 12, Chief 16, max 40) | `store/agents.go` |
-| How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); the task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/crew.go` |
+| How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); past it the run writes a hand-off note and waits for the human (§6.3), getting up to 2 turns past its turn limit for the note. The task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/handoff.go` |
+| The hand-off note in the next brief | 12,000 characters (`handoff.md` has the rest) | `crew/handoff.go` |
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
