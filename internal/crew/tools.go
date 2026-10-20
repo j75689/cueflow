@@ -149,6 +149,7 @@ func init() {
 		{name: "search_memory", capability: "memory", description: "Search your saved notes.",
 			schema: Obj(map[string]any{"query": Str("Keyword")}, "query"), run: toolSearchMemory},
 	}
+	coreTools = append(coreTools, fileTools...) // always available, like the tools above
 	store.ValidCapability = validCapability
 }
 

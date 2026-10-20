@@ -107,6 +107,7 @@ func (c *Crew) buildBrief(ctx context.Context, task *store.Task) string {
 			}
 		}
 	}
+	b.WriteString(c.filesBrief(ctx, task))
 	deps := Deps{Store: c.store, Hub: c.hub, Broker: c.broker, Logger: c.logger}
 	for _, section := range briefs() {
 		b.WriteString(section(ctx, deps, task))
