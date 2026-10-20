@@ -3,6 +3,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -95,8 +96,8 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		apiKey:      cfg.String("api_key"),
 		temperature: cfg.String("temperature"),
 		maxTokens:   cfg.Int("max_tokens", 8000),
-		// No overall timeout: the answer only arrives once it is complete, which can take minutes
-		// for a long one. Chat bounds each call with llm.CallTimeout.
+		// No overall timeout (it would cut a stream off), and a server that doesn't stream answers
+		// only once the whole answer is written. Chat bounds each call with llm.CallTimeout.
 		http: llm.HTTPClient(env.HTTPClient, 0),
 	}
 	c.contextWindow = int64(cfg.Int("context_window", 0))
@@ -208,13 +209,83 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		}
 		body["tools"] = tools
 	}
+	// Streamed: a long answer arrives as it is written, so no proxy or gateway in between times out
+	// an idle connection while the model works. A server that doesn't stream answers in one body,
+	// which is read the old way.
+	body["stream"] = true
+	body["stream_options"] = map[string]any{"include_usage": true}
+	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
+	defer cancel()
+	hresp, err := c.post(callCtx, body)
+	if err != nil {
+		return nil, err
+	}
+	defer hresp.Body.Close()
+	if hresp.StatusCode == http.StatusBadRequest {
+		// Some servers refuse stream_options (or streaming with tools): ask again without them.
+		data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
+		hresp.Body.Close()
+		if !strings.Contains(strings.ToLower(string(data)), "stream") {
+			return nil, httpError(hresp.StatusCode, data)
+		}
+		delete(body, "stream")
+		delete(body, "stream_options")
+		if hresp, err = c.post(callCtx, body); err != nil {
+			return nil, err
+		}
+		defer hresp.Body.Close()
+	}
+	if hresp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(hresp.Body, 1<<20))
+		return nil, httpError(hresp.StatusCode, data)
+	}
+	var out completion
+	if strings.HasPrefix(hresp.Header.Get("Content-Type"), "text/event-stream") {
+		out, err = readStream(io.LimitReader(hresp.Body, 16<<20))
+	} else {
+		data, rerr := io.ReadAll(io.LimitReader(hresp.Body, 16<<20))
+		if rerr != nil {
+			return nil, rerr
+		}
+		out, err = readBody(data)
+	}
+	if err != nil {
+		return nil, err
+	}
+	replay := out.message
+	replay.Role = "assistant"
+	msg := llm.Message{Role: llm.RoleAssistant, ProviderState: replay}
+	if out.message.Content != nil {
+		msg.Content = *out.message.Content
+	}
+	for _, tc := range out.message.ToolCalls {
+		args := json.RawMessage(tc.Function.Arguments)
+		if !json.Valid(args) {
+			args = json.RawMessage(`{}`)
+		}
+		msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: args})
+	}
+	stop := "end"
+	switch {
+	case len(msg.ToolCalls) > 0:
+		stop = "tool_use"
+	case out.finish == "length":
+		stop = "max_tokens"
+	case out.finish == "content_filter":
+		stop = "refusal"
+	}
+	return &llm.Response{Message: msg, StopReason: stop,
+		Usage: llm.Usage{InputTokens: out.usage.PromptTokens, OutputTokens: out.usage.CompletionTokens,
+			CacheReadTokens: out.usage.PromptTokensDetails.CachedTokens}}, nil
+}
+
+// post sends one chat completions request.
+func (c *Client) post(ctx context.Context, body map[string]any) (*http.Response, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, llm.CallTimeout)
-	defer cancel()
-	hreq, err := http.NewRequestWithContext(callCtx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -240,63 +311,145 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 	if err != nil {
 		return nil, fmt.Errorf("llm: %w", err)
 	}
-	defer hresp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(hresp.Body, 16<<20))
-	if err != nil {
-		return nil, err
+	return hresp, nil
+}
+
+func httpError(status int, data []byte) error {
+	body := strings.TrimSpace(string(data))
+	if isContextOverflow(status, body) {
+		return fmt.Errorf("llm: %w: HTTP %d: %.400s", llm.ErrContextOverflow, status, body)
 	}
-	if hresp.StatusCode != http.StatusOK {
-		body := strings.TrimSpace(string(data))
-		if isContextOverflow(hresp.StatusCode, body) {
-			return nil, fmt.Errorf("llm: %w: HTTP %d: %.400s", llm.ErrContextOverflow, hresp.StatusCode, body)
-		}
-		return nil, fmt.Errorf("llm: HTTP %d: %.400s", hresp.StatusCode, body)
-	}
+	return fmt.Errorf("llm: HTTP %d: %.400s", status, body)
+}
+
+// wireUsage is the usage block of a completion, streamed (the last chunk) or not.
+type wireUsage struct {
+	PromptTokens        int64 `json:"prompt_tokens"`
+	CompletionTokens    int64 `json:"completion_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+// completion is the assistant message of one call, however it arrived.
+type completion struct {
+	message wireMessage
+	finish  string
+	usage   wireUsage
+}
+
+func readBody(data []byte) (completion, error) {
 	var out struct {
 		Choices []struct {
 			Message      wireMessage `json:"message"`
 			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
-			PromptTokens        int64 `json:"prompt_tokens"`
-			CompletionTokens    int64 `json:"completion_tokens"`
-			PromptTokensDetails struct {
-				CachedTokens int64 `json:"cached_tokens"`
-			} `json:"prompt_tokens_details"`
-		} `json:"usage"`
+		Usage wireUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("llm: decode: %w", err)
+		return completion{}, fmt.Errorf("llm: decode: %w", err)
 	}
 	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("llm: empty response")
+		return completion{}, fmt.Errorf("llm: empty response")
 	}
-	ch := out.Choices[0]
-	replay := ch.Message
-	replay.Role = "assistant"
-	msg := llm.Message{Role: llm.RoleAssistant, ProviderState: replay}
-	if ch.Message.Content != nil {
-		msg.Content = *ch.Message.Content
-	}
-	for _, tc := range ch.Message.ToolCalls {
-		args := json.RawMessage(tc.Function.Arguments)
-		if !json.Valid(args) {
-			args = json.RawMessage(`{}`)
+	return completion{message: out.Choices[0].Message, finish: out.Choices[0].FinishReason, usage: out.Usage}, nil
+}
+
+// readStream puts a streamed completion back together: text pieces in order, and each tool call
+// from its pieces (keyed by index: the id and name come first, the arguments in parts, and
+// provider extensions such as Gemini's thought signature on any of them).
+func readStream(r io.Reader) (completion, error) {
+	var out completion
+	var text strings.Builder
+	sawText, sawChunk := false, false
+	calls := map[int]*wireToolCall{}
+	var order []int
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
 		}
-		msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: args})
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content   *string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+						ExtraContent json.RawMessage `json:"extra_content,omitempty"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage *wireUsage `json:"usage"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return out, fmt.Errorf("llm: decode stream: %w", err)
+		}
+		if chunk.Error != nil {
+			return out, fmt.Errorf("llm: stream error: %s", chunk.Error.Message)
+		}
+		sawChunk = true
+		if chunk.Usage != nil {
+			out.usage = *chunk.Usage
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != nil {
+				text.WriteString(*ch.Delta.Content)
+				sawText = true
+			}
+			for _, d := range ch.Delta.ToolCalls {
+				tc := calls[d.Index]
+				if tc == nil {
+					tc = &wireToolCall{Type: "function"}
+					calls[d.Index] = tc
+					order = append(order, d.Index)
+				}
+				if d.ID != "" {
+					tc.ID = d.ID
+				}
+				if d.Type != "" {
+					tc.Type = d.Type
+				}
+				tc.Function.Name += d.Function.Name
+				tc.Function.Arguments += d.Function.Arguments
+				if len(d.ExtraContent) > 0 && string(d.ExtraContent) != "null" {
+					tc.ExtraContent = d.ExtraContent
+				}
+			}
+			if ch.FinishReason != nil && *ch.FinishReason != "" {
+				out.finish = *ch.FinishReason
+			}
+		}
 	}
-	stop := "end"
-	switch {
-	case len(msg.ToolCalls) > 0:
-		stop = "tool_use"
-	case ch.FinishReason == "length":
-		stop = "max_tokens"
-	case ch.FinishReason == "content_filter":
-		stop = "refusal"
+	if err := sc.Err(); err != nil {
+		return out, fmt.Errorf("llm: read stream: %w", err)
 	}
-	return &llm.Response{Message: msg, StopReason: stop,
-		Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens,
-			CacheReadTokens: out.Usage.PromptTokensDetails.CachedTokens}}, nil
+	if !sawChunk {
+		return out, fmt.Errorf("llm: empty response")
+	}
+	if sawText {
+		t := text.String()
+		out.message.Content = &t
+	}
+	for _, i := range order {
+		out.message.ToolCalls = append(out.message.ToolCalls, *calls[i])
+	}
+	return out, nil
 }
 
 // endpoint returns the Chat Completions URL. Azure's legacy API addresses a deployment by path

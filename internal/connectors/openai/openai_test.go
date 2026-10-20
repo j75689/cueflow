@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/openai"
@@ -216,5 +219,84 @@ func TestContextWindowConfigured(t *testing.T) {
 		if got := inst.(llm.ContextWindower).ContextWindow(context.Background()); got != want {
 			t.Errorf("context_window %q: %d", cfg, got)
 		}
+	}
+}
+
+// sse writes chunks as a chat completions stream, pausing between them, then [DONE].
+func sse(w http.ResponseWriter, pause time.Duration, chunks ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, c := range chunks {
+		fmt.Fprintf(w, "data: %s\n\n", c)
+		w.(http.Flusher).Flush()
+		time.Sleep(pause)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// A streamed answer is put back together: text in order, tool calls from their pieces (Gemini's
+// thought signature kept for the replay), finish reason and the usage chunk. The request asks for
+// a stream with usage, and a stream longer than the shared client's timeout isn't cut off.
+func TestStreamedCompletion(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		sse(w, 100*time.Millisecond,
+			`{"choices":[{"index":0,"delta":{"role":"assistant","content":"Reading "}}]}`,
+			`{"choices":[{"index":0,"delta":{"content":"the file."}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"read_file","arguments":""},"extra_content":{"google":{"thought_signature":"sig"}}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"name\":"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.md\"}"}},{"index":1,"id":"c2","function":{"name":"list_files","arguments":"{}"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":100}}}`)
+	}))
+	defer srv.Close()
+	inst, err := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m"},
+		connector.Env{HTTPClient: &http.Client{Timeout: 300 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "go"}}})
+	if err != nil {
+		t.Fatalf("a long stream was cut off: %v", err)
+	}
+	if got["stream"] != true || got["stream_options"].(map[string]any)["include_usage"] != true {
+		t.Fatalf("request: %v", got)
+	}
+	if resp.Message.Content != "Reading the file." || resp.StopReason != "tool_use" || len(resp.Message.ToolCalls) != 2 ||
+		resp.Message.ToolCalls[0].Name != "read_file" || string(resp.Message.ToolCalls[0].Arguments) != `{"name":"a.md"}` ||
+		resp.Message.ToolCalls[1].ID != "c2" {
+		t.Fatalf("reassembled: %+v", resp.Message)
+	}
+	if resp.Usage.InputTokens != 120 || resp.Usage.OutputTokens != 30 || resp.Usage.CacheReadTokens != 100 {
+		t.Fatalf("usage: %+v", resp.Usage)
+	}
+	// The replayed turn carries the thought signature back.
+	_, _ = inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: "go"}, resp.Message, {Role: llm.RoleTool, ToolCallID: "c1", Content: "x"}}})
+	replayed, _ := json.Marshal(got["messages"])
+	if !strings.Contains(string(replayed), `"thought_signature":"sig"`) {
+		t.Fatalf("thought signature not replayed: %s", replayed)
+	}
+}
+
+// A server that refuses the stream options gets the request again without them, and its plain
+// answer is read as before.
+func TestStreamRefusedFallsBack(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		bodies = append(bodies, b)
+		if b["stream_options"] != nil {
+			http.Error(w, `{"error":{"message":"Unrecognized request argument supplied: stream_options"}}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"plain"}}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`))
+	}))
+	defer srv.Close()
+	inst, _ := connector.Build("openai", connector.Config{"provider": "openai_compatible", "base_url": srv.URL, "model": "m"}, connector.Env{})
+	resp, err := inst.(connector.LLM).Chat(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}})
+	if err != nil || resp.Message.Content != "plain" || len(bodies) != 2 || bodies[1]["stream"] != nil {
+		t.Fatalf("fallback: %v %+v (%d requests)", err, resp, len(bodies))
 	}
 }

@@ -275,7 +275,7 @@ sequenceDiagram
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |
 | 並行任務 | 3（`CUEFLOW_AGENT_CONCURRENCY`） | `config` |
-| 單次模型呼叫 | 10 分鐘；Claude connector 以串流接收回覆（最多等 2 分鐘開始回應；串流中斷或回報過載時會重試），長回覆不會被其他 connector 請求適用的 90 秒逾時切斷 | `llm/llm.go`、`connectors/anthropic` |
+| 單次模型呼叫 | 10 分鐘；所有 LLM connector 都以串流接收回覆，長回覆不會被其他 connector 請求適用的 90 秒逾時切斷，也不會被 proxy 的閒置逾時切斷。Claude connector 最多等 2 分鐘開始回應，串流中斷或回報過載時會重試；不支援串流的 OpenAI 相容伺服器照舊一次讀取，同樣以 10 分鐘為限 | `llm/llm.go`、`connectors/anthropic`、`connectors/openai` |
 | 執行租約 | 2 分鐘，每 40 秒續約；過期 → `WAITING_HUMAN` | `crew/crew.go` |
 | `read_url` | 只允許 http(s)；連線時擋 loopback / 私有 / link-local / CGNAT / multicast；最多 5 次重新導向；2 MB、8,000 字、30 秒；不走系統 proxy（`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` 可放寬） | `crew/fetch.go` |
 | 發布 | 任何 agent 都做不到，見 §4 | `guard`、`connector` |
