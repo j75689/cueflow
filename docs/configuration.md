@@ -40,7 +40,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | Variable | Default | Purpose |
 |---|---|---|
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
-| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
+| `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos and task files are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished deliverable uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
 | `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
 

@@ -76,6 +76,11 @@ uploaded from the review editor, generated with an image connector (by a reviewe
 `cueflow media migrate --to <target>` moves existing media between backends; URLs do not change, because each
 row records which backend holds its bytes.
 
+Task files (an agent's working storage for one task) are kept by the same setting, in their own
+`task_files` table. They are never served on `/media/{id}`, a subtask can read its ancestors' files but writes
+only its own, and deleting a task deletes its and its subtasks' files, bytes included. `media migrate` does not
+move them; a file written before the setting changed stays readable as long as its backend is configured.
+
 When handing a post to a publisher, CueFlow turns `/media/{id}` into an absolute URL under
 `CUEFLOW_MEDIA_BASE_URL`, which must be reachable from the publisher (Compose sets it to `http://cueflow:3000`).
 

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,21 +44,15 @@ func (s *Store) CreateMedia(ctx context.Context, in NewMedia) (*Media, error) {
 	m := &Media{MimeType: in.MimeType, SizeBytes: len(in.Data), Source: in.Source, Prompt: in.Prompt,
 		ConnectorID: in.ConnectorID, CreatedBy: in.CreatedBy}
 	m.ID = uuid.New()
-	kind, row := blob.KindDB, in.Data
-	if s.blobs != nil {
-		// Bytes first: a row that points at nothing is worse than an orphaned file.
-		if err := s.blobs.Put(ctx, m.ID.String(), in.Data); err != nil {
-			return nil, err
-		}
-		kind, row = s.blobs.Kind(), nil
+	kind, row, err := s.putBytes(ctx, m.ID, in.Data)
+	if err != nil {
+		return nil, err
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, connector_id, created_by, storage)
+	_, err = s.pool.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, connector_id, created_by, storage)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		m.ID, in.MimeType, row, len(in.Data), in.Source, in.Prompt, in.ConnectorID, in.CreatedBy, kind)
 	if err != nil {
-		if s.blobs != nil {
-			_ = s.blobs.Delete(ctx, m.ID.String())
-		}
+		_ = s.dropBytes(ctx, kind, m.ID)
 		return nil, err
 	}
 	return m, nil
@@ -81,14 +74,6 @@ func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*Med
 	return m, kind, nil
 }
 
-// blobFor returns the backend that holds rows tagged kind.
-func (s *Store) blobFor(kind string) (blob.Store, error) {
-	if s.blobs != nil && s.blobs.Kind() == kind {
-		return s.blobs, nil
-	}
-	return nil, fmt.Errorf("media stored in %q but that backend is not configured (CUEFLOW_MEDIA_STORAGE)", kind)
-}
-
 // GetMedia returns an image with its bytes.
 func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*Media, error) {
 	m, kind, err := s.getMedia(ctx, id, true)
@@ -98,11 +83,7 @@ func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*Media, error) {
 	if kind == blob.KindDB {
 		return m, nil
 	}
-	b, err := s.blobFor(kind)
-	if err != nil {
-		return nil, err
-	}
-	rc, _, err := b.Open(ctx, id.String())
+	rc, err := s.openBytes(ctx, kind, id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,30 +121,16 @@ func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*Media, io.ReadSee
 	if err != nil {
 		return nil, nil, err
 	}
-	if kind == blob.KindDB {
+	rc, err := s.openBytes(ctx, kind, id, func() ([]byte, error) {
 		var data []byte
-		if err := s.pool.QueryRow(ctx, `SELECT data FROM media WHERE id=$1`, id).Scan(&data); err != nil {
-			return nil, nil, NotFound(err)
-		}
-		return m, nopCloser{bytes.NewReader(data)}, nil
-	}
-	b, err := s.blobFor(kind)
+		err := s.pool.QueryRow(ctx, `SELECT data FROM media WHERE id=$1`, id).Scan(&data)
+		return data, NotFound(err)
+	})
 	if err != nil {
-		return nil, nil, err
-	}
-	rc, _, err := b.Open(ctx, id.String())
-	if err != nil {
-		if errors.Is(err, blob.ErrNotFound) {
-			return nil, nil, domain.ErrNotFound
-		}
 		return nil, nil, err
 	}
 	return m, rc, nil
 }
-
-type nopCloser struct{ *bytes.Reader }
-
-func (nopCloser) Close() error { return nil }
 
 // MigrateMedia moves every row not yet on dst into it and clears the database copy. dst nil moves
 // everything back into the database. It returns how many rows moved.
@@ -276,12 +243,11 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 	if _, err := s.pool.Exec(ctx, `DELETE FROM media WHERE id=$1`, id); err != nil {
 		return err
 	}
-	if kind != blob.KindDB {
-		if b, err := s.blobFor(kind); err == nil {
-			if err := b.Delete(ctx, id.String()); err != nil {
-				return fmt.Errorf("media %s removed, but its file could not be deleted: %w", id, err)
-			}
-		}
+	if _, err := s.blobFor(kind); kind != blob.KindDB && err != nil {
+		return nil // the backend is no longer configured; nothing this process can delete
+	}
+	if err := s.dropBytes(ctx, kind, id); err != nil {
+		return fmt.Errorf("media %s removed, but its file could not be deleted: %w", id, err)
 	}
 	return nil
 }
