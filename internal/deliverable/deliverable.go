@@ -236,6 +236,19 @@ func validatePayload(kind string, payload json.RawMessage) (json.RawMessage, err
 // DocumentKind is the built-in kind: a Markdown document.
 const DocumentKind = "document"
 
+// Document is a document deliverable's payload.
+type Document struct {
+	Content string `json:"content"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// DecodeDocument reads a document payload.
+func DecodeDocument(payload json.RawMessage) (Document, error) {
+	var d Document
+	err := json.Unmarshal(payload, &d)
+	return d, err
+}
+
 func init() {
 	RegisterKind(Kind{ID: DocumentKind, Name: "Document",
 		Description: "A Markdown document (a report, a plan, a spec, release notes...). The action connector decides where an approved document goes.",
@@ -244,10 +257,8 @@ func init() {
 			"summary": map[string]any{"type": "string", "description": "One or two sentences for the reviewer (optional)"},
 		}},
 		Validate: func(payload json.RawMessage) error {
-			var d struct {
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal(payload, &d); err != nil {
+			d, err := DecodeDocument(payload)
+			if err != nil {
 				return err
 			}
 			if strings.TrimSpace(d.Content) == "" {

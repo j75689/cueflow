@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -263,6 +266,83 @@ func TestAgentCreatesDeliverable(t *testing.T) {
 	last := briefs[len(briefs)-1]
 	if !strings.Contains(last, "Deliverables created for this task") || !strings.Contains(last, "Weekly report") {
 		t.Fatalf("brief does not list the deliverable:\n%s", last)
+	}
+}
+
+// An agent reads a deliverable in full with get_deliverable: a short one in one call, a long one in
+// pages by offset (sized to fit with a long header), a failed one with its error, and none of another
+// org's.
+func TestAgentReadsDeliverable(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "File the issue", "assignee_agent_id": team["chief"].ID}, &task)
+	doc := func(org uuid.UUID, title, content, summary string) uuid.UUID {
+		raw, _ := json.Marshal(map[string]any{"content": content, "summary": summary})
+		d, err := e.ds.Create(ctx, deliverable.New{OrgID: org, Kind: deliverable.DocumentKind, Title: title, Payload: raw}, deliverable.ActorAgent, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	long := "# 設計\n\n" + strings.Repeat("Disney+ 字幕。", 3000) + "\n## Last section\nthe end"
+	short := doc(task.OrgID, "Short", "# Short\n\nAll of it.", "the plan")
+	big := doc(task.OrgID, "Long", long, strings.Repeat("摘要", 1050)) // a header past the old 2,000 characters of slack
+	failed := doc(task.OrgID, "Failed", "# Failed", "")
+	if _, err := e.pool.Exec(ctx, `UPDATE deliverables SET status='FAILED', error_message='github: 422 Validation Failed' WHERE id=$1`, failed); err != nil {
+		t.Fatal(err)
+	}
+	other, err := e.store.CreateOrg(ctx, &store.Org{Name: "Other", Slug: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := doc(other.ID, "Theirs", "not yours", "")
+
+	var results []llm.Message
+	next := regexp.MustCompile(`Call get_deliverable with offset (\d+) for the rest`)
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		results = toolResults(req)
+		if len(results) == 0 {
+			return calls("get_deliverable", map[string]any{"deliverable_id": short.String()},
+				"get_deliverable", map[string]any{"deliverable_id": failed.String()},
+				"get_deliverable", map[string]any{"deliverable_id": foreign.String()},
+				"get_deliverable", map[string]any{"deliverable_id": big.String()})
+		}
+		if m := next.FindStringSubmatch(results[len(results)-1].Content); m != nil && len(results) < 10 {
+			off, _ := strconv.Atoi(m[1])
+			return calls("get_deliverable", map[string]any{"deliverable_id": big.String(), "offset": off})
+		}
+		return calls("complete_task", map[string]any{"summary": "read"})
+	})
+	e.crew.RunPending(ctx, 2)
+	if len(results) < 5 {
+		t.Fatalf("tool results: %+v", results)
+	}
+	if r := results[0].Content; !strings.Contains(r, "[PENDING_REVIEW] document, version 2: Short") ||
+		!strings.Contains(r, "Summary: the plan") || !strings.Contains(r, "characters 0–19 of 19.\n") ||
+		strings.Contains(r, "offset") || !strings.HasSuffix(r, "# Short\n\nAll of it.") {
+		t.Fatalf("short deliverable: %q", r)
+	}
+	if r := results[1].Content; !strings.Contains(r, "[FAILED]") || !strings.Contains(r, "Error: github: 422 Validation Failed") {
+		t.Fatalf("failed deliverable: %q", r)
+	}
+	if r := results[2].Content; !strings.HasPrefix(r, "error:") || strings.Contains(r, "not yours") {
+		t.Fatalf("another org's deliverable: %q", r)
+	}
+	// The pages of the long one each fit what the model sees, and add up to the content.
+	var got strings.Builder
+	for i, p := range results[3:] {
+		if n := utf8.RuneCountInString(p.Content); n > 32000 || strings.Contains(p.Content, "(truncated") {
+			t.Fatalf("page %d is %d characters, or was clipped: %.300q", i, n, p.Content)
+		}
+		if i == 0 && !strings.Contains(p.Content, "Summary: "+strings.Repeat("摘要", 1050)+"\n") {
+			t.Fatalf("the first page lost the summary: %.300q", p.Content)
+		}
+		_, body, _ := strings.Cut(p.Content[strings.Index(p.Content, "Content: characters"):], "\n\n")
+		got.WriteString(body)
+	}
+	if len(results) != 5 || got.String() != long {
+		t.Fatalf("%d pages add up to %d of %d characters", len(results)-3, utf8.RuneCountInString(got.String()), utf8.RuneCountInString(long))
 	}
 }
 

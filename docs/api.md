@@ -128,7 +128,8 @@ and `deliverable_transitions`; `/stats` adds `deliverables_by_status`; `GET /tas
  "attempts":1,"version":4,"created_by":"system_agent","acted_at":"...","created_at":"...","updated_at":"..."}
 ```
 
-Agents with the `deliverables` capability get `create_deliverable`, `list_deliverables` and `revise_deliverable`;
+Agents with the `deliverables` capability get `create_deliverable`, `list_deliverables`, `get_deliverable` and
+`revise_deliverable`;
 nothing they can call acts on an item.
 
 ## Connectors (plugins)

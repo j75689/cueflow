@@ -38,7 +38,7 @@ worker acts on it (`DONE` or `FAILED`, and a failed one can be retried). Nothing
   item inside the approval). `post` refuses one with no publisher to use, or no accounts for a publisher that
   needs them; the approve endpoints answer `400 invalid_argument` with the reason.
 - **Agents**: capability `deliverables` (tools `create_deliverable`, `list_deliverables`,
-  `revise_deliverable`).
+  `get_deliverable`, `revise_deliverable`).
 - **Dashboard**: the Deliverables page (review, edit, approve, reject, retry) and a task's deliverables.
 - **API and MCP**: `/api/v1/deliverables` ([api.md](api.md)), and `list_deliverables` on the operator MCP.
 - **Settings**: `CUEFLOW_DISPATCH_INTERVAL`, `CUEFLOW_DISPATCH_LEASE` ([configuration.md](configuration.md)).

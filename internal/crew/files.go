@@ -21,9 +21,6 @@ import (
 // reads its ancestors' too, so a subtask can use what the task that delegated it saved.
 
 const (
-	// readFileDefault is how many characters read_file returns when no limit is given, and the most it
-	// returns at once: with the header it stays under maxToolResult, so a read is never clipped.
-	readFileDefault = 30000
 	// briefFiles caps the files listed in the brief; the rest are counted and list_files shows them.
 	briefFiles = 30
 	// listFilesMax caps one list_files answer; it says how many more there are.
@@ -40,10 +37,10 @@ var fileTools = []tool{
 			"content": Str("The whole text of the file")}, "name", "content"), run: toolWriteFile},
 	{name: "read_file", description: fmt.Sprintf("Read a file of this task or of a task above it. Returns up to %d characters "+
 		"from offset (a character position, default 0) and says how many characters the file has in all; call again with a "+
-		"larger offset for the rest.", readFileDefault),
+		"larger offset for the rest.", PageChars),
 		schema: Obj(map[string]any{"name": Str("File name, as listed under Files"),
 			"offset": Integer("First character to return (default 0)"),
-			"limit":  Integer(fmt.Sprintf("Characters to return (default and maximum %d)", readFileDefault))}, "name"), run: toolReadFile},
+			"limit":  Integer(fmt.Sprintf("Characters to return (default and maximum %d)", PageChars))}, "name"), run: toolReadFile},
 	{name: "list_files", description: fmt.Sprintf("List the files this task can read: its own and those of the tasks above it (at most %d, by name).", listFilesMax),
 		schema: Obj(map[string]any{}), run: toolListFiles},
 }
@@ -85,12 +82,6 @@ func toolReadFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 	if strings.TrimSpace(a.Name) == "" {
 		return "", errors.New("name is required")
 	}
-	if a.Offset < 0 {
-		return "", errors.New("offset can't be negative")
-	}
-	if a.Limit <= 0 || a.Limit > readFileDefault {
-		a.Limit = readFileDefault
-	}
 	f, rc, err := e.c.store.OpenTaskFile(ctx, e.task.ID, a.Name)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", fmt.Errorf("there is no file named %q; %s", a.Name, fileNames(ctx, e))
@@ -106,19 +97,7 @@ func toolReadFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 	if !utf8.Valid(data) {
 		return "", fmt.Errorf("%s is not text (%d bytes) and can't be shown", f.Name, len(data))
 	}
-	total := utf8.RuneCount(data)
-	if a.Offset > 0 && a.Offset >= total {
-		return "", fmt.Errorf("offset %d is past the end of %s, which has %d characters", a.Offset, f.Name, total)
-	}
-	end := min(a.Offset+a.Limit, total)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s%s: characters %d–%d of %d.", f.Name, ownerNote(ctx, e, f), a.Offset, end, total)
-	if end < total {
-		fmt.Fprintf(&b, " Call read_file with offset %d for the rest.", end)
-	}
-	b.WriteString("\n\n")
-	b.Write(runeSlice(data, a.Offset, end))
-	return b.String(), nil
+	return PageText(f.Name+ownerNote(ctx, e, f)+": ", data, a.Offset, a.Limit, "read_file", f.Name)
 }
 
 // runeSlice returns characters [from, to) of valid UTF-8 data without decoding the rest.
