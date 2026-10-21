@@ -105,11 +105,24 @@ func migrate() error {
 		return err
 	}
 	ctx := context.Background()
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := openDB(ctx, cfg, 0)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	return migrateDB(ctx, cfg, pool)
+}
+
+// openDB opens the main pool: for a transaction-mode pooler when a session URL is set.
+func openDB(ctx context.Context, cfg *config.Config, maxConns int) (*pgxpool.Pool, error) {
+	return db.OpenWith(ctx, cfg.DatabaseURL, db.Options{MaxConns: maxConns, TxPooler: cfg.DatabaseSessionURL != ""})
+}
+
+// migrateDB migrates through the session URL when there is one (the migration lock needs a session).
+func migrateDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
+	if cfg.DatabaseSessionURL != "" {
+		return db.MigrateSession(ctx, cfg.DatabaseSessionURL)
+	}
 	return db.Migrate(ctx, pool)
 }
 
@@ -140,12 +153,12 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := connectWithRetry(ctx, cfg.DatabaseURL, cfg.DBMaxConns, logger)
+	pool, err := connectWithRetry(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := migrateDB(ctx, cfg, pool); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
@@ -167,6 +180,7 @@ func serve() error {
 	cs := content.NewStore(st)
 	broker := events.NewBroker()
 	broker.Attach(pool, logger)
+	broker.ListenURL = cfg.DatabaseSessionURL
 	go broker.Run(ctx)
 	h := hub.New(st, logger)
 	sched := scheduler.New(st, logger)
@@ -303,10 +317,10 @@ func serve() error {
 }
 
 // connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
-func connectWithRetry(ctx context.Context, url string, maxConns int, logger *slog.Logger) (*pgxpool.Pool, error) {
+func connectWithRetry(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 30; attempt++ {
-		pool, err := db.OpenWith(ctx, url, maxConns)
+		pool, err := openDB(ctx, cfg, cfg.DBMaxConns)
 		if err == nil {
 			return pool, nil
 		}
@@ -365,12 +379,12 @@ func rotateKey(dryRun bool) error {
 		return err
 	}
 	ctx := context.Background()
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := openDB(ctx, cfg, 0)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := migrateDB(ctx, cfg, pool); err != nil {
 		return err
 	}
 	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
@@ -407,7 +421,7 @@ func mediaCmd(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	pool, err := openDB(ctx, cfg, 0)
 	if err != nil {
 		return err
 	}

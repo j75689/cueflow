@@ -42,16 +42,25 @@ Package settings → Change visibility).
 2. In *Project settings → Data API*: turn **off** *Enable Data API* and *Automatically expose new
    tables*, and turn **on** *Enable automatic RLS*. CueFlow talks to Postgres directly and never
    uses the REST API, and its tables hold encrypted connector secrets.
-3. Use the **session pooler on port 5432**, not the transaction pooler (6543): CueFlow uses prepared
-   statements, `LISTEN/NOTIFY` and `FOR UPDATE SKIP LOCKED`, which need session semantics. The
-   connection string looks like
-   `postgres://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
-   Connect as the `postgres` role (it owns the tables, so RLS does not apply to it).
-4. `CUEFLOW_DB_MAX_CONNS=4` per instance keeps three instances inside the free tier's session-pooler
-   limit (15 clients) with room to spare. With 5 they fill it exactly, and during a deploy the old
-   revision's instances keep their connections until their open requests (up to 30 minutes) end, so
-   new instances fail with `max clients reached in session mode`. Each instance also holds one
-   connection for `LISTEN`.
+3. CueFlow takes two connection strings (*Connect* in the project, *Connection pooler*):
+   - `DATABASE_URL`: the **transaction pooler**, port 6543. It lends a server connection only for the
+     length of a transaction and takes ~200 clients on the free tier, so instance count isn't capped
+     by the database. With `DATABASE_SESSION_URL` set, CueFlow opens this pool without named prepared
+     statements (pgx's `cache_describe` mode), which a transaction pooler can't keep.
+   - `DATABASE_SESSION_URL`: the **session pooler**, port 5432, for the work that needs a session:
+     each instance's one `LISTEN` connection (live updates across instances) and a short-lived
+     connection that takes the migration lock at startup.
+
+   Both look like `postgres://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:<port>/postgres`.
+   Connect as the `postgres` role (it owns the tables, so RLS does not apply to it). With only
+   `DATABASE_URL` set (a session pooler or a direct connection), everything uses it as before.
+4. Connection budget on the free tier: the session pooler's 15 clients go to one `LISTEN` connection
+   per instance (plus one for a minute at startup), so about a dozen instances fit, counting the old
+   revision's instances that keep running during a deploy until their requests (up to 30 minutes)
+   end. `CUEFLOW_DB_MAX_CONNS=5` caps each instance's transaction-pooler clients, far inside its
+   limit. Without the session URL every connection is a session client: then keep
+   `CUEFLOW_DB_MAX_CONNS=4` and at most three instances, or new ones fail with
+   `max clients reached in session mode`.
 5. Free projects are **paused after 7 days without activity**. The one-minute tick counts as activity;
    if you ever disable it, expect a paused database.
 
@@ -85,13 +94,13 @@ g artifacts repositories create ghcr --location "$REGION" --repository-format do
 
 ## 4. Secrets and the first deploy
 
-Four secrets, created **from your own terminal, never through chat**. `CUEFLOW_SECRET_KEY` is 32 bytes
+Five secrets, created **from your own terminal, never through chat**. `CUEFLOW_SECRET_KEY` is 32 bytes
 as 64 hex characters or base64 (`cueflow genkey`). If you restore an existing database, it must be the
 **same key** the data was encrypted with, otherwise every stored connector credential is unreadable.
 Keep a copy somewhere outside the database.
 
 ```sh
-for name in DATABASE_URL CUEFLOW_SECRET_KEY CUEFLOW_ADMIN_TOKEN CUEFLOW_MCP_TOKEN; do
+for name in DATABASE_URL DATABASE_SESSION_URL CUEFLOW_SECRET_KEY CUEFLOW_ADMIN_TOKEN CUEFLOW_MCP_TOKEN; do
   printf '%s: ' "$name"; read -rs v; echo
   printf %s "$v" | g secrets create "cueflow-$name" --data-file=- ; unset v
   g secrets add-iam-policy-binding "cueflow-$name" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor
@@ -105,8 +114,8 @@ their token audience must match it exactly), so deploy once, read the URL, and d
 IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/j75689/cueflow:1.0.0   # a release
 g run deploy cueflow --region "$REGION" --image "$IMAGE" --service-account "$SA" \
   --allow-unauthenticated --min-instances 0 --max-instances 3 --timeout 1800 \
-  --set-secrets "DATABASE_URL=cueflow-DATABASE_URL:latest,CUEFLOW_SECRET_KEY=cueflow-CUEFLOW_SECRET_KEY:latest,CUEFLOW_ADMIN_TOKEN=cueflow-CUEFLOW_ADMIN_TOKEN:latest,CUEFLOW_MCP_TOKEN=cueflow-CUEFLOW_MCP_TOKEN:latest" \
-  --set-env-vars "CUEFLOW_QUEUE=cloudtasks,CUEFLOW_TICK=external,CUEFLOW_TASKS_QUEUE=projects/$PROJECT/locations/$REGION/queues/$QUEUE,CUEFLOW_TASKS_SERVICE_ACCOUNT=$SA,CUEFLOW_INTERNAL_SERVICE_ACCOUNTS=$SA,CUEFLOW_MEDIA_STORAGE=gcs://$BUCKET/media,CUEFLOW_DB_MAX_CONNS=4,CUEFLOW_AGENT_CONCURRENCY=3"
+  --set-secrets "DATABASE_URL=cueflow-DATABASE_URL:latest,DATABASE_SESSION_URL=cueflow-DATABASE_SESSION_URL:latest,CUEFLOW_SECRET_KEY=cueflow-CUEFLOW_SECRET_KEY:latest,CUEFLOW_ADMIN_TOKEN=cueflow-CUEFLOW_ADMIN_TOKEN:latest,CUEFLOW_MCP_TOKEN=cueflow-CUEFLOW_MCP_TOKEN:latest" \
+  --set-env-vars "CUEFLOW_QUEUE=cloudtasks,CUEFLOW_TICK=external,CUEFLOW_TASKS_QUEUE=projects/$PROJECT/locations/$REGION/queues/$QUEUE,CUEFLOW_TASKS_SERVICE_ACCOUNT=$SA,CUEFLOW_INTERNAL_SERVICE_ACCOUNTS=$SA,CUEFLOW_MEDIA_STORAGE=gcs://$BUCKET/media,CUEFLOW_DB_MAX_CONNS=5,CUEFLOW_AGENT_CONCURRENCY=3"
 
 URL=$(g run services describe cueflow --region "$REGION" --format 'value(status.url)')
 g run services update cueflow --region "$REGION" \
@@ -127,6 +136,29 @@ Open the service URL, enter the admin token when asked, and check *Connectors* a
 
 If you prefer Terraform or another deployment tool, the resources above are the whole list: the
 service with those secrets and variables, and the Scheduler job.
+
+An install that still runs everything through the session pooler moves to the transaction pooler
+with two new secrets and one deploy. Leave `cueflow-DATABASE_URL` as it is: Cloud Run reads a
+secret when an instance starts, so changing it in place would hand the running revision's new
+instances a transaction-pooler URL without the session URL (and it is the way back):
+
+```sh
+# 1. The session URL is what DATABASE_URL holds today (port 5432).
+g secrets versions access latest --secret cueflow-DATABASE_URL |
+  g secrets create cueflow-DATABASE_SESSION_URL --data-file=-
+# 2. The transaction pooler: the same URL with port 6543.
+printf 'DATABASE_URL on port 6543: '; read -rs v; echo
+printf %s "$v" | g secrets create cueflow-DATABASE_POOLED_URL --data-file=- ; unset v
+for name in DATABASE_SESSION_URL DATABASE_POOLED_URL; do
+  g secrets add-iam-policy-binding "cueflow-$name" --member "serviceAccount:$SA" --role roles/secretmanager.secretAccessor
+done
+# 3. One deploy switches both.
+g run services update cueflow --region "$REGION" \
+  --update-secrets "DATABASE_URL=cueflow-DATABASE_POOLED_URL:latest,DATABASE_SESSION_URL=cueflow-DATABASE_SESSION_URL:latest" \
+  --update-env-vars CUEFLOW_DB_MAX_CONNS=5
+```
+
+To go back, map `DATABASE_URL` to `cueflow-DATABASE_URL` again and remove `DATABASE_SESSION_URL`.
 
 ## 5. Moving an existing install
 

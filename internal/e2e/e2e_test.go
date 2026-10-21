@@ -55,7 +55,10 @@ func setup(t *testing.T) *env {
 		t.Skip("CUEFLOW_TEST_DATABASE_URL not set")
 	}
 	ctx := context.Background()
-	pool, err := db.Open(ctx, url)
+	// CUEFLOW_TEST_DATABASE_SESSION_URL runs the suite the way a transaction-mode pooler is used:
+	// the URL above is the pooler, this one the session connection for the migration.
+	sessionURL := os.Getenv("CUEFLOW_TEST_DATABASE_SESSION_URL")
+	pool, err := db.OpenWith(ctx, url, db.Options{TxPooler: sessionURL != ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +66,12 @@ func setup(t *testing.T) *env {
 	if _, err := pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrate(ctx, pool); err != nil {
+	if sessionURL != "" {
+		err = db.MigrateSession(ctx, sessionURL)
+	} else {
+		err = db.Migrate(ctx, pool)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
