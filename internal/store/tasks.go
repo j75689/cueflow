@@ -647,7 +647,8 @@ type AgentRun struct {
 	ContextTokens int64 `json:"context_tokens"`
 	ContextWindow int64 `json:"context_window"`
 	// Outcome is how the run ended: complete, ask, approval, wait, handoff, overflow, limit, error,
-	// canceled ("" while running, and for runs before it was recorded).
+	// canceled, interrupted, continued ("" while running, and for runs before it was recorded;
+	// "handover" while a running run waits for the next delivery to keep watching it).
 	Outcome string `json:"outcome"`
 	Error   string `json:"error"`
 	// ConnectorID is the LLM connector (built-in runtime) or the ACP runtime connector used.
@@ -713,6 +714,44 @@ func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRu
 		out = append(out, &r)
 	}
 	return out, rows.Err()
+}
+
+// GetAgentRun loads one run.
+func (s *Store) GetAgentRun(ctx context.Context, id uuid.UUID) (*AgentRun, error) {
+	var r AgentRun
+	err := s.pool.QueryRow(ctx, `SELECT `+agentRunColumns+` FROM agent_runs WHERE id=$1`, id).Scan(r.scanDest()...)
+	if err != nil {
+		return nil, NotFound(err)
+	}
+	return &r, nil
+}
+
+// HandOverAgentRun marks a running run whose delivery is ending as waiting for the next one to keep
+// watching it (outcome "handover"; see ClaimHandedOverRuns).
+func (s *Store) HandOverAgentRun(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET outcome='handover' WHERE id=$1 AND status='RUNNING'`, id)
+	return err
+}
+
+// ClaimHandedOverRuns takes up to n handed-over runs for this delivery to keep watching; each is
+// taken by exactly one caller.
+func (s *Store) ClaimHandedOverRuns(ctx context.Context, n int) ([]uuid.UUID, error) {
+	rows, err := s.pool.Query(ctx, `UPDATE agent_runs SET outcome='' WHERE id IN (
+		SELECT id FROM agent_runs WHERE status='RUNNING' AND outcome='handover'
+		ORDER BY started_at LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING id`, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // FailStaleAgentRuns marks runs left RUNNING by a previous process.

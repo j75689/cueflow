@@ -63,8 +63,13 @@ type Crew struct {
 	// entry goes when the run ends (finish, and once more when runTask returns).
 	taskOrgs sync.Map
 
+	// DeliveryLimit is how long one queued delivery (an HTTP request from Cloud Tasks) may run before
+	// Cloud Tasks' dispatch deadline and Cloud Run's request timeout, both 30 minutes, cut it off
+	// (see delivery.go).
+	DeliveryLimit time.Duration
+
 	mu      sync.Mutex
-	running map[uuid.UUID]context.CancelFunc
+	running map[uuid.UUID]context.CancelCauseFunc
 	wake    chan struct{}
 	wg      sync.WaitGroup
 }
@@ -72,8 +77,8 @@ type Crew struct {
 func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
 		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
-		Lease: 2 * time.Minute, Every: 2 * time.Second,
-		running: map[uuid.UUID]context.CancelFunc{}, wake: make(chan struct{}, 1)}
+		Lease: 2 * time.Minute, Every: 2 * time.Second, DeliveryLimit: 30 * time.Minute,
+		running: map[uuid.UUID]context.CancelCauseFunc{}, wake: make(chan struct{}, 1)}
 }
 
 func (c *Crew) Wake() {
@@ -96,7 +101,7 @@ func (c *Crew) Cancel(taskID uuid.UUID) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if cancel, ok := c.running[taskID]; ok {
-		cancel()
+		cancel(errStopped)
 		return true
 	}
 	return false
@@ -140,7 +145,7 @@ func (c *Crew) dispatch(ctx context.Context) {
 }
 
 func (c *Crew) start(ctx context.Context, id uuid.UUID) {
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancelCause(ctx)
 	c.mu.Lock()
 	c.running[id] = cancel
 	c.mu.Unlock()
@@ -151,34 +156,47 @@ func (c *Crew) start(ctx context.Context, id uuid.UUID) {
 			c.mu.Lock()
 			delete(c.running, id)
 			c.mu.Unlock()
-			cancel()
+			cancel(nil)
 			c.Wake()
 		}()
 		c.runTask(runCtx, id)
 	}()
 }
 
-// handlerBudget bounds one crew delivery; whatever is left is picked up by a fresh one.
-const handlerBudget = 25 * time.Minute
-
-// HandleCrew is the jobs.KindCrew handler: it claims TODO tasks (as many at once as this process
-// has capacity for) and works them to the end of their runs, repeating until none are left. Every
-// delivery is idempotent: claiming is atomic, so a duplicate finds nothing to do.
+// HandleCrew is the jobs.KindCrew handler: it keeps watching the runs an earlier delivery handed
+// over, claims TODO tasks (as many at once as this process has capacity for) and works them until
+// their runs end or the delivery's time is nearly up (delivery.go), repeating until none are left.
+// Every delivery is idempotent: claiming is atomic, so a duplicate finds nothing to do.
 func (c *Crew) HandleCrew(ctx context.Context) error {
-	deadline := time.Now().Add(handlerBudget)
-	for time.Now().Before(deadline) && ctx.Err() == nil {
-		c.recoverExpired(ctx)
+	start := time.Now()
+	ctx = withDelivery(ctx, start, c.DeliveryLimit)
+	for time.Now().Before(claimUntil(start, c.DeliveryLimit)) && ctx.Err() == nil {
 		c.mu.Lock()
 		free := max(c.Concurrency-len(c.running), 1)
 		c.mu.Unlock()
-		ids, err := c.store.ClaimTodo(ctx, c.Lease, free)
+		runs, err := c.store.ClaimHandedOverRuns(ctx, free)
 		if err != nil {
 			return err
 		}
-		if len(ids) == 0 {
+		// After the hand-overs are taken, so their leases are not mistaken for dead runs.
+		c.recoverExpired(ctx)
+		var ids []uuid.UUID
+		if free -= len(runs); free > 0 {
+			if ids, err = c.store.ClaimTodo(ctx, c.Lease, free); err != nil {
+				return err
+			}
+		}
+		if len(runs)+len(ids) == 0 {
 			return nil
 		}
 		var wg sync.WaitGroup
+		for _, id := range runs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c.resumeRun(ctx, id)
+			}()
+		}
 		for _, id := range ids {
 			wg.Add(1)
 			go func() {
@@ -196,7 +214,12 @@ func (c *Crew) HandleCrew(ctx context.Context) error {
 
 // runNow works one claimed task synchronously.
 func (c *Crew) runNow(ctx context.Context, id uuid.UUID) {
-	runCtx, cancel := context.WithCancel(ctx)
+	c.tracked(ctx, id, func(ctx context.Context) { c.runTask(ctx, id) })
+}
+
+// tracked runs work for task id synchronously, where Cancel can stop it.
+func (c *Crew) tracked(ctx context.Context, id uuid.UUID, work func(context.Context)) {
+	runCtx, cancel := context.WithCancelCause(ctx)
 	c.mu.Lock()
 	c.running[id] = cancel
 	c.mu.Unlock()
@@ -204,9 +227,9 @@ func (c *Crew) runNow(ctx context.Context, id uuid.UUID) {
 		c.mu.Lock()
 		delete(c.running, id)
 		c.mu.Unlock()
-		cancel()
+		cancel(nil)
 	}()
-	c.runTask(runCtx, id)
+	work(runCtx)
 }
 
 // Sweep is the crew's part of the external clock: it returns interrupted tasks to the board and
@@ -354,8 +377,8 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 		c.logger.Error("start run", "err", err)
 		return
 	}
-	ctx, cancelRun := context.WithCancel(ctx)
-	defer cancelRun()
+	ctx, cancelRun := context.WithCancelCause(ctx)
+	defer cancelRun(nil)
 	stopBeat := c.heartbeat(ctx, cancelRun, task.ID)
 	defer stopBeat()
 
@@ -365,17 +388,32 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 	} else {
 		out = c.loop(ctx, task, a, run)
 	}
+	c.endRun(ctx, task, a, run, out, stopBeat)
+}
+
+// endRun applies how a run ended: handed over to the next delivery, or finished. stopBeat ends the
+// run's heartbeat first, so a last beat can't shorten the lease handOver sets.
+func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome, stopBeat func()) {
+	bg := context.WithoutCancel(ctx)
+	if out.kind == "handover" {
+		stopBeat()
+		c.handOver(bg, task, run)
+		return
+	}
 	if ctx.Err() != nil {
-		out = &outcome{kind: "canceled"}
+		out = stopped(ctx)
 	}
 	c.finish(bg, task, a, run, out)
 }
 
 // heartbeat keeps a running task's lease alive. When the task is no longer IN_PROGRESS (a human
 // canceled it, possibly through another instance) it calls cancel so the run stops.
-func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelFunc, id uuid.UUID) func() {
-	done := make(chan struct{})
+// heartbeat keeps the task's lease. A lease it can't extend means the task left IN_PROGRESS (a human
+// stopped or moved it, possibly through another instance), so the run is stopped as by a human.
+func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id uuid.UUID) func() {
+	done, exited := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(exited)
 		t := time.NewTicker(c.Lease / 3)
 		defer t.Stop()
 		for {
@@ -386,13 +424,18 @@ func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelFunc, id uuid
 				return
 			case <-t.C:
 				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, c.Lease); err == nil && !ok {
-					cancel()
+					cancel(errStopped)
 					return
 				}
 			}
 		}
 	}()
-	return func() { close(done) }
+	// Stopping waits for the goroutine, so no beat lands after it returns. Safe to call twice.
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(done) })
+		<-exited
+	}
 }
 
 func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun) *outcome {
@@ -431,6 +474,9 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 	var h handOff
 	// A hand-off asked for on the last allowed turn still gets its turns to write the note.
 	for run.Turns < a.MaxTurns || h.asked && h.turns < handOffTurns {
+		if run.Turns > 0 && turnsOver(ctx) {
+			return &outcome{kind: "continue"} // the delivery is nearly over; a fresh run takes the next turn
+		}
 		resp, err := model.Chat(agentCtx, llm.Request{System: system, Messages: msgs, Tools: llmTools})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -659,9 +705,26 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		if run != nil {
 			run.Error = "context window exceeded"
 		}
+	case "continue":
+		auto, msg := c.continueRun(ctx, task, run)
+		c.system(ctx, task.ID, msg)
+		alertText = msg
+		if auto {
+			next = store.TaskTodo
+			if run != nil {
+				run.Outcome = outcomeContinued
+			}
+		}
 	case "canceled":
 		c.system(ctx, task.ID, "Stopped.")
 		runStatus = "CANCELED"
+	case "interrupted":
+		alertText = "The agent run was interrupted before it finished (the server stopped or its request was cut off). Reply or press Run to continue."
+		c.system(ctx, task.ID, alertText)
+		runStatus = "FAILED"
+		if run != nil {
+			run.Error = "interrupted"
+		}
 	default: // error
 		c.system(ctx, task.ID, "The agent run failed: "+out.text)
 		// The error can carry a request URL, request id or gateway body; keep those out of the alert.

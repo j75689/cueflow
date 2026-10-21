@@ -179,8 +179,12 @@ sequenceDiagram
 | context 達到交接點（§6.3） | 交接筆記（有標示）與系統訊息 | `WAITING_HUMAN` | SUCCEEDED |
 | 超過 context 上限 | 系統訊息（說明該縮減什麼，或回覆後以新的 run 繼續） | `WAITING_HUMAN` | FAILED |
 | LLM／設定錯誤 | 系統訊息（含錯誤原因） | `WAITING_HUMAN` | FAILED |
-| 被人停止 | 「Stopped.」 | `WAITING_HUMAN` | CANCELED |
+| 被人停止（按 Stop、拖走或改派卡片，在任何 instance 上） | 「Stopped.」 | `WAITING_HUMAN` | CANCELED |
+| 內建 loop 用完一次雲端 delivery 的時間（見下） | 系統訊息 | `TODO`，以新的 run 繼續（連續最多 5 次，之後 `WAITING_HUMAN`） | SUCCEEDED（`continued`） |
+| 其他原因結束（伺服器停止、delivery 的請求被切斷） | 系統訊息（說明中斷，可回覆繼續） | `WAITING_HUMAN` | FAILED |
 | 程序重啟、租約過期 | 系統訊息（說明中斷） | `WAITING_HUMAN` | FAILED |
+
+**雲端 delivery**（`CUEFLOW_QUEUE=cloudtasks`）：一次執行跑在一個 Cloud Tasks delivery 裡，也就是一個 HTTP 請求，Cloud Tasks 和 Cloud Run 都會在 30 分鐘後切斷它。一個 delivery 只在前 20 分鐘認領新工作。內建 loop 過了 25 分鐘就不再開新回合，改由下一個 delivery 以新的 run 繼續（和一般 run 一樣從 brief 與對話串開始）。跑在 runner 上的 run 會在 28 分鐘時交棒：runner 上的 agent 繼續工作，下一個 delivery 接著看同一個 job，所以長時間的 QA 或建置不會被請求上限砍掉。直接在 CueFlow 主機上跑的 ACP agent 無法交棒，超過 30 分鐘會被中斷。
 
 **執行中有人留言**：runner 不會打斷正在跑的 LLM 呼叫，而是在結束時檢查「本次執行開始後是否有人類訊息」。如果有，就不套用完成狀態，改回 `TODO` 立即重跑，讓新的留言被處理（被停止或失敗時除外；第一輪就超過 context 上限時也不重跑，因為重跑只會重複同樣的結果）。
 

@@ -35,7 +35,14 @@ const runnerPoll = time.Second
 func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, pool runnerPool) *outcome {
 	env := &runEnv{c: c, task: task, agent: a}
 	token, mrun, unregister := c.registerMCPRun(ctx, env)
-	defer unregister()
+	handedOver := false
+	defer func() {
+		if handedOver {
+			c.mcp.remove(token) // the token stays valid: the runner keeps calling tools while the next delivery watches
+		} else {
+			unregister()
+		}
+	}()
 	defer func() {
 		if env.searcher != nil {
 			hub.Close(env.searcher)
@@ -49,10 +56,7 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 	}
 	prompt := acpPrompt + buildSystemPrompt(a, task, team, memories) + "\n\n---\n\n" + c.buildBrief(ctx, task)
 
-	timeout := pool.RunTimeout()
-	if timeout <= 0 {
-		timeout = 20 * time.Minute
-	}
+	timeout := runnerTimeout(pool)
 	job, err := c.store.CreateRunnerJob(ctx, store.NewRunnerJob{
 		OrgID: task.OrgID, TaskID: task.ID, AgentRunID: &run.ID, Labels: pool.Labels(),
 		Payload: runnerapi.Job{
@@ -64,15 +68,41 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 		return &outcome{kind: "error", text: "could not queue the runner job: " + err.Error()}
 	}
 	run.ConnectorID, run.Runtime = a.RuntimeConnectorID, "acp"
-	labels := "any runner"
-	if l := pool.Labels(); len(l) > 0 {
-		labels = "labels: " + strings.Join(l, ", ")
-	}
-	c.system(ctx, task.ID, fmt.Sprintf("Waiting for a runner (%s).", labels))
+	c.system(ctx, task.ID, fmt.Sprintf("Waiting for a runner (%s).", runnerLabels(pool)))
+	out := c.waitRunnerJob(ctx, run, env, mrun, pool, job)
+	handedOver = out.kind == "handover"
+	return out
+}
 
-	// A little slack beyond the agent's own timeout covers startup and the final upload.
-	deadline := time.Now().Add(timeout + 2*time.Minute)
-	queueDeadline := time.Now().Add(pool.QueueTimeout())
+func runnerTimeout(pool runnerPool) time.Duration {
+	if t := pool.RunTimeout(); t > 0 {
+		return t
+	}
+	return 20 * time.Minute
+}
+
+func runnerLabels(pool runnerPool) string {
+	if l := pool.Labels(); len(l) > 0 {
+		return "labels: " + strings.Join(l, ", ")
+	}
+	return "any runner"
+}
+
+// waitRunnerJob waits for the runner to finish the job, for a terminal tool call, for cancellation,
+// for the job to be lost, or (in a cloud delivery) for the delivery's time to be nearly up: then it
+// returns "handover" and leaves the job running for the next delivery to keep watching (resumeRun).
+func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runEnv, mrun *mcpRun, pool runnerPool, job *store.RunnerJob) *outcome {
+	timeout := runnerTimeout(pool)
+	// A little slack beyond the agent's own timeout covers startup and the final upload. Both
+	// deadlines count from the job's creation, so they hold across deliveries.
+	deadline := job.CreatedAt.Add(timeout + 2*time.Minute)
+	queueDeadline := job.CreatedAt.Add(pool.QueueTimeout())
+	var handOver <-chan time.Time
+	if at, ok := handOverAt(ctx); ok {
+		hand := time.NewTimer(time.Until(at))
+		defer hand.Stop()
+		handOver = hand.C
+	}
 	t := time.NewTicker(runnerPoll)
 	defer t.Stop()
 	var res acpdrive.Result
@@ -87,6 +117,8 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 			// agent and reports the tail of the conversation before we move on.
 			c.stopRunnerJob(ctx, job.ID, 20*time.Second)
 			return c.acpOutcome(ctx, run, env, acpdrive.Result{}, timeout)
+		case <-handOver:
+			return &outcome{kind: "handover"}
 		case <-t.C:
 		}
 		cur, err := c.store.GetRunnerJob(ctx, job.ID)
@@ -98,7 +130,7 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 		case store.JobQueued:
 			if now.After(queueDeadline) {
 				_, _ = c.store.EndRunnerJob(ctx, job.ID, store.JobExpired, nil)
-				return &outcome{kind: "error", text: fmt.Sprintf("no runner picked up the work within %s (%s)", pool.QueueTimeout(), labels)}
+				return &outcome{kind: "error", text: fmt.Sprintf("no runner picked up the work within %s (%s)", pool.QueueTimeout(), runnerLabels(pool))}
 			}
 		case store.JobRunning:
 			if cur.LeaseUntil != nil && now.After(*cur.LeaseUntil) || now.After(deadline) {

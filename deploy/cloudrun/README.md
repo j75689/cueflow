@@ -47,7 +47,11 @@ Package settings → Change visibility).
    connection string looks like
    `postgres://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
    Connect as the `postgres` role (it owns the tables, so RLS does not apply to it).
-4. `CUEFLOW_DB_MAX_CONNS=5` per instance keeps three instances inside the free tier's connection limit.
+4. `CUEFLOW_DB_MAX_CONNS=4` per instance keeps three instances inside the free tier's session-pooler
+   limit (15 clients) with room to spare. With 5 they fill it exactly, and during a deploy the old
+   revision's instances keep their connections until their open requests (up to 30 minutes) end, so
+   new instances fail with `max clients reached in session mode`. Each instance also holds one
+   connection for `LISTEN`.
 5. Free projects are **paused after 7 days without activity**. The one-minute tick counts as activity;
    if you ever disable it, expect a paused database.
 
@@ -102,7 +106,7 @@ IMAGE=$REGION-docker.pkg.dev/$PROJECT/ghcr/j75689/cueflow:1.0.0   # a release
 g run deploy cueflow --region "$REGION" --image "$IMAGE" --service-account "$SA" \
   --allow-unauthenticated --min-instances 0 --max-instances 3 --timeout 1800 \
   --set-secrets "DATABASE_URL=cueflow-DATABASE_URL:latest,CUEFLOW_SECRET_KEY=cueflow-CUEFLOW_SECRET_KEY:latest,CUEFLOW_ADMIN_TOKEN=cueflow-CUEFLOW_ADMIN_TOKEN:latest,CUEFLOW_MCP_TOKEN=cueflow-CUEFLOW_MCP_TOKEN:latest" \
-  --set-env-vars "CUEFLOW_QUEUE=cloudtasks,CUEFLOW_TICK=external,CUEFLOW_TASKS_QUEUE=projects/$PROJECT/locations/$REGION/queues/$QUEUE,CUEFLOW_TASKS_SERVICE_ACCOUNT=$SA,CUEFLOW_INTERNAL_SERVICE_ACCOUNTS=$SA,CUEFLOW_MEDIA_STORAGE=gcs://$BUCKET/media,CUEFLOW_DB_MAX_CONNS=5,CUEFLOW_AGENT_CONCURRENCY=3"
+  --set-env-vars "CUEFLOW_QUEUE=cloudtasks,CUEFLOW_TICK=external,CUEFLOW_TASKS_QUEUE=projects/$PROJECT/locations/$REGION/queues/$QUEUE,CUEFLOW_TASKS_SERVICE_ACCOUNT=$SA,CUEFLOW_INTERNAL_SERVICE_ACCOUNTS=$SA,CUEFLOW_MEDIA_STORAGE=gcs://$BUCKET/media,CUEFLOW_DB_MAX_CONNS=4,CUEFLOW_AGENT_CONCURRENCY=3"
 
 URL=$(g run services describe cueflow --region "$REGION" --format 'value(status.url)')
 g run services update cueflow --region "$REGION" \
@@ -207,6 +211,10 @@ Give the backup bucket a lifecycle rule (for example delete after 30 days).
 At low traffic Cloud Run, Cloud Tasks and Cloud Scheduler stay in their free tiers; the bucket costs
 cents; Supabase Free is $0. The service scales to zero but keeps an instance while a request is open,
 and the dashboard's live-update stream is a request: leave the dashboard open and the instance stays up.
+
+A request lasts at most 30 minutes (`--timeout 1800`, and Cloud Tasks' dispatch deadline). Agent runs
+that take longer continue across deliveries: built-in runs in a fresh run, runner runs handed over
+with the runner's agent still working (see [agentic-flow §6.2](../../docs/agentic-flow.md#62-how-runs-end)).
 
 ## Services that write media to the bucket
 

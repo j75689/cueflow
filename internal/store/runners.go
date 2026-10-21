@@ -327,6 +327,11 @@ func (s *Store) GetRunnerJob(ctx context.Context, id uuid.UUID) (*RunnerJob, err
 	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.id=$1`, id))
 }
 
+// RunnerJobForRun is the newest runner job of an agent run.
+func (s *Store) RunnerJobForRun(ctx context.Context, runID uuid.UUID) (*RunnerJob, error) {
+	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.agent_run_id=$1 ORDER BY j.created_at DESC LIMIT 1`, runID))
+}
+
 func (s *Store) ListTaskRunnerJobs(ctx context.Context, taskID uuid.UUID) ([]*RunnerJob, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.task_id=$1 ORDER BY j.created_at DESC`, taskID)
 	if err != nil {

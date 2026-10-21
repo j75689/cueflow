@@ -180,8 +180,18 @@ Benefits:
 | Context reached the hand-off point (§6.3) | the hand-off note (marked) and a system message | `WAITING_HUMAN` | SUCCEEDED |
 | Context window exceeded | system message (what to shrink, or reply to continue in a fresh run) | `WAITING_HUMAN` | FAILED |
 | LLM / configuration error | system message (with the error) | `WAITING_HUMAN` | FAILED |
-| Stopped by a human | "Stopped." | `WAITING_HUMAN` | CANCELED |
+| Stopped by a human (Stop, moving or reassigning the card, on any instance) | "Stopped." | `WAITING_HUMAN` | CANCELED |
+| Built-in run used its cloud delivery's time (below) | system message | `TODO`, continuing in a fresh run (up to 5 in a row, then `WAITING_HUMAN`) | SUCCEEDED (`continued`) |
+| Context ended any other way (the server stopped, a delivery's request was cut off) | system message (interrupted; reply to continue) | `WAITING_HUMAN` | FAILED |
 | Process restart, lease expired | system message (explaining the interruption) | `WAITING_HUMAN` | FAILED |
+
+**Cloud deliveries** (`CUEFLOW_QUEUE=cloudtasks`): a run works inside one Cloud Tasks delivery, an HTTP
+request that Cloud Tasks and Cloud Run cut off after 30 minutes. A delivery claims work only in its first
+20 minutes. A built-in run starts no new turn after 25 minutes and continues in a fresh run that the next
+delivery picks up (it starts from the brief and thread, like any run). A run on a runner is handed over at
+28 minutes: the runner's agent keeps working, and the next delivery keeps watching the same job, so a long
+QA or build pass is never killed by the request limit. An ACP agent on the CueFlow host itself can't be
+handed over; such a run past 30 minutes is interrupted.
 
 **A human comments during a run**: the runner does not interrupt the in-flight LLM call. When the run ends it checks whether any human message arrived after the run started. If so, it does not apply the completion status; it moves the task back to `TODO` and reruns immediately so the new comment is handled (except when the run was stopped or failed, or a context overflow on its first turn, which a rerun would only repeat).
 
