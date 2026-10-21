@@ -42,6 +42,16 @@ What each role needs:
 - Protect the default branch of that repository (require a pull request). The agents never merge, but the
   token they hold decides what they *could* do.
 
+Pull requests the team opens share one body shape, so the human who merges can judge one quickly: **Summary**
+(why, then the smallest visual that makes the change clear), **Evidence** (before and after) and **Merge Danger**
+(a one-way or two-way door, and the blast radius). A repository's own pull request template takes precedence. The
+Reviewer checks the body against the diff and makes its own door call (an understated one is a blocker), QA reruns
+the evidence, and the Tech Lead reports the reviewer's door and blast radius back with the pull request. The shape is
+adapted from the [`pr`](https://github.com/mattpocock/skills/tree/v1.3.0/skills/engineering/pr) skill in
+mattpocock/skills, whose Summary visuals come from Dex Horthy's
+[`show-me`](https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md); both are MIT
+licensed, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Two engineers working in parallel: import the file, then duplicate the Engineer in the dashboard with another
 slug (`frontend`, `backend`) and a line in its instructions about its half; the Tech Lead sees both in its team
 list.
