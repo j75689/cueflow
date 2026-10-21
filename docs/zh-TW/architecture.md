@@ -42,7 +42,7 @@ flowchart TB
         Src["source: RSS · IMAP"]
         Search["search: SearXNG · Tavily"]
         LLM["llm: OpenAI 相容（OpenRouter · Azure）· Claude API · Bedrock · Vertex（Claude、Gemini）"]
-        Notif["notifier: SMTP"]
+        Notif["notifier: SMTP · Telegram"]
         Pub["publisher: MCP publisher"]
         Act["action: MCP action"]
     end
@@ -178,6 +178,7 @@ classDiagram
     LLM <|.. ClaudeVertex
     LLM <|.. GeminiVertex
     Notifier <|.. SMTP
+    Notifier <|.. Telegram
 ```
 
 一個插件 = 一個 package，在 `init()` 裡呼叫 `connector.Register(spec, factory)`：

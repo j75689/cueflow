@@ -2,10 +2,11 @@
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage, setApiOrg } from "@/lib/api";
-import type { Org } from "@/lib/types";
+import type { Connector, Org } from "@/lib/types";
 import { useDialog } from "./dialog";
 import { Popover } from "./popover";
 import { useServerEvent, useToast } from "./providers";
+import { Select } from "./select";
 import { Button, Checkbox, Field, Icon, Input, Modal, cx } from "./ui";
 
 const ORG_KEY = "cueflow.org";
@@ -172,6 +173,21 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = useState("");
   const [seed, setSeed] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [notifiers, setNotifiers] = useState<Connector[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    api.listConnectors("notifier").then(setNotifiers, () => setNotifiers([]));
+  }, [open]);
+
+  const setNotifier = async (o: Org, id: string) => {
+    try {
+      await api.updateOrg(o.id, { notifier_id: id });
+      await reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
 
   const create = async () => {
     if (!name.trim()) return;
@@ -223,22 +239,47 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
         <p className="text-sm text-fg-2">
           Each org has its own agents, board, schedules, deliverables and runs. Connectors and usage are shared.
         </p>
+        <p className="text-sm text-fg-2">
+          {notifiers?.length
+            ? "Alerts tell an org's chosen notifier when a task needs you: ready for review, a question, an approval, or a run that failed or was interrupted."
+            : "To get an alert when a task needs you, add a notifier connector (Telegram or email), then pick it for the org here."}
+        </p>
         <ul className="divide-y divide-line rounded-md border border-line">
           {orgs.map((o, i) => (
-            <li key={o.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1">
-                <span className="font-medium text-fg">{o.name}</span>
-                <span className="ml-2 font-mono text-xs text-fg-3">{o.slug}</span>
-                {i === 0 && <span className="ml-2 text-xs text-fg-3">default</span>}
-                {o.id === org?.id && <span className="ml-2 text-xs text-accent">current</span>}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => rename(o)} aria-label={`Rename ${o.name}`}>
-                <Icon name="edit" className="h-3.5 w-3.5" />
-              </Button>
-              {orgs.length > 1 && (
-                <Button size="sm" variant="ghost" onClick={() => remove(o)} aria-label={`Delete ${o.name}`}>
-                  <Icon name="trash" className="h-3.5 w-3.5" />
+            <li key={o.id} className="space-y-2 px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium text-fg">{o.name}</span>
+                  <span className="ml-2 font-mono text-xs text-fg-3">{o.slug}</span>
+                  {i === 0 && <span className="ml-2 text-xs text-fg-3">default</span>}
+                  {o.id === org?.id && <span className="ml-2 text-xs text-accent">current</span>}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => rename(o)} aria-label={`Rename ${o.name}`}>
+                  <Icon name="edit" className="h-3.5 w-3.5" />
                 </Button>
+                {orgs.length > 1 && (
+                  <Button size="sm" variant="ghost" onClick={() => remove(o)} aria-label={`Delete ${o.name}`}>
+                    <Icon name="trash" className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+              {!!notifiers?.length && (
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-xs text-fg-3">Alerts</span>
+                  <Select
+                    className="min-w-0 flex-1"
+                    value={o.notifier_id ?? ""}
+                    onChange={(e) => void setNotifier(o, e.target.value)}
+                    aria-label={`Alerts for ${o.name}`}
+                  >
+                    <option value="">Off</option>
+                    {notifiers.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.is_active ? n.name : `${n.name} (disabled)`}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
               )}
             </li>
           ))}

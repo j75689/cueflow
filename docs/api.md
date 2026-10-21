@@ -34,7 +34,9 @@ first one is the default org.
 (`POST /agents/template?org=...`).
 
 ### `PATCH /api/v1/orgs/{id}`
-`{"name":"...","slug":"..."}`, either field optional.
+`{"name":"...","slug":"...","notifier_id":"uuid"}`, every field optional. `notifier_id` picks the notifier
+connector for the org's task alerts (`400` if the connector is not a notifier); `""` turns alerts off. Orgs
+carry `notifier_id` (or `null`) in every response.
 
 ### `DELETE /api/v1/orgs/{id}`
 `204`. Only an empty org (no agents, tasks, schedules or deliverables) can be deleted, and never the last

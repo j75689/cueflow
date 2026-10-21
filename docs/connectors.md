@@ -17,7 +17,7 @@ implements `Test(ctx) (*TestResult, error)`, which backs the **Test** button.
 | `source` | `Fetch(ctx, FetchOptions) ([]Item, error)` | the agents' `fetch_sources` tool and the **Fetch now** button |
 | `search` | `Search(ctx, query, limit) ([]SearchResult, error)` | the agent's `web_search` tool |
 | `llm` | `Chat(ctx, llm.Request) (*llm.Response, error)`, `Model()` | the agent loop |
-| `notifier` | `Notify(ctx, Notification) error` | modules that send reminders (nothing in the core today) |
+| `notifier` | `Notify(ctx, Notification) error` | the crew, for the task alerts of each org that picked this notifier ([agentic-flow §6.2](agentic-flow.md#62-how-runs-end)) |
 | `runtime` | `Launch() RuntimeLaunch` | the crew runner, for agents that run in an external ACP agent |
 | `image` | `GenerateImage(ctx, ImageRequest) ([]Image, error)` | the **Generate image** button and the agent's `generate_image` tool |
 | `action` | `Act(ctx, ActRequest) (*ActResult, error)` | the deliverables worker, for approved deliverables of kinds without an action of their own (`document`) |

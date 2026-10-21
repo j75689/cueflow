@@ -201,6 +201,7 @@ func serve() error {
 	team.Concurrency = cfg.AgentConcurrency
 	team.ContextHandOffAt = cfg.ContextHandOffAt
 	team.MCPBaseURL = localBaseURL(cfg.Addr)
+	team.PublicURL = cfg.PublicURL
 	team.ValidateSchedule = scheduler.ValidateSchedule
 	team.OnSchedulesChanged = func(ctx context.Context) { _ = sched.Reload(ctx) }
 	sched.OnTaskSpawned = func(ctx context.Context, t *store.Task) {

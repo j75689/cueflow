@@ -154,7 +154,7 @@ export const api = {
 
   listOrgs: () => request<Org[]>("GET", "/orgs"),
   createOrg: (body: { name: string; slug?: string; seed_agents?: boolean }) => request<Org>("POST", "/orgs", body),
-  updateOrg: (id: string, body: { name?: string; slug?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
+  updateOrg: (id: string, body: { name?: string; slug?: string; notifier_id?: string }) => request<Org>("PATCH", `/orgs/${id}`, body),
   deleteOrg: (id: string) => request<void>("DELETE", `/orgs/${id}`),
 
   listDeliverables: (q: { status?: string[]; kind?: string; task_id?: string; q?: string; limit?: number; offset?: number }) =>

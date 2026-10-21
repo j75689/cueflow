@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
 )
 
@@ -19,15 +20,17 @@ type Org struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
+	// NotifierID is the notifier connector the org's task alerts go to; nil sends none.
+	NotifierID *uuid.UUID `json:"notifier_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-const orgColumns = `id, name, slug, created_at, updated_at`
+const orgColumns = `id, name, slug, notifier_id, created_at, updated_at`
 
 func scanOrg(row pgx.Row) (*Org, error) {
 	var o Org
-	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt)
+	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.NotifierID, &o.CreatedAt, &o.UpdatedAt)
 	return &o, err
 }
 
@@ -115,8 +118,21 @@ func (s *Store) UpdateOrg(ctx context.Context, o *Org) (*Org, error) {
 	if err := o.normalize(); err != nil {
 		return nil, err
 	}
-	out, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET name=$2, slug=$3, updated_at=NOW() WHERE id=$1 RETURNING `+orgColumns,
-		o.ID, truncate(o.Name, 64), o.Slug))
+	if o.NotifierID != nil {
+		var kind string
+		err := s.pool.QueryRow(ctx, "SELECT kind FROM connectors WHERE id=$1", *o.NotifierID).Scan(&kind)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, Invalid("notifier not found")
+		}
+		if err != nil {
+			return nil, err
+		}
+		if kind != string(connector.KindNotifier) {
+			return nil, Invalid("the connector is not a notifier")
+		}
+	}
+	out, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET name=$2, slug=$3, notifier_id=$4, updated_at=NOW() WHERE id=$1 RETURNING `+orgColumns,
+		o.ID, truncate(o.Name, 64), o.Slug, o.NotifierID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
