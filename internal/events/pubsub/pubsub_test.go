@@ -168,3 +168,54 @@ func TestReceiveFailsWhenTheSubscriptionIsGone(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A pull that hangs (a half-open connection) times out and is retried, instead of leaving the
+// instance deaf with no error for Run to act on.
+func TestHungPullIsRetried(t *testing.T) {
+	defer func(d time.Duration) { pullTimeout = d }(pullTimeout)
+	pullTimeout = 200 * time.Millisecond
+	f := newFake()
+	var mu sync.Mutex
+	pulls := 0
+	stop := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ":pull") {
+			mu.Lock()
+			pulls++
+			first := pulls == 1
+			mu.Unlock()
+			if first {
+				select { // never answers, like a half-open connection
+				case <-r.Context().Done():
+				case <-stop:
+				}
+				return
+			}
+		}
+		f.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	defer close(stop) // before Close, which waits for the hung handler
+	tr, err := New(context.Background(), Config{Topic: "projects/p/topics/t", Endpoint: srv.URL, Client: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Publish(context.Background(), []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got := make(chan string, 1)
+	errc := make(chan error, 1)
+	go func() { errc <- tr.Receive(ctx, func(b []byte) { got <- string(b) }) }()
+	select {
+	case m := <-got:
+		if m != "hello" {
+			t.Fatalf("got %q", m)
+		}
+	case err := <-errc:
+		t.Fatalf("Receive returned %v instead of retrying the hung pull", err)
+	case <-ctx.Done():
+		t.Fatal("the hung pull was never retried")
+	}
+}

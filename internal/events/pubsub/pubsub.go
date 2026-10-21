@@ -36,6 +36,14 @@ const (
 	maxMessages = 100
 )
 
+// pullTimeout bounds one pull, so a connection that went half-open (the default client has no
+// timeout, and ctx only ends at shutdown) can't leave the instance silently deaf; a pull that runs
+// out is treated as empty. callTimeout bounds every other call.
+var (
+	pullTimeout = 60 * time.Second
+	callTimeout = 10 * time.Second
+)
+
 // Config configures a Transport.
 type Config struct {
 	// Topic is "projects/P/topics/T"; it must exist.
@@ -94,6 +102,7 @@ func (t *Transport) Close(ctx context.Context) error {
 	return t.call(ctx, http.MethodDelete, "/v1/"+t.sub, nil, nil)
 }
 
+// Publish is bounded by the caller's ctx (the broker gives it 3 s).
 func (t *Transport) Publish(ctx context.Context, payload []byte) error {
 	body := map[string]any{"messages": []map[string]any{{"data": base64.StdEncoding.EncodeToString(payload)}}}
 	return t.call(ctx, http.MethodPost, "/v1/"+t.cfg.Topic+":publish", body, nil)
@@ -110,7 +119,13 @@ func (t *Transport) Receive(ctx context.Context, deliver func([]byte)) error {
 			} `json:"receivedMessages"`
 		}
 		start := time.Now()
-		if err := t.call(ctx, http.MethodPost, "/v1/"+t.sub+":pull", map[string]any{"maxMessages": maxMessages}, &out); err != nil {
+		pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
+		err := t.call(pullCtx, http.MethodPost, "/v1/"+t.sub+":pull", map[string]any{"maxMessages": maxMessages}, &out)
+		cancel()
+		if err != nil && ctx.Err() == nil && errors.Is(pullCtx.Err(), context.DeadlineExceeded) {
+			continue // nothing came within pullTimeout: pull again
+		}
+		if err != nil {
 			return err
 		}
 		ids := make([]string, 0, len(out.ReceivedMessages))
@@ -122,7 +137,10 @@ func (t *Transport) Receive(ctx context.Context, deliver func([]byte)) error {
 		}
 		if len(ids) > 0 {
 			// Unacked messages come back after the deadline; at worst a view refetches twice.
-			if err := t.call(ctx, http.MethodPost, "/v1/"+t.sub+":acknowledge", map[string]any{"ackIds": ids}, nil); err != nil {
+			ackCtx, cancel := context.WithTimeout(ctx, callTimeout)
+			err := t.call(ackCtx, http.MethodPost, "/v1/"+t.sub+":acknowledge", map[string]any{"ackIds": ids}, nil)
+			cancel()
+			if err != nil {
 				return err
 			}
 		} else if time.Since(start) < 200*time.Millisecond {
