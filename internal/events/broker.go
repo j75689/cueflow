@@ -1,6 +1,6 @@
 // Package events is a pub/sub used to push live updates to dashboard clients (SSE). By default it is
-// in-process; Use makes it fan out through a Transport (PostgreSQL LISTEN/NOTIFY, or Google Pub/Sub
-// in package events/pubsub) so every instance sees every event.
+// in-process; Use makes it fan out through a Transport so every instance sees every event: package
+// events/pg (PostgreSQL LISTEN/NOTIFY) or events/pubsub (Google Pub/Sub).
 package events
 
 import (
@@ -11,11 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// Channel is the NOTIFY channel events travel on.
-const Channel = "cueflow_events"
 
 type Event struct {
 	Name string `json:"name"`
@@ -45,9 +41,6 @@ func (b *Broker) Use(t Transport, log *slog.Logger) {
 	b.transport = t
 	b.log = log.With("component", "events")
 }
-
-// Attach is Use with PostgreSQL LISTEN/NOTIFY on the pool.
-func (b *Broker) Attach(pool *pgxpool.Pool, log *slog.Logger) { b.Use(&PG{Pool: pool}, log) }
 
 // Subscribe returns a channel of events and a cancel func that must be called.
 func (b *Broker) Subscribe() (<-chan Event, func()) {

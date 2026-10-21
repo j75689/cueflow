@@ -41,6 +41,7 @@ import (
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
+	"github.com/j75689/cueflow/internal/events/pg"
 	"github.com/j75689/cueflow/internal/events/pubsub"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/internalauth"
@@ -200,7 +201,7 @@ func serve() error {
 		defer closeEvents() // a startup error after this point
 		broker.Use(t, logger)
 	} else {
-		broker.Use(&events.PG{Pool: pool, ListenURL: cfg.DatabaseSessionURL}, logger)
+		broker.Use(&pg.Transport{Pool: pool, ListenURL: cfg.DatabaseSessionURL}, logger)
 	}
 	go broker.Run(ctx)
 	h := hub.New(st, logger)

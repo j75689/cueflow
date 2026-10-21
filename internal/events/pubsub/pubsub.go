@@ -36,13 +36,8 @@ const (
 	maxMessages = 100
 )
 
-// pullTimeout bounds one pull, so a connection that went half-open (the default client has no
-// timeout, and ctx only ends at shutdown) can't leave the instance silently deaf; a pull that runs
-// out is treated as empty. callTimeout bounds every other call.
-var (
-	pullTimeout = 60 * time.Second
-	callTimeout = 10 * time.Second
-)
+// callTimeout bounds an acknowledge.
+const callTimeout = 10 * time.Second
 
 // Config configures a Transport.
 type Config struct {
@@ -52,6 +47,10 @@ type Config struct {
 	Client *http.Client
 	// Endpoint overrides DefaultEndpoint (the emulator, tests).
 	Endpoint string
+	// PullTimeout bounds one pull (default 60 s), so a connection that went half-open (the default
+	// client has no timeout, and Receive's ctx only ends at shutdown) can't leave the instance
+	// silently deaf; a pull that runs out is treated as empty.
+	PullTimeout time.Duration
 }
 
 // Transport implements events.Transport.
@@ -70,6 +69,9 @@ func New(ctx context.Context, cfg Config) (*Transport, error) {
 	}
 	if cfg.Endpoint == "" {
 		cfg.Endpoint = DefaultEndpoint
+	}
+	if cfg.PullTimeout <= 0 {
+		cfg.PullTimeout = 60 * time.Second
 	}
 	cfg.Endpoint = strings.TrimRight(cfg.Endpoint, "/")
 	if cfg.Client == nil {
@@ -119,11 +121,11 @@ func (t *Transport) Receive(ctx context.Context, deliver func([]byte)) error {
 			} `json:"receivedMessages"`
 		}
 		start := time.Now()
-		pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
+		pullCtx, cancel := context.WithTimeout(ctx, t.cfg.PullTimeout)
 		err := t.call(pullCtx, http.MethodPost, "/v1/"+t.sub+":pull", map[string]any{"maxMessages": maxMessages}, &out)
 		cancel()
 		if err != nil && ctx.Err() == nil && errors.Is(pullCtx.Err(), context.DeadlineExceeded) {
-			continue // nothing came within pullTimeout: pull again
+			continue // nothing came within PullTimeout: pull again
 		}
 		if err != nil {
 			return err

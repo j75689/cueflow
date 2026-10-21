@@ -104,7 +104,9 @@ func TestTwoInstancesSeeEachOthersEvents(t *testing.T) {
 		t.Fatal("each instance needs its own subscription")
 	}
 	if fake != nil {
+		fake.mu.Lock()
 		got := fake.created[ta.Subscription()]
+		fake.mu.Unlock()
 		if got["topic"] != cfg.Topic || got["expirationPolicy"].(map[string]any)["ttl"] != "86400s" {
 			t.Fatalf("subscription settings: %v", got)
 		}
@@ -114,8 +116,11 @@ func TestTwoInstancesSeeEachOthersEvents(t *testing.T) {
 	a, b := events.NewBroker(), events.NewBroker()
 	a.Use(ta, log)
 	b.Use(tb, log)
-	go a.Run(ctx)
-	go b.Run(ctx)
+	var running sync.WaitGroup
+	for _, br := range []*events.Broker{a, b} {
+		running.Add(1)
+		go func() { defer running.Done(); br.Run(ctx) }()
+	}
 	inA, unsubA := a.Subscribe()
 	defer unsubA()
 	inB, unsubB := b.Subscribe()
@@ -139,8 +144,15 @@ func TestTwoInstancesSeeEachOthersEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if fake != nil && (len(fake.deleted) != 2 || fake.acked < 2) {
-		t.Fatalf("deleted %v, acked %d", fake.deleted, fake.acked)
+	cancel() // stop both receivers before reading what the fake recorded
+	running.Wait()
+	if fake != nil {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		// Each receiver delivers, then acks; one stopped between the two acks nothing, which is fine.
+		if len(fake.deleted) != 2 || fake.acked < 1 {
+			t.Fatalf("deleted %v, acked %d", fake.deleted, fake.acked)
+		}
 	}
 }
 
@@ -172,8 +184,6 @@ func TestReceiveFailsWhenTheSubscriptionIsGone(t *testing.T) {
 // A pull that hangs (a half-open connection) times out and is retried, instead of leaving the
 // instance deaf with no error for Run to act on.
 func TestHungPullIsRetried(t *testing.T) {
-	defer func(d time.Duration) { pullTimeout = d }(pullTimeout)
-	pullTimeout = 200 * time.Millisecond
 	f := newFake()
 	var mu sync.Mutex
 	pulls := 0
@@ -196,7 +206,8 @@ func TestHungPullIsRetried(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(stop) // before Close, which waits for the hung handler
-	tr, err := New(context.Background(), Config{Topic: "projects/p/topics/t", Endpoint: srv.URL, Client: srv.Client()})
+	tr, err := New(context.Background(), Config{Topic: "projects/p/topics/t", Endpoint: srv.URL, Client: srv.Client(),
+		PullTimeout: 200 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,4 +229,6 @@ func TestHungPullIsRetried(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("the hung pull was never retried")
 	}
+	cancel()
+	<-errc
 }
