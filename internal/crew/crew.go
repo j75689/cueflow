@@ -132,19 +132,20 @@ func (c *Crew) dispatch(ctx context.Context) {
 	if free <= 0 {
 		return
 	}
-	ids, err := c.store.ClaimTodo(ctx, c.Lease, free)
+	claims, err := c.store.ClaimTodo(ctx, c.Lease, free)
 	if err != nil {
 		if ctx.Err() == nil {
 			c.logger.Error("claim tasks", "err", err)
 		}
 		return
 	}
-	for _, id := range ids {
-		c.start(ctx, id)
+	for _, cl := range claims {
+		c.start(ctx, cl)
 	}
 }
 
-func (c *Crew) start(ctx context.Context, id uuid.UUID) {
+func (c *Crew) start(ctx context.Context, cl store.Claim) {
+	id := cl.ID
 	runCtx, cancel := context.WithCancelCause(ctx)
 	c.mu.Lock()
 	c.running[id] = cancel
@@ -159,7 +160,7 @@ func (c *Crew) start(ctx context.Context, id uuid.UUID) {
 			cancel(nil)
 			c.Wake()
 		}()
-		c.runTask(runCtx, id)
+		c.runTask(runCtx, cl)
 	}()
 }
 
@@ -180,13 +181,13 @@ func (c *Crew) HandleCrew(ctx context.Context) error {
 		}
 		// After the hand-overs are taken, so their leases are not mistaken for dead runs.
 		c.recoverExpired(ctx)
-		var ids []uuid.UUID
+		var claims []store.Claim
 		if free -= len(runs); free > 0 {
-			if ids, err = c.store.ClaimTodo(ctx, c.Lease, free); err != nil {
+			if claims, err = c.store.ClaimTodo(ctx, c.Lease, free); err != nil {
 				return err
 			}
 		}
-		if len(runs)+len(ids) == 0 {
+		if len(runs)+len(claims) == 0 {
 			return nil
 		}
 		var wg sync.WaitGroup
@@ -197,11 +198,11 @@ func (c *Crew) HandleCrew(ctx context.Context) error {
 				c.resumeRun(ctx, id)
 			}()
 		}
-		for _, id := range ids {
+		for _, cl := range claims {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				c.runNow(ctx, id)
+				c.runNow(ctx, cl)
 			}()
 		}
 		wg.Wait()
@@ -213,8 +214,8 @@ func (c *Crew) HandleCrew(ctx context.Context) error {
 }
 
 // runNow works one claimed task synchronously.
-func (c *Crew) runNow(ctx context.Context, id uuid.UUID) {
-	c.tracked(ctx, id, func(ctx context.Context) { c.runTask(ctx, id) })
+func (c *Crew) runNow(ctx context.Context, cl store.Claim) {
+	c.tracked(ctx, cl.ID, func(ctx context.Context) { c.runTask(ctx, cl) })
 }
 
 // tracked runs work for task id synchronously, where Cancel can stop it.
@@ -253,12 +254,12 @@ func (c *Crew) Sweep(ctx context.Context) error {
 // Intended for tests and one-shot CLI use.
 func (c *Crew) RunPending(ctx context.Context, maxRounds int) {
 	for i := 0; i < maxRounds; i++ {
-		ids, err := c.store.ClaimTodo(ctx, c.Lease, 10)
-		if err != nil || len(ids) == 0 {
+		claims, err := c.store.ClaimTodo(ctx, c.Lease, 10)
+		if err != nil || len(claims) == 0 {
 			return
 		}
-		for _, id := range ids {
-			c.runTask(ctx, id)
+		for _, cl := range claims {
+			c.runTask(ctx, cl)
 		}
 	}
 }
@@ -353,7 +354,10 @@ func (c *Crew) llmFor(ctx context.Context, a *store.Agent) (connector.LLM, uuid.
 
 // --- the agent loop ---
 
-func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
+// runTask works the task of a claim. Everything it does to the task's lease and status is fenced by
+// the claim's attempt, never the task's current one: a newer claim means this one was lost.
+func (c *Crew) runTask(ctx context.Context, cl store.Claim) {
+	id := cl.ID
 	defer c.taskOrgs.Delete(id) // the run wrote most of the task's messages; don't keep the entry forever
 	bg := context.WithoutCancel(ctx)
 	task, err := c.store.GetTask(bg, id)
@@ -363,23 +367,23 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 	}
 	c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": id, "status": task.Status})
 	if task.AssigneeAgentID == nil {
-		c.finish(bg, task, nil, nil, &outcome{kind: "error", text: "task has no assignee"})
+		c.finish(bg, task, nil, nil, cl.Attempt, &outcome{kind: "error", text: "task has no assignee"})
 		return
 	}
 	a, err := c.store.GetAgent(bg, *task.AssigneeAgentID)
 	if err != nil {
-		c.finish(bg, task, nil, nil, &outcome{kind: "error", text: "assigned agent not found"})
+		c.finish(bg, task, nil, nil, cl.Attempt, &outcome{kind: "error", text: "assigned agent not found"})
 		return
 	}
 
-	run, err := c.store.StartAgentRun(bg, task.ID, a.ID)
+	run, err := c.store.StartAgentRun(bg, task.ID, a.ID, cl.Attempt)
 	if err != nil {
 		c.logger.Error("start run", "err", err)
 		return
 	}
 	ctx, cancelRun := context.WithCancelCause(ctx)
 	defer cancelRun(nil)
-	stopBeat := c.heartbeat(ctx, cancelRun, task.ID)
+	stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.Attempt)
 	defer stopBeat()
 
 	var out *outcome
@@ -403,14 +407,13 @@ func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run
 	if ctx.Err() != nil {
 		out = stopped(ctx)
 	}
-	c.finish(bg, task, a, run, out)
+	c.finish(bg, task, a, run, run.Attempt, out)
 }
 
-// heartbeat keeps a running task's lease alive. When the task is no longer IN_PROGRESS (a human
-// canceled it, possibly through another instance) it calls cancel so the run stops.
-// heartbeat keeps the task's lease. A lease it can't extend means the task left IN_PROGRESS (a human
-// stopped or moved it, possibly through another instance), so the run is stopped as by a human.
-func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id uuid.UUID) func() {
+// heartbeat keeps the task's lease for the claim attempt. A lease it can't extend means the task
+// left IN_PROGRESS (a human stopped or moved it, possibly through another instance) or was claimed
+// again after this run stalled past its lease, so the run is stopped as by a human.
+func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id uuid.UUID, attempt int) func() {
 	done, exited := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(exited)
@@ -423,7 +426,7 @@ func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, c.Lease); err == nil && !ok {
+				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, attempt, c.Lease); err == nil && !ok {
 					cancel(errStopped)
 					return
 				}
@@ -654,10 +657,21 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	return res, isErr
 }
 
-// finish records the outcome and moves the task, unless a human already moved it elsewhere.
-func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) {
+// finish records the outcome and moves the task, unless a human already moved it elsewhere. It ends
+// the claim attempt: if the task was claimed again since (this run stalled past its lease), the newer
+// claim owns the task and its thread, so only the run is recorded.
+func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, attempt int, out *outcome) {
 	// Both run paths (runTask and a self-driven agent) end here, after writing most of the task's messages.
 	defer c.taskOrgs.Delete(task.ID)
+	if now, err := c.store.TaskAttempts(ctx, task.ID); err == nil && now != attempt {
+		if run != nil {
+			run.Status, run.Outcome, run.Error = "CANCELED", "canceled", "the task was claimed again while this run was stalled"
+			if err := c.store.FinishAgentRun(ctx, run); err != nil {
+				c.logger.Warn("finish run", "err", err)
+			}
+		}
+		return
+	}
 	next := store.TaskWaitingHuman
 	var result *string
 	runStatus := "SUCCEEDED"
@@ -753,13 +767,13 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		}
 	}
 
-	changed, err := c.store.SetTaskStatusIf(ctx, task.ID, []store.TaskStatus{store.TaskInProgress}, next, result)
+	changed, err := c.store.SetClaimedTaskStatus(ctx, task.ID, attempt, next, result)
 	if err != nil {
 		c.logger.Error("finish task", "task", task.ID, "err", err)
 		return
 	}
 	if !changed {
-		return // a human moved the card meanwhile
+		return // a human moved the card meanwhile, or the task was claimed again
 	}
 	c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": task.ID, "status": next})
 	if next == store.TaskBlocked {

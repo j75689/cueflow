@@ -108,7 +108,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 			if task == nil {
 				return "Nothing to claim: no matching task is waiting in TODO for you.", false
 			}
-			run, err := c.store.StartAgentRun(ctx, task.ID, a.ID)
+			run, err := c.store.StartAgentRun(ctx, task.ID, a.ID, task.Attempts)
 			if err != nil {
 				return err.Error(), true
 			}
@@ -151,7 +151,9 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 				return err.Error(), true
 			}
 			env := c.selfDrivenEnv(task, a)
-			_, _ = c.store.ExtendTaskLease(ctx, task.ID, selfDrivenLease)
+			// Not fenced by a claim: the claim belongs to the agent, not to a process that could stall
+			// and come back, and every call re-reads the agent's task, so it acts on the current one.
+			_, _ = c.store.ExtendTaskLease(ctx, task.ID, task.Attempts, selfDrivenLease)
 			out, isErr := c.execTool(guard.WithAgent(ctx), env, byName,
 				llm.ToolCall{ID: uuid.NewString(), Name: t.name, Arguments: stripTaskArg(args)})
 			if env.outcome != nil {
@@ -269,7 +271,7 @@ func (c *Crew) finishSelfDriven(ctx context.Context, task *store.Task, a *store.
 	} else {
 		run.Turns = max(run.Turns, 1)
 	}
-	c.finish(bg, task, a, run, env.outcome)
+	c.finish(bg, task, a, run, task.Attempts, env.outcome)
 }
 
 // recoverSelfDriven returns a self-driven task whose agent went quiet to TODO, so it can be claimed
