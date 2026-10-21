@@ -664,6 +664,8 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		runStatus = "CANCELED"
 	default: // error
 		c.system(ctx, task.ID, "The agent run failed: "+out.text)
+		// The error can carry a request URL, request id or gateway body; keep those out of the alert.
+		alertText = "The agent run failed. Open the task for details."
 		runStatus = "FAILED"
 		if run != nil {
 			run.Error = out.text
