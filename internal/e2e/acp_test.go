@@ -70,6 +70,10 @@ func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Prompt
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock(s)}}})
 	}
 	say("Reading the task. ")
+	// CUEFLOW_FAKE_ACP_DELAY makes the agent take its time, like real work that outlives a delivery.
+	if d, _ := time.ParseDuration(os.Getenv("CUEFLOW_FAKE_ACP_DELAY")); d > 0 {
+		time.Sleep(d)
+	}
 	if !strings.Contains(text, "Write about ACP") || !strings.Contains(text, `MCP server named "cueflow"`) {
 		say("The prompt did not contain the task brief.")
 	}

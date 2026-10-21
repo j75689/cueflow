@@ -27,6 +27,8 @@ func alertHeadline(kind string) string {
 		return "🔐 Needs your approval"
 	case "handoff":
 		return "⏸ Handed off, waiting for you"
+	case "continue":
+		return "⏸ Paused after long runs"
 	case "limit":
 		return "⚠️ Stopped: turn budget used"
 	case "overflow":

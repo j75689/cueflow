@@ -186,25 +186,10 @@ func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent
 	if a == nil || !a.AutoHandOff || !out.noted || run == nil {
 		return false, out.text
 	}
-	runs, err := c.store.ListAgentRuns(ctx, task.ID)
+	streak, err := c.streak(ctx, task, run, outcomeAutoHandOff)
 	if err != nil {
 		c.logger.Warn("count automatic hand-offs; waiting for the human", "task", task.ID, "err", err)
 		return false, out.text
-	}
-	lastHuman, spoke, err := c.store.LastHumanMessageAt(ctx, task.ID)
-	if err != nil {
-		c.logger.Warn("count automatic hand-offs; waiting for the human", "task", task.ID, "err", err)
-		return false, out.text
-	}
-	streak := 1              // this run
-	for _, r := range runs { // newest first
-		if r.ID == run.ID || r.FinishedAt == nil {
-			continue
-		}
-		if r.Outcome != outcomeAutoHandOff || spoke && lastHuman.After(r.StartedAt) {
-			break
-		}
-		streak++
 	}
 	if streak > maxAutoHandOffs {
 		return false, out.text + fmt.Sprintf(" This is the %d%s hand-off in a row, so it waits for you this time.", streak, ordinal(streak))
@@ -212,6 +197,30 @@ func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent
 	return true, fmt.Sprintf("The agent's context reached %d%% of the model's window, so it handed off and continues in a fresh run "+
 		"that starts from %s (automatic hand-off %d of %d in a row; the agent's Auto hand-off setting). Comment any time to steer it.",
 		contextPct(run), handOffFile, streak, maxAutoHandOffs)
+}
+
+// streak counts this run and the finished runs right before it that ended with outcome, stopping at
+// one a human message came after (any human move resets it).
+func (c *Crew) streak(ctx context.Context, task *store.Task, run *store.AgentRun, outcome string) (int, error) {
+	runs, err := c.store.ListAgentRuns(ctx, task.ID)
+	if err != nil {
+		return 0, err
+	}
+	lastHuman, spoke, err := c.store.LastHumanMessageAt(ctx, task.ID)
+	if err != nil {
+		return 0, err
+	}
+	n := 1                   // this run
+	for _, r := range runs { // newest first
+		if r.ID == run.ID || r.FinishedAt == nil {
+			continue
+		}
+		if r.Outcome != outcome || spoke && lastHuman.After(r.StartedAt) {
+			break
+		}
+		n++
+	}
+	return n, nil
 }
 
 // outcomeAutoHandOff is the outcome recorded for a hand-off that continued without waiting.
