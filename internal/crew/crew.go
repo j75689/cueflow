@@ -388,13 +388,15 @@ func (c *Crew) runTask(ctx context.Context, id uuid.UUID) {
 	} else {
 		out = c.loop(ctx, task, a, run)
 	}
-	c.endRun(ctx, task, a, run, out)
+	c.endRun(ctx, task, a, run, out, stopBeat)
 }
 
-// endRun applies how a run ended: handed over to the next delivery, or finished.
-func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) {
+// endRun applies how a run ended: handed over to the next delivery, or finished. stopBeat ends the
+// run's heartbeat first, so a last beat can't shorten the lease handOver sets.
+func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome, stopBeat func()) {
 	bg := context.WithoutCancel(ctx)
 	if out.kind == "handover" {
+		stopBeat()
 		c.handOver(bg, task, run)
 		return
 	}
@@ -409,8 +411,9 @@ func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run
 // heartbeat keeps the task's lease. A lease it can't extend means the task left IN_PROGRESS (a human
 // stopped or moved it, possibly through another instance), so the run is stopped as by a human.
 func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id uuid.UUID) func() {
-	done := make(chan struct{})
+	done, exited := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(exited)
 		t := time.NewTicker(c.Lease / 3)
 		defer t.Stop()
 		for {
@@ -427,7 +430,12 @@ func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id
 			}
 		}
 	}()
-	return func() { close(done) }
+	// Stopping waits for the goroutine, so no beat lands after it returns. Safe to call twice.
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(done) })
+		<-exited
+	}
 }
 
 func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun) *outcome {

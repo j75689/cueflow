@@ -107,7 +107,7 @@ func (c *Crew) resumeRun(ctx context.Context, runID uuid.UUID) {
 		}
 		stopBeat := c.heartbeat(ctx, cancelRun, task.ID)
 		defer stopBeat()
-		c.endRun(ctx, task, a, run, c.rewatchRunner(ctx, task, a, run, job))
+		c.endRun(ctx, task, a, run, c.rewatchRunner(ctx, task, a, run, job), stopBeat)
 	})
 }
 
