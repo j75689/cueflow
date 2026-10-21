@@ -52,9 +52,8 @@ func notifyAcross(t *testing.T, url, listenURL string) {
 	defer func() { cancel(); pool.Close() }() // listeners hold connections until ctx ends
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a, b := NewBroker(), NewBroker()
-	a.Attach(pool, log)
-	b.Attach(pool, log)
-	a.ListenURL, b.ListenURL = listenURL, listenURL
+	a.Use(&PG{Pool: pool, ListenURL: listenURL}, log)
+	b.Use(&PG{Pool: pool, ListenURL: listenURL}, log)
 	go a.Run(ctx)
 	go b.Run(ctx)
 	ch, unsub := b.Subscribe()

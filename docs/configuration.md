@@ -53,6 +53,8 @@ See [modules.md](modules.md#images-and-videos) for how media is stored, served a
 | Variable | Default | Purpose |
 |---|---|---|
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](../deploy/cloudrun/README.md)) |
+| `CUEFLOW_EVENTS` | `postgres` | How dashboard live updates reach every instance: `postgres` (`LISTEN/NOTIFY`, one session connection per instance) or `pubsub` (Google Pub/Sub, no database connection; see [`deploy/cloudrun`](../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)). `PUBSUB_EMULATOR_HOST` points it at the emulator |
+| `CUEFLOW_PUBSUB_TOPIC` | empty | The topic for `CUEFLOW_EVENTS=pubsub`, as `projects/PROJECT/topics/TOPIC` |
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |

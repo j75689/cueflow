@@ -1,5 +1,6 @@
 // Package events is a pub/sub used to push live updates to dashboard clients (SSE). By default it is
-// in-process; Attach makes it fan out through PostgreSQL LISTEN/NOTIFY so every instance sees every event.
+// in-process; Use makes it fan out through a Transport (PostgreSQL LISTEN/NOTIFY, or Google Pub/Sub
+// in package events/pubsub) so every instance sees every event.
 package events
 
 import (
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,22 +32,22 @@ func (ev Event) For(org string) bool {
 }
 
 type Broker struct {
-	mu   sync.Mutex
-	subs map[chan Event]struct{}
-	pool *pgxpool.Pool
-	log  *slog.Logger
-	// ListenURL, when set, is where Run LISTENs: a session-mode URL for a pool that goes through a
-	// transaction pooler, which can't keep a LISTEN. Empty listens on a connection of the pool.
-	ListenURL string
+	mu        sync.Mutex
+	subs      map[chan Event]struct{}
+	transport Transport
+	log       *slog.Logger
 }
 
 func NewBroker() *Broker { return &Broker{subs: map[chan Event]struct{}{}} }
 
-// Attach routes Publish through NOTIFY and delivers what Run hears. Call before Run.
-func (b *Broker) Attach(pool *pgxpool.Pool, log *slog.Logger) {
-	b.pool = pool
+// Use routes Publish through t and delivers what Run hears from it. Call before Run.
+func (b *Broker) Use(t Transport, log *slog.Logger) {
+	b.transport = t
 	b.log = log.With("component", "events")
 }
+
+// Attach is Use with PostgreSQL LISTEN/NOTIFY on the pool.
+func (b *Broker) Attach(pool *pgxpool.Pool, log *slog.Logger) { b.Use(&PG{Pool: pool}, log) }
 
 // Subscribe returns a channel of events and a cancel func that must be called.
 func (b *Broker) Subscribe() (<-chan Event, func()) {
@@ -99,16 +99,16 @@ func (b *Broker) PublishGlobal(name string, data any) {
 
 // send fans out without blocking; slow subscribers drop events (clients refetch on reconnect).
 func (b *Broker) send(ev Event) {
-	if b.pool != nil {
+	if b.transport != nil {
 		payload, err := json.Marshal(ev)
 		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
 			defer cancel()
-			if _, err = b.pool.Exec(ctx, "SELECT pg_notify($1, $2)", Channel, string(payload)); err == nil {
+			if err = b.transport.Publish(ctx, payload); err == nil {
 				return
 			}
 		}
-		b.log.Warn("notify failed; delivering locally", "err", err)
+		b.log.Warn("publish failed; delivering locally", "err", err)
 	}
 	b.deliver(ev)
 }
@@ -124,53 +124,28 @@ func (b *Broker) deliver(ev Event) {
 	}
 }
 
-// Run listens for notifications until ctx ends, reconnecting on failure. It is a no-op for an
-// in-process broker.
+// publishTimeout bounds how long Publish may hold up the request that caused the event.
+const publishTimeout = 3 * time.Second
+
+// Run receives events from the transport until ctx ends, reconnecting on failure. It is a no-op for
+// an in-process broker.
 func (b *Broker) Run(ctx context.Context) {
-	if b.pool == nil {
+	if b.transport == nil {
 		return
 	}
 	for ctx.Err() == nil {
-		if err := b.listen(ctx); err != nil && ctx.Err() == nil {
-			b.log.Warn("event listener stopped; reconnecting", "err", err)
+		err := b.transport.Receive(ctx, func(payload []byte) {
+			var ev Event
+			if json.Unmarshal(payload, &ev) == nil {
+				b.deliver(ev)
+			}
+		})
+		if err != nil && ctx.Err() == nil {
+			b.log.Warn("event receiver stopped; reconnecting", "err", err)
 		}
 		select {
 		case <-ctx.Done():
 		case <-time.After(2 * time.Second):
-		}
-	}
-}
-
-func (b *Broker) listen(ctx context.Context) error {
-	var conn *pgx.Conn
-	if b.ListenURL != "" {
-		c, err := pgx.Connect(ctx, b.ListenURL)
-		if err != nil {
-			return err
-		}
-		defer c.Close(context.Background())
-		conn = c
-	} else {
-		c, err := b.pool.Acquire(ctx)
-		if err != nil {
-			return err
-		}
-		defer c.Release()
-		conn = c.Conn()
-	}
-	if _, err := conn.Exec(ctx, "LISTEN "+Channel); err != nil {
-		return err
-	}
-	for {
-		n, err := conn.WaitForNotification(ctx)
-		if err != nil {
-			// A broken connection must not go back to the pool.
-			_ = conn.Close(context.Background())
-			return err
-		}
-		var ev Event
-		if json.Unmarshal([]byte(n.Payload), &ev) == nil {
-			b.deliver(ev)
 		}
 	}
 }

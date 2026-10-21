@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
+	"github.com/j75689/cueflow/internal/events/pubsub"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/internalauth"
 	"github.com/j75689/cueflow/internal/jobs"
@@ -179,8 +181,27 @@ func serve() error {
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
 	cs := content.NewStore(st)
 	broker := events.NewBroker()
-	broker.Attach(pool, logger)
-	broker.ListenURL = cfg.DatabaseSessionURL
+	closeEvents := func() {}
+	if cfg.Events == "pubsub" {
+		t, err := newPubSub(ctx, cfg.PubSubTopic)
+		if err != nil {
+			return err
+		}
+		var once sync.Once
+		closeEvents = func() {
+			once.Do(func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err := t.Close(closeCtx); err != nil {
+					logger.Warn("delete events subscription (it expires on its own)", "subscription", t.Subscription(), "err", err)
+				}
+			})
+		}
+		defer closeEvents() // a startup error after this point
+		broker.Use(t, logger)
+	} else {
+		broker.Use(&events.PG{Pool: pool, ListenURL: cfg.DatabaseSessionURL}, logger)
+	}
 	go broker.Run(ctx)
 	h := hub.New(st, logger)
 	sched := scheduler.New(st, logger)
@@ -309,11 +330,24 @@ func serve() error {
 	case <-ctx.Done():
 	}
 	logger.Info("shutting down")
+	// Before the HTTP drain, which waits for open dashboard streams: Cloud Run kills the instance 10 s
+	// after SIGTERM, and a subscription left behind lingers until it expires a day later.
+	closeEvents()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	team.Wait()
 	return nil
+}
+
+// newPubSub creates this instance's events subscription; PUBSUB_EMULATOR_HOST points it at the
+// emulator, as Google's own clients do.
+func newPubSub(ctx context.Context, topic string) (*pubsub.Transport, error) {
+	cfg := pubsub.Config{Topic: topic}
+	if h := os.Getenv("PUBSUB_EMULATOR_HOST"); h != "" {
+		cfg.Endpoint, cfg.Client = "http://"+h, http.DefaultClient
+	}
+	return pubsub.New(ctx, cfg)
 }
 
 // connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
