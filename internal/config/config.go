@@ -59,6 +59,12 @@ type Config struct {
 	// Queue is how background work is requested: "local" (in-process loops, the default) or
 	// "cloudtasks" (each request becomes an HTTP delivery to /internal/work/{kind}/{id}).
 	Queue string
+	// Events is how live dashboard updates reach every instance (CUEFLOW_EVENTS): "postgres"
+	// (LISTEN/NOTIFY, the default) or "pubsub" (Google Pub/Sub on PubSubTopic, which takes no
+	// database connection; see events/pubsub).
+	Events string
+	// PubSubTopic is "projects/P/topics/T" for CUEFLOW_EVENTS=pubsub (CUEFLOW_PUBSUB_TOPIC).
+	PubSubTopic string
 	// Tick is who runs the clock: "internal" (in-process cron and loops) or "external" (Cloud
 	// Scheduler calls /internal/tick every minute; no in-process loops start).
 	Tick string
@@ -129,6 +135,8 @@ func Load() (*Config, error) {
 	}
 	c.MediaStorage = env("CUEFLOW_MEDIA_STORAGE", "")
 	c.Queue = env("CUEFLOW_QUEUE", "local")
+	c.Events = env("CUEFLOW_EVENTS", "postgres")
+	c.PubSubTopic = os.Getenv("CUEFLOW_PUBSUB_TOPIC")
 	c.Tick = env("CUEFLOW_TICK", "internal")
 	c.TasksQueue = os.Getenv("CUEFLOW_TASKS_QUEUE")
 	c.TasksTargetURL = strings.TrimRight(env("CUEFLOW_TASKS_TARGET_URL", c.PublicURL), "/")
@@ -151,6 +159,12 @@ func Load() (*Config, error) {
 	}
 	if c.Queue != "local" && c.Queue != "cloudtasks" {
 		return nil, fmt.Errorf("CUEFLOW_QUEUE must be local or cloudtasks, got %q", c.Queue)
+	}
+	if c.Events != "postgres" && c.Events != "pubsub" {
+		return nil, fmt.Errorf("CUEFLOW_EVENTS must be postgres or pubsub, got %q", c.Events)
+	}
+	if c.Events == "pubsub" && c.PubSubTopic == "" {
+		return nil, errors.New("CUEFLOW_EVENTS=pubsub needs CUEFLOW_PUBSUB_TOPIC (projects/PROJECT/topics/TOPIC)")
 	}
 	if c.Tick != "internal" && c.Tick != "external" {
 		return nil, fmt.Errorf("CUEFLOW_TICK must be internal or external, got %q", c.Tick)

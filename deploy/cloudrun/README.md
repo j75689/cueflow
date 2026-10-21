@@ -248,6 +248,41 @@ A request lasts at most 30 minutes (`--timeout 1800`, and Cloud Tasks' dispatch 
 that take longer continue across deliveries: built-in runs in a fresh run, runner runs handed over
 with the runner's agent still working (see [agentic-flow §6.2](../../docs/agentic-flow.md#62-how-runs-end)).
 
+## Live updates through Pub/Sub (optional)
+
+Dashboard live updates reach every instance through Postgres `LISTEN/NOTIFY` by default, which costs
+each instance one session-pooler connection (step 2). When instance counts outgrow that, Pub/Sub
+carries them instead and the instances hold no session connection at all (the session URL is then
+only used for a minute at startup, by the migration).
+
+```sh
+g services enable pubsub.googleapis.com
+g pubsub topics create cueflow-events
+g pubsub topics add-iam-policy-binding cueflow-events --member "serviceAccount:$SA" --role roles/pubsub.publisher
+g pubsub topics add-iam-policy-binding cueflow-events --member "serviceAccount:$SA" --role roles/pubsub.subscriber
+# Each instance creates and deletes its own subscription, which needs these project permissions.
+g iam roles create cueflowEventsSubscriptions --project "$PROJECT" --title "CueFlow events subscriptions" \
+  --permissions pubsub.subscriptions.create,pubsub.subscriptions.delete,pubsub.subscriptions.consume
+g projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" \
+  --role "projects/$PROJECT/roles/cueflowEventsSubscriptions" --condition None
+g run services update cueflow --region "$REGION" \
+  --update-env-vars "CUEFLOW_EVENTS=pubsub,CUEFLOW_PUBSUB_TOPIC=projects/$PROJECT/topics/cueflow-events"
+```
+
+How it works and what it costs:
+
+- Pub/Sub hands a message to each subscription once, so each instance subscribes on its own: it
+  creates `cueflow-events-<random>` at start and deletes it on SIGTERM, before draining requests.
+  An instance killed before that leaves one behind, which its expiration policy removes after a day.
+- Events take about 100 ms to 1 s to arrive instead of milliseconds. Every page treats an event as
+  "refetch", so that is only a slightly later refresh, and a lost one leaves a view stale until its
+  next refetch, as before.
+- With request-based billing an instance gets CPU only while it serves a request, so one without an
+  open dashboard stream may stall its pull. That is fine: only instances serving a stream need events.
+- At dashboard traffic it stays inside Pub/Sub's free tier.
+
+To switch back, set `CUEFLOW_EVENTS=postgres` (or remove it).
+
 ## Services that write media to the bucket
 
 A service of yours that produces big files (a video renderer, for example) should not push them through
