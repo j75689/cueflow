@@ -49,6 +49,9 @@ type Crew struct {
 	// (e.g. http://127.0.0.1:3000); per-run tool servers live under MCPPathPrefix.
 	MCPBaseURL string
 
+	// PublicURL is how people reach the dashboard, for the task link in alerts (see notify.go).
+	PublicURL string
+
 	// Queue, when set (cloud deployment), replaces the in-process wake-up: Wake enqueues a
 	// jobs.KindCrew delivery, handled by HandleCrew.
 	Queue jobs.Queue
@@ -255,6 +258,15 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {
 			c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
 			c.broker.Publish(c.taskOrg(ctx, id), "task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
+			if t, err := c.store.GetTask(ctx, id); err == nil {
+				var a *store.Agent
+				if t.AssigneeAgentID != nil {
+					if got, err := c.store.GetAgent(ctx, *t.AssigneeAgentID); err == nil {
+						a = got
+					}
+				}
+				c.alert(ctx, t, a, "interrupted", "The run stopped (server restart or crash). Reply or press Run to continue.")
+			}
 		}
 	}
 }
@@ -604,6 +616,7 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	var result *string
 	runStatus := "SUCCEEDED"
 	subtaskOfAgent := task.CreatedBy == "agent" && task.ParentID != nil
+	alertText := out.text // what the alert says, when the task ends up waiting for a human
 
 	switch out.kind {
 	case "complete":
@@ -621,7 +634,8 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		c.system(ctx, task.ID, out.text)
 		next = store.TaskBlocked
 	case "limit":
-		c.system(ctx, task.ID, fmt.Sprintf("The agent used its %d-turn budget. Reply to continue, or raise max turns.", a.MaxTurns))
+		alertText = fmt.Sprintf("The agent used its %d-turn budget. Reply to continue, or raise max turns.", a.MaxTurns)
+		c.system(ctx, task.ID, alertText)
 		runStatus = "FAILED"
 		if run != nil {
 			run.Error = "turn limit reached"
@@ -631,6 +645,7 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		// meanwhile re-queues the task like any other.
 		auto, msg := c.autoHandOff(ctx, task, a, run, out)
 		c.system(ctx, task.ID, msg)
+		alertText = msg
 		if auto {
 			next = store.TaskTodo
 			if run != nil {
@@ -691,6 +706,9 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	}
 	if task.ParentID != nil && (next == store.TaskDone || next == store.TaskReview) {
 		c.resumeIfSubtasksDone(ctx, *task.ParentID)
+	}
+	if next == store.TaskWaitingHuman || next == store.TaskReview {
+		c.alert(ctx, task, a, out.kind, alertText)
 	}
 }
 

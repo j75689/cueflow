@@ -141,9 +141,10 @@ func (c *Crew) requestApproval(ctx context.Context, e *runEnv, connID uuid.UUID,
 	}
 	var args any = map[string]any{}
 	_ = json.Unmarshal(raw, &args)
-	c.say(ctx, e.task.ID, e.agent, "approval", fmt.Sprintf("Wants to call %s on %s.", name, server),
+	ask := fmt.Sprintf("Wants to call %s on %s.", name, server)
+	c.say(ctx, e.task.ID, e.agent, "approval", ask,
 		map[string]any{"approval_id": ap.ID, "server": server, "tool": name, "arguments": args})
-	e.outcome = &outcome{kind: "approval"}
+	e.outcome = &outcome{kind: "approval", text: ask} // the text is for the alert; the thread has it already
 	return "Approval requested. Stop now; you will be resumed with the result once the human decides.", nil
 }
 

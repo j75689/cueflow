@@ -184,6 +184,8 @@ sequenceDiagram
 
 **執行中有人留言**：runner 不會打斷正在跑的 LLM 呼叫，而是在結束時檢查「本次執行開始後是否有人類訊息」。如果有，就不套用完成狀態，改回 `TODO` 立即重跑，讓新的留言被處理（被停止或失敗時除外；第一輪就超過 context 上限時也不重跑，因為重跑只會重複同樣的結果）。
 
+**通知**：一次執行結束後，若任務停在需要人處理的狀態（`REVIEW` 或 `WAITING_HUMAN`：待審核、提問、等待核准、交接後停下、執行失敗，或因重啟被中斷），CueFlow 會透過該 org 選定的 notifier connector（**Manage orgs → Alerts**；Telegram 或 email）發一則訊息，內容包含 org、任務、agent、原因，以及任務連結（由 `CUEFLOW_PUBLIC_URL` 組成）。被人停止、因子任務而 `BLOCKED`、agent 建立的子任務結束為 `DONE`，以及因執行中留言而重新排入的執行，都不會發。發送採盡力而為（15 秒逾時，失敗只記 log）；停用該 notifier connector 即可靜音。
+
 ### 6.3 context 快滿時交接
 
 run 的對話歷史只往後加（已送給模型的內容不會被截斷），所以長時間的 run 會一直長大，直到接近模型的上限。最新一次的 prompt 達到交接點（預設為已知上限的 80%，`CUEFLOW_CONTEXT_HANDOFF`）時：

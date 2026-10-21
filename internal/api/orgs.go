@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -31,6 +33,8 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) {
 type orgBody struct {
 	Name *string `json:"name"`
 	Slug *string `json:"slug"`
+	// NotifierID picks the notifier connector for the org's task alerts; "" turns alerts off.
+	NotifierID *string `json:"notifier_id"`
 	// SeedAgents creates the starter Chief agent in a new org.
 	SeedAgents bool `json:"seed_agents"`
 }
@@ -83,6 +87,17 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Slug != nil {
 		cur.Slug = *body.Slug
+	}
+	if body.NotifierID != nil {
+		cur.NotifierID = nil
+		if *body.NotifierID != "" {
+			id, err := uuid.Parse(*body.NotifierID)
+			if err != nil {
+				s.Fail(w, &store.ValidationError{Msg: "notifier_id must be a connector id"})
+				return
+			}
+			cur.NotifierID = &id
+		}
 	}
 	out, err := s.Store.UpdateOrg(r.Context(), cur)
 	if err != nil {

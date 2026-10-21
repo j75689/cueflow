@@ -21,4 +21,5 @@ import (
 	_ "github.com/j75689/cueflow/internal/connectors/searxng"
 	_ "github.com/j75689/cueflow/internal/connectors/smtp"
 	_ "github.com/j75689/cueflow/internal/connectors/tavily"
+	_ "github.com/j75689/cueflow/internal/connectors/telegram"
 )

@@ -185,6 +185,14 @@ Benefits:
 
 **A human comments during a run**: the runner does not interrupt the in-flight LLM call. When the run ends it checks whether any human message arrived after the run started. If so, it does not apply the completion status; it moves the task back to `TODO` and reruns immediately so the new comment is handled (except when the run was stopped or failed, or a context overflow on its first turn, which a rerun would only repeat).
 
+**Alerts**: when a run leaves the task waiting for a human (`REVIEW` or `WAITING_HUMAN`: ready for review, a
+question, an approval, a hand-off that stopped, a failed run or one cut off by a restart), CueFlow sends one
+message through the notifier connector the org picked (**Manage orgs → Alerts**; Telegram or email). It
+names the org, task, agent and reason, with a link to the task (built from `CUEFLOW_PUBLIC_URL`). A run
+stopped by a human, a task blocked on subtasks, an agent-created subtask that ends `DONE` and a run that a
+mid-run comment re-queues send none. Sending is best effort (15 s timeout, errors logged); disabling the
+notifier connector mutes it.
+
 ### 6.3 Hand-off when the context fills up
 
 A run's history is append-only (nothing sent to the model is cut), so a long run grows until it nears the model's

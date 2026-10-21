@@ -8,7 +8,7 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 | 資料來源 | `rss`（RSS/Atom，以 GUID 去重）· `imap`（信箱資料夾，唯讀） |
 | 搜尋 | `searxng`（自託管）· `tavily` |
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |
-| 通知 | `smtp`（審核提醒與摘要信） |
+| 通知 | `telegram`（由 bot 發到私訊、群組、頻道或論壇主題）· `smtp`（email）。每個 org 各自選一個接收任務通知（[agentic-flow §6.2](agentic-flow.md#62-結束條件與狀態對應)） |
 | 動作 | `mcp_action`：把核准的 deliverable 交給你自己 MCP 伺服器上的一個工具（預設 `deliver`，參數 `{id, kind, title, payload, previous}`）；只有 worker 會呼叫 |
 | Agent 工具 | `mcp_server`：任何 MCP server（HTTP 或 stdio），每個工具可設為允許、詢問（每次呼叫由你核准）或禁止 |
 | 圖片生成 | `openai_image`（OpenAI / Azure / 相容服務）· `gemini_image`（AI Studio key）· `vertex_image`（Vertex AI，ADC）· `comfyui`（自架） |

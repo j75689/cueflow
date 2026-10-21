@@ -43,7 +43,7 @@ flowchart TB
         Src["source: RSS · IMAP"]
         Search["search: SearXNG · Tavily"]
         LLM["llm: OpenAI-compatible (OpenRouter · Azure) · Claude API · Bedrock · Vertex (Claude, Gemini)"]
-        Notif["notifier: SMTP"]
+        Notif["notifier: SMTP · Telegram"]
         Pub["publisher: MCP publisher"]
         Act["action: MCP action"]
     end
@@ -182,6 +182,7 @@ classDiagram
     LLM <|.. ClaudeVertex
     LLM <|.. GeminiVertex
     Notifier <|.. SMTP
+    Notifier <|.. Telegram
 ```
 
 One plugin = one package that calls `connector.Register(spec, factory)` in `init()`:

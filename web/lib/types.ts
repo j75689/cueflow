@@ -72,6 +72,8 @@ export interface Org {
   id: string;
   name: string;
   slug: string;
+  /** The notifier connector the org's task alerts go to; null sends none. */
+  notifier_id: string | null;
   created_at: string;
   updated_at: string;
 }
