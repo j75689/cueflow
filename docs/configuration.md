@@ -8,6 +8,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
+| `DATABASE_SESSION_URL` | empty | A session-mode connection for `LISTEN` and the migration lock. Set it when `DATABASE_URL` is a transaction-mode pooler (Supabase port 6543, PgBouncer `pool_mode=transaction`); the main pool then runs without named prepared statements. Empty: everything uses `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
@@ -16,7 +17,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's database connections (use ~5 per instance on a small database) |
+| `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's main pool (use ~5 per instance on a small database; behind a session pooler every one counts against its client limit) |
 
 ## Publishing and scheduling
 

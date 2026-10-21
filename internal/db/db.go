@@ -16,17 +16,40 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func Open(ctx context.Context, url string) (*pgxpool.Pool, error) { return OpenWith(ctx, url, 0) }
+func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	return OpenWith(ctx, url, Options{})
+}
 
-// OpenWith opens the pool capped at maxConns connections (0 keeps the driver default). A small cap
-// lets several cloud instances share a database with a low connection limit.
-func OpenWith(ctx context.Context, url string, maxConns int) (*pgxpool.Pool, error) {
+// Options tune the pool.
+type Options struct {
+	// MaxConns caps the pool (0 keeps the driver default). A small cap lets several cloud instances
+	// share a database with a low connection limit.
+	MaxConns int
+	// TxPooler opens the pool for a transaction-mode pooler (Supavisor on 6543, PgBouncer in
+	// transaction mode), which lends a server connection only until the end of each transaction, so
+	// no named prepared statement survives from one query to the next. Queries run in
+	// QueryExecModeCacheDescribe: the parameter and result types of each statement are learned once
+	// (through the unnamed statement) and cached on the client, and every execution is a single
+	// Parse/Bind/Execute round trip that needs nothing from an earlier one. QueryExecModeExec would
+	// also be safe but sends untyped text parameters, which turns a []byte meant for jsonb into
+	// bytea; DescribeExec needs its two round trips on the same server connection. A migration that
+	// changes a cached statement's types makes its next run fail once, as with the default statement
+	// cache. Session-only work (LISTEN, the migration lock) goes through the session URL instead.
+	TxPooler bool
+}
+
+// OpenWith opens the pool with the given options.
+func OpenWith(ctx context.Context, url string, o Options) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, err
 	}
-	if maxConns > 0 {
-		cfg.MaxConns = int32(maxConns)
+	if o.MaxConns > 0 {
+		cfg.MaxConns = int32(o.MaxConns)
+	}
+	if o.TxPooler {
+		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+		cfg.ConnConfig.StatementCacheCapacity = 0
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -43,14 +66,29 @@ func OpenWith(ctx context.Context, url string, maxConns int) (*pgxpool.Pool, err
 const migrationLockKey = 0x637565666c6f77 // "cueflow"
 
 // Migrate applies every embedded migration not yet recorded in schema_migrations, each in its
-// own transaction.
+// own transaction, on a connection of the pool.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
 	defer conn.Release()
+	return migrate(ctx, conn.Conn())
+}
 
+// MigrateSession is Migrate on a short-lived connection of its own to sessionURL: the advisory lock
+// that keeps two starting instances from migrating at once belongs to a session, which a
+// transaction pooler doesn't keep.
+func MigrateSession(ctx context.Context, sessionURL string) error {
+	conn, err := pgx.Connect(ctx, sessionURL)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(context.Background())
+	return migrate(ctx, conn)
+}
+
+func migrate(ctx context.Context, conn *pgx.Conn) error {
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
 		return err
 	}

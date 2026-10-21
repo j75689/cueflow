@@ -17,13 +17,13 @@ import (
 // Org is a team with its own agents, board, schedules, deliverables and runs.
 // Connectors and media are global.
 type Org struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	Slug string    `json:"slug"`
 	// NotifierID is the notifier connector the org's task alerts go to; nil sends none.
 	NotifierID *uuid.UUID `json:"notifier_id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 const orgColumns = `id, name, slug, notifier_id, created_at, updated_at`

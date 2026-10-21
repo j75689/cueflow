@@ -7,6 +7,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
+| `DATABASE_SESSION_URL` | 空 | 給 `LISTEN` 與 migration 鎖用的 session 模式連線。當 `DATABASE_URL` 是 transaction 模式的 pooler（Supabase 的 6543、PgBouncer `pool_mode=transaction`）時設定；主連線池就不使用具名 prepared statement。留空：全部走 `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex），請備份 |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號分隔 |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
@@ -15,7 +16,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
-| `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序的資料庫連線上限（小型資料庫建議每個實例約 5） |
+| `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序主連線池的上限（小型資料庫建議每個實例約 5；走 session pooler 時每一條都算進它的 client 上限） |
 
 ## 發布與排程
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,6 +36,9 @@ type Broker struct {
 	subs map[chan Event]struct{}
 	pool *pgxpool.Pool
 	log  *slog.Logger
+	// ListenURL, when set, is where Run LISTENs: a session-mode URL for a pool that goes through a
+	// transaction pooler, which can't keep a LISTEN. Empty listens on a connection of the pool.
+	ListenURL string
 }
 
 func NewBroker() *Broker { return &Broker{subs: map[chan Event]struct{}{}} }
@@ -138,19 +142,30 @@ func (b *Broker) Run(ctx context.Context) {
 }
 
 func (b *Broker) listen(ctx context.Context) error {
-	conn, err := b.pool.Acquire(ctx)
-	if err != nil {
-		return err
+	var conn *pgx.Conn
+	if b.ListenURL != "" {
+		c, err := pgx.Connect(ctx, b.ListenURL)
+		if err != nil {
+			return err
+		}
+		defer c.Close(context.Background())
+		conn = c
+	} else {
+		c, err := b.pool.Acquire(ctx)
+		if err != nil {
+			return err
+		}
+		defer c.Release()
+		conn = c.Conn()
 	}
-	defer conn.Release()
 	if _, err := conn.Exec(ctx, "LISTEN "+Channel); err != nil {
 		return err
 	}
 	for {
-		n, err := conn.Conn().WaitForNotification(ctx)
+		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			// A broken connection must not go back to the pool.
-			_ = conn.Conn().Close(context.Background())
+			_ = conn.Close(context.Background())
 			return err
 		}
 		var ev Event

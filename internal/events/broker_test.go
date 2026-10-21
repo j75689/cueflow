@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,8 +19,33 @@ func TestNotifyAcrossInstances(t *testing.T) {
 	if url == "" {
 		t.Skip("CUEFLOW_TEST_DATABASE_URL not set")
 	}
+	// With a session URL (the transaction-pooler setup) the pool publishes through the pooler and
+	// LISTEN gets a session connection of its own. CUEFLOW_TEST_DATABASE_SESSION_URL is that session
+	// URL when the URL above is a real transaction pooler; otherwise the same database stands in.
+	session := os.Getenv("CUEFLOW_TEST_DATABASE_SESSION_URL")
+	t.Run("pool listens", func(t *testing.T) {
+		if session != "" {
+			t.Skip("LISTEN through a transaction pooler hears nothing; that is what ListenURL is for")
+		}
+		notifyAcross(t, url, "")
+	})
+	if session == "" {
+		session = url
+	}
+	t.Run("session url listens", func(t *testing.T) { notifyAcross(t, url, session) })
+}
+
+func notifyAcross(t *testing.T, url, listenURL string) {
 	ctx, cancel := context.WithCancel(context.Background())
-	pool, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listenURL != "" { // as db.OpenWith does for a transaction pooler
+		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+		cfg.ConnConfig.StatementCacheCapacity = 0
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +54,7 @@ func TestNotifyAcrossInstances(t *testing.T) {
 	a, b := NewBroker(), NewBroker()
 	a.Attach(pool, log)
 	b.Attach(pool, log)
+	a.ListenURL, b.ListenURL = listenURL, listenURL
 	go a.Run(ctx)
 	go b.Run(ctx)
 	ch, unsub := b.Subscribe()

@@ -18,6 +18,11 @@ type Config struct {
 	// unless the operator opts in.
 	Addr        string
 	DatabaseURL string
+	// DatabaseSessionURL (DATABASE_SESSION_URL) is a session-mode URL for the work that needs a
+	// session: LISTEN and the migration lock. Setting it means DatabaseURL goes through a
+	// transaction-mode pooler (e.g. Supabase's on port 6543), and the pool is opened for one.
+	// Empty: everything uses DatabaseURL, which must then be a direct or session-mode connection.
+	DatabaseSessionURL string
 	// SecretKey is the 32-byte AES-256-GCM key used to encrypt connector secrets.
 	SecretKey []byte
 	// PreviousSecretKeys still decrypt during a key rotation (CUEFLOW_SECRET_KEY_PREVIOUS,
@@ -94,6 +99,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		Addr:                  env("CUEFLOW_ADDR", "127.0.0.1:3000"),
 		DatabaseURL:           env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
+		DatabaseSessionURL:    os.Getenv("DATABASE_SESSION_URL"),
 		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
 		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
