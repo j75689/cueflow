@@ -11,6 +11,7 @@ import {
   useRef,
 } from "react";
 
+import { createPortal } from "react-dom";
 import { cx, inputBase } from "./cx";
 
 export { cx, inputBase };
@@ -286,8 +287,10 @@ export function Modal({
     };
   }, [open]);
 
-  if (!open) return null;
-  return (
+  if (!open || typeof document === "undefined") return null;
+  // Portaled to <body>: rendered in place, a modal opened from inside a stacking context (the sticky
+  // sidebar's org switcher, a sticky page bar) is painted under the page that follows it.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onMouseDown={onClose}
@@ -321,7 +324,8 @@ export function Modal({
           <div className="flex justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
