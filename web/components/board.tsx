@@ -145,7 +145,7 @@ export function BoardList({
       assigned > 0 &&
       !(await dialog.confirm({
         title: `Move ${plural(chosen.length, "task")} to To do?`,
-        message: `${plural(assigned, "assigned agent")} start working right away.`,
+        message: `${plural(assigned, "assigned agent")} ${assigned === 1 ? "starts" : "start"} working right away.`,
         confirmLabel: "Move to To do",
       }))
     )
@@ -255,7 +255,7 @@ export function BoardList({
                 />
                 <span className="font-mono text-[11px] text-fg-3">#{t.number}</span>
                 <div className="flex min-w-0 flex-1 basis-48 items-center gap-2">
-                  {t.parent_id && <span className="text-fg-3" title="Subtask">↳</span>}
+                  {t.parent_id && <span className="text-sm text-fg-3" title="Subtask">↳</span>}
                   <Link href={`/tasks/view/?id=${t.id}`} className="truncate text-sm text-fg hover:text-accent">
                     {t.title}
                   </Link>
