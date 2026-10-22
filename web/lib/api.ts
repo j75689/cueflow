@@ -28,6 +28,7 @@ import type {
   TaskDetail,
   TaskMessage,
   TaskPatch,
+  TaskStatus,
   TeamTemplate,
   ToolApproval,
   ToolPermission,
@@ -247,6 +248,8 @@ export const api = {
   createTask: (body: TaskCreate) => request<Task>("POST", "/tasks", body),
   updateTask: (id: string, body: TaskPatch) => request<Task>("PATCH", `/tasks/${id}`, body),
   deleteTask: (id: string) => request<void>("DELETE", `/tasks/${id}`),
+  bulkTasks: (body: { action: "move" | "delete"; ids: string[]; status?: TaskStatus }) =>
+    request<BulkResult>("POST", "/tasks/bulk", body),
   taskMessages: (id: string) => request<TaskMessage[]>("GET", `/tasks/${id}/messages`),
   postTaskMessage: (id: string, content: string) =>
     request<TaskMessage>("POST", `/tasks/${id}/messages`, { content }),
