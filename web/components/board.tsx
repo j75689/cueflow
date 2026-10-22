@@ -307,7 +307,7 @@ export function BoardList({
                     </span>
                   )}
                 </div>
-                <span className="flex items-center gap-3 text-[11px] text-fg-3">
+                <span className="flex min-w-0 items-center gap-3 text-[11px] text-fg-3">
                   <PriorityDot priority={t.priority} withLabel />
                   <span className="flex w-32 items-center gap-1.5 text-xs text-fg-2">
                     <AgentAvatar agent={t.assignee} size="xs" />
