@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,9 +163,20 @@ type TaskFilter struct {
 	All        bool // include old DONE/CANCELED
 	CreatedBy  string
 	Limit      int
+	Offset     int
+	Sort       TaskSort
 }
 
-func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
+// TaskSort is the order ListTasks returns tasks in.
+type TaskSort string
+
+const (
+	TaskSortPosition TaskSort = ""       // position, created_at, id
+	TaskSortRecent   TaskSort = "recent" // most recently finished (or updated) first, then id
+)
+
+// taskWhere builds the WHERE clause of a task query; statuses=false leaves f.Statuses out (for CountTasks).
+func taskWhere(f TaskFilter, statuses bool) (string, []any) {
 	var where []string
 	var args []any
 	arg := func(v any) string {
@@ -174,7 +186,7 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
 	if f.OrgID != nil {
 		where = append(where, "t.org_id = "+arg(*f.OrgID))
 	}
-	if len(f.Statuses) > 0 {
+	if statuses && len(f.Statuses) > 0 {
 		ss := make([]string, len(f.Statuses))
 		for i, st := range f.Statuses {
 			ss[i] = string(st)
@@ -195,21 +207,35 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		p := arg("%" + q + "%")
-		where = append(where, "(t.title ILIKE "+p+" OR t.description ILIKE "+p+")")
+		match := "t.title ILIKE " + p + " OR t.description ILIKE " + p
+		// "#12" or "12" also finds task number 12.
+		if n, err := strconv.ParseInt(strings.TrimPrefix(q, "#"), 10, 64); err == nil {
+			match += " OR t.number = " + arg(n)
+		}
+		where = append(where, "("+match+")")
 	}
 	if !f.All {
 		where = append(where, "NOT (t.status IN ('DONE','CANCELED') AND t.updated_at < NOW() - INTERVAL '14 days')")
 	}
-	cond := ""
-	if len(where) > 0 {
-		cond = " WHERE " + strings.Join(where, " AND ")
+	if len(where) == 0 {
+		return "", args
 	}
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
+	cond, args := taskWhere(f, true)
 	limit := f.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 500
 	}
-	rows, err := s.pool.Query(ctx, "SELECT "+taskColumns+taskFrom+cond+
-		" ORDER BY t.position, t.created_at LIMIT "+arg(limit), args...)
+	order := " ORDER BY t.position, t.created_at, t.id"
+	if f.Sort == TaskSortRecent {
+		order = " ORDER BY COALESCE(t.completed_at, t.updated_at) DESC, t.id DESC"
+	}
+	args = append(args, limit, max(f.Offset, 0))
+	rows, err := s.pool.Query(ctx, "SELECT "+taskColumns+taskFrom+cond+order+
+		fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +247,30 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]*Task, error) {
 			return nil, err
 		}
 		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// CountTasks counts the tasks f matches per status (every status present, 0 when empty), ignoring
+// f.Statuses, Limit, Offset and Sort.
+func (s *Store) CountTasks(ctx context.Context, f TaskFilter) (map[TaskStatus]int, error) {
+	cond, args := taskWhere(f, false)
+	rows, err := s.pool.Query(ctx, "SELECT t.status, count(*) FROM tasks t"+cond+" GROUP BY t.status", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[TaskStatus]int, len(TaskStatuses))
+	for _, st := range TaskStatuses {
+		out[st] = 0
+	}
+	for rows.Next() {
+		var st TaskStatus
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[st] = n
 	}
 	return out, rows.Err()
 }
