@@ -40,7 +40,7 @@ func (s *Server) mcpHandler() http.Handler {
 		}
 		return operator
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	serve := mcpx.Stateless(h) // no request held open (Cloud Run bills one, and each takes a slot)
+	serve := mcpx.Stateless(h, s.MCPRequestTimeout) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		// An agent token acts as that agent: it sees and works only that agent's tasks.

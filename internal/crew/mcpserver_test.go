@@ -20,7 +20,7 @@ func TestQueuedToolCallGivesUpWithItsRequest(t *testing.T) {
 	}
 }
 
-// Nor does it wait for the turn as long as its request may live (mcpx.MaxRequestTime).
+// Nor does it wait for the turn as long as its request may live (CUEFLOW_MCP_REQUEST_TIMEOUT).
 func TestQueuedToolCallWaitsForTheTurnOnlySoLong(t *testing.T) {
 	defer func(d time.Duration) { toolTurnWait = d }(toolTurnWait)
 	toolTurnWait = 50 * time.Millisecond

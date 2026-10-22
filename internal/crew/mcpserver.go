@@ -184,8 +184,9 @@ func (c *Crew) lookupMCPRun(ctx context.Context, token string) *mcpRun {
 	return run
 }
 
-// toolTurnWait bounds how long a tool call waits for the run's previous one, well under
-// mcpx.MaxRequestTime: an agent calls tools in parallel, and each call waiting holds a request slot.
+// toolTurnWait bounds how long a tool call waits for the run's previous one, well under the request
+// timeout (CUEFLOW_MCP_REQUEST_TIMEOUT, which also bounds the wait when shorter): an agent calls tools
+// in parallel, and each call waiting holds a request slot.
 var toolTurnWait = 90 * time.Second
 
 // acquire takes the run's turn, giving up when ctx ends; release gives it back.
@@ -232,15 +233,16 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: out}}}
 }
 
-// MCPHandler serves every active run's tool server under MCPPathPrefix, from any instance.
-func (c *Crew) MCPHandler() http.Handler {
+// MCPHandler serves every active run's tool server under MCPPathPrefix, from any instance. maxRequest bounds
+// one request (see mcpx.Stateless).
+func (c *Crew) MCPHandler(maxRequest time.Duration) http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		if run := c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)); run != nil {
 			return run.server
 		}
 		return nil
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	serve := mcpx.Stateless(h) // no request held open (Cloud Run bills one, and each takes a slot)
+	serve := mcpx.Stateless(h, maxRequest) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)) == nil {
 			http.Error(w, "unknown or finished run", http.StatusNotFound)

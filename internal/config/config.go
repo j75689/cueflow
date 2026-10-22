@@ -68,6 +68,9 @@ type Config struct {
 	// PubSubDeleteTimeout bounds deleting this instance's subscription on shutdown
 	// (CUEFLOW_PUBSUB_DELETE_TIMEOUT, default 8 s).
 	PubSubDeleteTimeout time.Duration
+	// MCPRequestTimeout bounds one request to the stateless MCP endpoints, /mcp and /mcp/run
+	// (CUEFLOW_MCP_REQUEST_TIMEOUT, default 10 min).
+	MCPRequestTimeout time.Duration
 	// Tick is who runs the clock: "internal" (in-process cron and loops) or "external" (Cloud
 	// Scheduler calls /internal/tick every minute; no in-process loops start).
 	Tick string
@@ -143,6 +146,13 @@ func Load() (*Config, error) {
 	c.PubSubDeleteTimeout = envDuration("CUEFLOW_PUBSUB_DELETE_TIMEOUT", DefaultPubSubDeleteTimeout)
 	if c.PubSubDeleteTimeout <= 0 {
 		return nil, fmt.Errorf("CUEFLOW_PUBSUB_DELETE_TIMEOUT must be > 0, got %s", c.PubSubDeleteTimeout)
+	}
+	c.MCPRequestTimeout = envDuration("CUEFLOW_MCP_REQUEST_TIMEOUT", DefaultMCPRequestTimeout)
+	if c.MCPRequestTimeout <= 0 {
+		return nil, fmt.Errorf("CUEFLOW_MCP_REQUEST_TIMEOUT must be > 0, got %s", c.MCPRequestTimeout)
+	}
+	if c.MCPRequestTimeout >= 30*time.Minute {
+		warn(fmt.Sprintf("CUEFLOW_MCP_REQUEST_TIMEOUT=%s is not under Cloud Run's 30 min request timeout, which then cuts the request first", c.MCPRequestTimeout))
 	}
 	if c.PubSubDeleteTimeout >= 10*time.Second {
 		warn(fmt.Sprintf("CUEFLOW_PUBSUB_DELETE_TIMEOUT=%s is not under Cloud Run's 10 s shutdown grace: the instance may be killed before the delete returns", c.PubSubDeleteTimeout))
@@ -251,6 +261,10 @@ func envBool(k string) bool {
 // DefaultPubSubDeleteTimeout is CUEFLOW_PUBSUB_DELETE_TIMEOUT's default. Pub/Sub can take a few
 // seconds to answer a delete it has already done, and the delete must fit in Cloud Run's 10 s after SIGTERM.
 const DefaultPubSubDeleteTimeout = 8 * time.Second
+
+// DefaultMCPRequestTimeout is CUEFLOW_MCP_REQUEST_TIMEOUT's default: longer than any built-in tool call
+// takes, well under Cloud Run's 30-minute request timeout.
+const DefaultMCPRequestTimeout = 10 * time.Minute
 
 // DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
 const DefaultContextHandOffAt = 0.8

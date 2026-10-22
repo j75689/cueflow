@@ -41,6 +41,8 @@ type Server struct {
 	AdminToken string
 	// MCPToken enables the operator MCP endpoint (CUEFLOW_MCP_TOKEN); empty disables it.
 	MCPToken string
+	// MCPRequestTimeout bounds one request to the MCP endpoints (CUEFLOW_MCP_REQUEST_TIMEOUT); 0 sets none.
+	MCPRequestTimeout time.Duration
 	// PublicURL is how people reach this server (links in emails).
 	PublicURL string
 	// DirectURL is how machines reach it (runner registration commands, MCP setup commands); empty
@@ -154,7 +156,7 @@ func (s *Server) Handler() http.Handler {
 	r.Route("/api/runner/v1", s.runnerRoutes)
 	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run
 	// token in the path, not the admin token: the agent process never sees admin credentials.
-	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler())
+	r.Handle(crew.MCPPathPrefix+"*", s.Crew.MCPHandler(s.MCPRequestTimeout))
 	// Operator MCP endpoint for external agents, authenticated by CUEFLOW_MCP_TOKEN.
 	r.Handle(MCPPath, s.mcpHandler())
 	// Stored images, public by unguessable id so publishers can fetch them.
