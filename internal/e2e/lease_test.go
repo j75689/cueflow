@@ -286,3 +286,48 @@ func TestLostClaimIsNotHandedOver(t *testing.T) {
 		t.Fatalf("runs %+v, jobs %+v", runs, jobs_)
 	}
 }
+
+// A turn that comes back after its task was stopped or claimed again is stale: its reply is not
+// written (here a plain-text answer, which would otherwise complete the task with it) and the run
+// ends canceled.
+func TestStalledTurnsReplyIsNotWritten(t *testing.T) {
+	for _, tc := range []struct{ name, lose string }{
+		{"claimed again", `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`},
+		{"stopped by a human", `UPDATE tasks SET status = 'CANCELED' WHERE id=$1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, team := crewSetup(t)
+			ctx := context.Background()
+			started, lost := make(chan struct{}), make(chan struct{})
+			var mu sync.Mutex
+			turns := 0
+			setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+				mu.Lock()
+				turns++
+				mu.Unlock()
+				close(started)
+				<-lost
+				return llm.Message{Role: llm.RoleAssistant, Content: "The stale summary."}
+			})
+			var task store.Task
+			e.do("POST", "/tasks", map[string]any{"title": "Stalled reply", "assignee_agent_id": team["chief"].ID}, &task)
+			done := make(chan struct{})
+			go func() { defer close(done); e.crew.RunPending(ctx, 1) }()
+			<-started
+			if _, err := e.pool.Exec(ctx, tc.lose, task.ID); err != nil {
+				t.Fatal(err)
+			}
+			close(lost)
+			<-done
+
+			got, _ := e.store.GetTask(ctx, task.ID)
+			runs, _ := e.store.ListAgentRuns(ctx, task.ID)
+			thread := threadText(t, e, task.ID.String())
+			mu.Lock()
+			defer mu.Unlock()
+			if turns != 1 || got.Result != "" || len(runs) != 1 || runs[0].Status != "CANCELED" || strings.Contains(thread, "stale summary") {
+				t.Fatalf("%d turns, %s %q, runs %+v, thread:\n%s", turns, got.Status, got.Result, runs, thread)
+			}
+		})
+	}
+}

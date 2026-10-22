@@ -510,6 +510,11 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		run.CacheWriteTokens += resp.Usage.CacheWriteTokens
 		// The history is append-only, so this call's prompt is how full the context is now.
 		run.ContextTokens = resp.Usage.InputTokens
+		// A run that stalls most likely stalls in the model call: if the task was stopped, moved or
+		// claimed again meanwhile, the turn it got back is stale, and none of it is written.
+		if c.claimLost(ctx, env) {
+			return env.outcome
+		}
 		c.recordContext(ctx, task, run)
 		msgs = append(msgs, resp.Message)
 
@@ -614,23 +619,8 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	// lost while it runs (the irreversible actions wait for a human anyway, as deliverables or tool
 	// approvals). Not here: a self-driven agent's calls (runID nil), and RunApproval, which makes a
 	// call a human approved rather than one a live run makes.
-	// A refusal ends the run: as a canceled outcome (on a run token it is recorded, so the instance
-	// that owns the run ends it too, and the runner's agent is stopped) and, where this instance owns
-	// the run, by canceling it at once.
-	if env.runID != nil {
-		if !env.lost {
-			held, err := c.store.HoldsClaim(context.WithoutCancel(ctx), env.task.ID, *env.runID)
-			env.lost = err == nil && !held
-		}
-		if env.lost {
-			if env.outcome == nil {
-				env.outcome = &outcome{kind: "canceled"}
-			}
-			if env.stop != nil {
-				env.stop(errStopped)
-			}
-			return "This run may no longer work on the task: it was stopped, moved, deleted or taken over by a newer run. Stop working.", true
-		}
+	if c.claimLost(ctx, env) {
+		return "This run may no longer work on the task: it was stopped, moved, deleted or taken over by a newer run. Stop working.", true
 	}
 	t, ok := byName[call.Name]
 	if !ok {
@@ -691,6 +681,30 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
 	}
 	return res, isErr
+}
+
+// claimLost reports whether the run may no longer act on its task (HoldsClaim), and then ends it:
+// as a canceled outcome (on a run token it is recorded, so the instance that owns the run ends it
+// too, and the runner's agent is stopped) and, where this instance owns the run, by canceling it at
+// once. Once lost, it stays lost without asking again. A run with no runID is not fenced (see runEnv).
+func (c *Crew) claimLost(ctx context.Context, env *runEnv) bool {
+	if env.runID == nil {
+		return false
+	}
+	if !env.lost {
+		held, err := c.store.HoldsClaim(context.WithoutCancel(ctx), env.task.ID, *env.runID)
+		env.lost = err == nil && !held
+	}
+	if !env.lost {
+		return false
+	}
+	if env.outcome == nil {
+		env.outcome = &outcome{kind: "canceled"}
+	}
+	if env.stop != nil {
+		env.stop(errStopped)
+	}
+	return true
 }
 
 // finish records the outcome and moves the task, unless a human already moved it elsewhere. It ends
