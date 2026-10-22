@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AgentAvatar, PriorityDot, TASK_STATUS_LABEL } from "@/components/agents";
 import { useDialog } from "@/components/dialog";
-import { useToast } from "@/components/providers";
-import { Checkbox, Select, cx } from "@/components/ui";
+import { useServerEvent, useToast } from "@/components/providers";
+import { Button, Checkbox, ErrorBox, Loading, Select, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtRelative, plural } from "@/lib/format";
+import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Task, TaskStatus } from "@/lib/types";
 
 export interface Column {
@@ -34,6 +35,9 @@ export const CANCELED_COLUMN: Column = { key: "canceled", label: "Canceled", sta
 
 // List mode always offers every category, Canceled included.
 export const LIST_COLUMNS: Column[] = [...COLUMNS, CANCELED_COLUMN];
+
+// Rows per List mode page; one page fits one bulk request.
+const LIST_PAGE = 100;
 
 export function sortTasks(a: Task, b: Task) {
   if (a.position !== b.position) return a.position - b.position;
@@ -63,10 +67,10 @@ export function FilterChip({ active, onClick, children }: { active: boolean; onC
 }
 
 // subtasksUnder counts the tasks a delete of chosen takes with it. A delete removes a task's whole
-// subtree, so it walks parent_id over all (the board's unfiltered list) and counts every descendant
-// once; a chosen card under another chosen card is already in the chosen count. all stops at the
-// server's row limit, so a parent with more subtasks than all holds adds the missing children and
-// marks the count partial: their own subtasks can't be seen.
+// subtree, so it walks parent_id over all (the tasks loaded, in List mode the current page) and counts
+// every descendant once; a chosen card under another chosen card is already in the chosen count. A
+// parent with more subtasks than all holds adds the missing children and marks the count partial:
+// their own subtasks can't be seen.
 export function subtasksUnder(chosen: Task[], all: Task[]): { count: number; partial: boolean } {
   const children = new Map<string, Task[]>();
   for (const t of all) if (t.parent_id) children.set(t.parent_id, [...(children.get(t.parent_id) ?? []), t]);
@@ -91,34 +95,69 @@ export function subtasksUnder(chosen: Task[], all: Task[]): { count: number; par
   return { count, partial };
 }
 
-// BoardList is the board's list mode: one category's cards as rows, ticked ones moved or deleted
-// with one bulk request. tasks is the board's filtered list (agent, search); all is every task the
-// board loaded, for counting what a delete takes with it.
+// BoardList is the board's list mode: one category's cards as rows, a page at a time from the server
+// (filtered by q and assignee there), ticked ones moved or deleted with one bulk request. page is
+// 1-based.
 export function BoardList({
-  tasks,
-  all,
   category,
+  page,
   onCategory,
-  onChanged,
+  onPage,
+  q,
+  assignee,
 }: {
-  tasks: Task[];
-  all: Task[];
   category: Column;
+  page: number;
   onCategory: (key: string) => void;
-  onChanged: () => void;
+  onPage: (page: number) => void;
+  q: string;
+  assignee: string | null;
 }) {
   const toast = useToast();
   const dialog = useDialog();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<"move" | "delete" | null>(null);
 
-  const rows = useMemo(() => {
-    const finished = category.key === "done" || category.key === "canceled";
-    return tasks.filter((t) => category.statuses.includes(t.status)).sort(finished ? sortFinished : sortTasks);
-  }, [tasks, category]);
+  // Typing searches once it pauses, not on every key.
+  const [query, setQuery] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
 
-  // A new category starts with nothing ticked.
-  useEffect(() => setSelected(new Set()), [category.key]);
+  const finished = category.key === "done" || category.key === "canceled";
+  const list = useAsync(
+    () =>
+      api.listTasks({
+        status: category.statuses,
+        all: true,
+        sort: finished ? "recent" : "position",
+        q: query,
+        assignee: assignee ?? undefined,
+        limit: LIST_PAGE,
+        offset: (page - 1) * LIST_PAGE,
+        counts: true,
+      }),
+    [category.key, page, query, assignee],
+  );
+  // A bulk action sends one event per card; one reload covers them all, and a steady stream still
+  // reloads every second.
+  const reload = useDebouncedCallback(() => void list.reload(), 250, 1000);
+  useServerEvent(["task.updated", "task.deleted"], reload);
+
+  const rows = list.data?.items ?? [];
+  const total = list.data?.total ?? 0;
+  const from = (page - 1) * LIST_PAGE;
+  const range = `${from + 1}–${from + rows.length} of ${total}`;
+
+  // Past the last page (its cards were all moved or deleted): show the new last page.
+  useEffect(() => {
+    if (list.data && !list.data.items.length && page > 1 && total > 0) onPage(Math.ceil(total / LIST_PAGE));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.data]);
+
+  // Another category, page, search or agent starts with nothing ticked.
+  useEffect(() => setSelected(new Set()), [category.key, page, query, assignee]);
   // A filter, a search or a live update that drops a row drops it from the selection too.
   useEffect(() => {
     setSelected((cur) => {
@@ -165,7 +204,7 @@ export function BoardList({
       toast.error(e);
     } finally {
       setBusy(null);
-      onChanged();
+      void list.reload();
     }
   };
 
@@ -186,7 +225,7 @@ export function BoardList({
   };
 
   const remove = async () => {
-    const { count: subtasks, partial } = subtasksUnder(chosen, all);
+    const { count: subtasks, partial } = subtasksUnder(chosen, rows);
     let message = "Their conversations and files are deleted too.";
     if (subtasks > 0)
       message += ` ${partial ? "At least " : ""}${plural(subtasks, "subtask")} under them ${subtasks === 1 ? "is" : "are"} deleted as well.`;
@@ -212,7 +251,9 @@ export function BoardList({
           <FilterChip key={c.key} active={c.key === category.key} onClick={() => onCategory(c.key)}>
             <span className={cx("h-2 w-2 shrink-0 rounded-full", c.dot)} aria-hidden />
             {c.label}
-            <span className="tabular-nums text-fg-3">{tasks.filter((t) => c.statuses.includes(t.status)).length}</span>
+            <span className="tabular-nums text-fg-3">
+              {c.statuses.reduce((n, s) => n + (list.data?.counts?.[s] ?? 0), 0)}
+            </span>
           </FilterChip>
         ))}
       </div>
@@ -230,6 +271,9 @@ export function BoardList({
             label={<span aria-live="polite">{chosen.length ? `${chosen.length} selected` : "Select all"}</span>}
             disabled={!!busy}
           />
+          {chosen.length === 0 && total > LIST_PAGE && (
+            <span className="ml-auto text-xs tabular-nums text-fg-3">{range}</span>
+          )}
           {chosen.length > 0 && (
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {running > 0 && <span className="text-xs text-fg-3">Running cards can&apos;t be moved; stop them first</span>}
@@ -261,7 +305,14 @@ export function BoardList({
         </div>
       )}
 
-      {rows.length === 0 ? (
+      {list.error && (
+        <div className="mb-3">
+          <ErrorBox onRetry={list.reload}>{list.error}</ErrorBox>
+        </div>
+      )}
+      {list.loading && !list.data ? (
+        <Loading />
+      ) : rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-2 py-10 text-center text-xs text-fg-4">
           {category.key === "waiting" ? "Nothing waiting on you" : "No tasks"}
         </p>
@@ -324,6 +375,18 @@ export function BoardList({
             );
           })}
         </ul>
+      )}
+
+      {total > LIST_PAGE && (
+        <nav aria-label="Pages" className="mt-3 flex items-center justify-end gap-2">
+          <span className="text-xs tabular-nums text-fg-3">{range}</span>
+          <Button size="sm" onClick={() => onPage(page - 1)} disabled={page <= 1 || list.loading}>
+            Previous
+          </Button>
+          <Button size="sm" onClick={() => onPage(page + 1)} disabled={from + rows.length >= total || list.loading}>
+            Next
+          </Button>
+        </nav>
       )}
     </div>
   );

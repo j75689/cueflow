@@ -122,7 +122,7 @@ stateDiagram-v2
 
 和 deliverable 狀態機不同，任務狀態對人是寬鬆的：看板上可以自由拖動（除了「進行中」）。嚴格的部分是 agent 結束時：只有在任務**仍是 `IN_PROGRESS`** 時才會套用新狀態（`SetTaskStatusIf`）；如果人在 agent 執行中把卡片拖走，agent 的結果會寫進對話串，但不會把卡片拉回去。
 
-看板的 **List** 檢視（Board → *List*，或 `/board/?view=list&status=<column>`，`<column>` 為 `backlog`、`todo`、`progress`、`waiting`、`review`、`done` 或 `canceled`）一次以列表顯示一個欄位，用分類標籤切換；搜尋框與 agent 篩選和看板一樣適用。和看板不同，Done 與 Canceled 也會顯示 14 天以前完成的卡片，方便批次移動或刪除舊卡片；列表最多載入前 500 張任務，達到上限時會顯示提示。勾選卡片（或 *Select all*）後選 **Move to…**（Backlog、To do、Review、Done 或 Canceled）或 **Delete**；每張卡片都和單獨移動或刪除時一樣處理（`POST /api/v1/tasks/bulk`，見 [api.md](../api.md#tasks-kanban-board)，英文）。規則也相同：執行中的卡片要先停止才能移動。
+看板的 **List** 檢視（Board → *List*，或 `/board/?view=list&status=<column>`，`<column>` 為 `backlog`、`todo`、`progress`、`waiting`、`review`、`done` 或 `canceled`）一次以列表顯示一個欄位，用分類標籤切換；搜尋框與 agent 篩選和看板一樣適用。和看板不同，Done 與 Canceled 也會顯示 14 天以前完成的卡片，方便批次移動或刪除舊卡片。列表每頁 100 張卡片（*Previous* / *Next*，網址帶 `&page=N`），Done 與 Canceled 依完成時間由新到舊排列，搜尋框也會比對描述。勾選卡片（或 *Select all*，勾選本頁所有卡片）後選 **Move to…**（Backlog、To do、Review、Done 或 Canceled）或 **Delete**；每張卡片都和單獨移動或刪除時一樣處理（`POST /api/v1/tasks/bulk`，見 [api.md](../api.md#tasks-kanban-board)，英文）。規則也相同：執行中的卡片要先停止才能移動。
 
 ## 6. 一次執行（Run）的生命週期
 

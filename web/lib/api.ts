@@ -26,6 +26,7 @@ import type {
   Task,
   TaskCreate,
   TaskDetail,
+  TaskList,
   TaskMessage,
   TaskPatch,
   TaskStatus,
@@ -242,8 +243,24 @@ export const api = {
   deleteRunner: (id: string) => request<void>("DELETE", `/runners/${id}`),
   taskRunnerJobs: (id: string) => request<RunnerJob[]>("GET", `/tasks/${id}/runner-jobs`),
 
-  listTasks: (q: { status?: string[]; assignee?: string; parent_id?: string; q?: string; all?: boolean } = {}) =>
-    request<{ items: Task[] }>("GET", "/tasks", undefined, { ...q, all: q.all ? "1" : undefined }),
+  listTasks: (
+    q: {
+      status?: string[];
+      assignee?: string;
+      parent_id?: string;
+      q?: string;
+      all?: boolean;
+      sort?: "position" | "recent";
+      limit?: number;
+      offset?: number;
+      counts?: boolean;
+    } = {},
+  ) =>
+    request<TaskList>("GET", "/tasks", undefined, {
+      ...q,
+      all: q.all ? "1" : undefined,
+      counts: q.counts ? "1" : undefined,
+    }),
   getTask: (id: string) => request<TaskDetail>("GET", `/tasks/${id}`),
   createTask: (body: TaskCreate) => request<Task>("POST", "/tasks", body),
   updateTask: (id: string, body: TaskPatch) => request<Task>("PATCH", `/tasks/${id}`, body),
