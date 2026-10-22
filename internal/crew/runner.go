@@ -161,30 +161,31 @@ func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runE
 	return c.acpOutcome(ctx, run, env, res, timeout)
 }
 
-// ApplyRunnerEvents writes what a runner's agent did into the task thread.
 // RunnerJobLost reports whether a runner job's run may no longer act on its task (see HoldsClaim),
 // and then marks the job canceling, so the runner stops its agent at its next events or heartbeat
 // even when no instance is watching the run any more. Its events are then not applied: after a human
 // stop that drops the tail the agent reports while it stops, which is fine, as it is what the run did
 // after the human stopped it. A hand-over and the tail after a terminal tool keep the task
 // IN_PROGRESS under the run, so they pass. Jobs from before the run was recorded on them are not
-// fenced, and the check fails open like claimLost's.
+// fenced, nor are finished ones (their events are not applied anyway), and the check fails open
+// (holdsClaim). A canceling job is still checked, as its events are applied, but not stopped again.
 func (c *Crew) RunnerJobLost(ctx context.Context, job *store.RunnerJob) bool {
-	if job.AgentRunID == nil {
+	if job.AgentRunID == nil || store.JobFinished(job.Status) {
 		return false
 	}
-	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimCheckTimeout)
-	defer cancel()
-	held, err := c.store.HoldsClaim(checkCtx, job.TaskID, *job.AgentRunID)
-	if err != nil || held {
+	if c.holdsClaim(ctx, job.TaskID, *job.AgentRunID) {
 		return false
 	}
-	if err := c.store.StopRunnerJob(checkCtx, job.ID); err != nil {
+	if job.Status == store.JobCanceling {
+		return true
+	}
+	if err := c.store.StopRunnerJob(context.WithoutCancel(ctx), job.ID); err != nil {
 		c.logger.Warn("stop a runner job whose run lost its task", "job", job.ID, "err", err)
 	}
 	return true
 }
 
+// ApplyRunnerEvents writes what a runner's agent did into the task thread.
 func (c *Crew) ApplyRunnerEvents(ctx context.Context, job *store.RunnerJob, events []runnerapi.Event) {
 	var agent *store.Agent
 	if t, err := c.store.GetTask(ctx, job.TaskID); err == nil && t.AssigneeAgentID != nil {

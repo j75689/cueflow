@@ -683,24 +683,30 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	return res, isErr
 }
 
-// claimCheckTimeout bounds claimLost's check, so a hung database doesn't hold up every turn and tool call.
+// claimCheckTimeout bounds holdsClaim, so a hung database doesn't hold up every turn, tool call and
+// runner request.
 const claimCheckTimeout = 5 * time.Second
+
+// holdsClaim is the claim check every fence before an action uses (claimLost, RunnerJobLost): whether
+// runID may still act on the task (store.HoldsClaim). It fails open: a database error or a check that
+// takes longer than claimCheckTimeout counts as held, and the run's heartbeat still fences it.
+func (c *Crew) holdsClaim(ctx context.Context, taskID, runID uuid.UUID) bool {
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimCheckTimeout)
+	defer cancel()
+	held, err := c.store.HoldsClaim(checkCtx, taskID, runID)
+	return err != nil || held
+}
 
 // claimLost reports whether the run may no longer act on its task (HoldsClaim), and then ends it:
 // as a canceled outcome (on a run token it is recorded, so the instance that owns the run ends it
 // too, and the runner's agent is stopped) and, where this instance owns the run, by canceling it at
 // once. Once lost, it stays lost without asking again. A run with no runID is not fenced (see runEnv).
-// The check fails open: a database error or a check that takes longer than claimCheckTimeout lets the
-// run go on (its heartbeat still fences it).
 func (c *Crew) claimLost(ctx context.Context, env *runEnv) bool {
 	if env.runID == nil {
 		return false
 	}
 	if !env.lost {
-		checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimCheckTimeout)
-		held, err := c.store.HoldsClaim(checkCtx, env.task.ID, *env.runID)
-		cancel()
-		env.lost = err == nil && !held
+		env.lost = !c.holdsClaim(ctx, env.task.ID, *env.runID)
 	}
 	if !env.lost {
 		return false

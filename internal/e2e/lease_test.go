@@ -262,31 +262,33 @@ func TestMCPToolCallIsRefusedOnceTheClaimIsLost(t *testing.T) {
 }
 
 // A runner run whose claim was lost by the time its delivery hands it over ends there: the job is
-// stopped and the run is not handed over.
+// stopped and the run is not handed over. No runner takes the job, so nothing but the hand-over (the
+// lease is 2 minutes) can end the run before the delivery's time is up.
 func TestLostClaimIsNotHandedOver(t *testing.T) {
 	e := setup(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	q := &fakeQueue{}
 	e.crew.Queue = q
-	agent := slowRunnerAgent(ctx, t, e)
+	agent, _ := runnerAgent(t, e)
 	var task store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
 
-	e.crew.DeliveryLimit = 3 * time.Second // hands over at 2.8 s; the agent makes no call before 5 s
+	e.crew.DeliveryLimit = 3 * time.Second // hands over at 2.8 s
 	go func() {
 		time.Sleep(time.Second)
 		_, _ = e.pool.Exec(context.Background(), `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID)
 	}()
+	start := time.Now()
 	if err := e.crew.HandleCrew(ctx); err != nil {
 		t.Fatal(err)
 	}
+	took := time.Since(start)
 	runs, _ := e.store.ListAgentRuns(ctx, task.ID)
 	var jobs_ []store.RunnerJob
 	e.do("GET", "/tasks/"+task.ID.String()+"/runner-jobs", nil, &jobs_)
-	if len(runs) != 1 || runs[0].Status != "CANCELED" || runs[0].Outcome == "handover" ||
-		len(jobs_) != 1 || !store.JobFinished(jobs_[0].Status) {
-		t.Fatalf("runs %+v, jobs %+v", runs, jobs_)
+	if took < 2700*time.Millisecond || len(runs) != 1 || runs[0].Status != "CANCELED" || runs[0].Outcome == "handover" ||
+		len(jobs_) != 1 || jobs_[0].Status != store.JobCanceled {
+		t.Fatalf("after %s: runs %+v, jobs %+v", took, runs, jobs_)
 	}
 }
 
@@ -417,6 +419,16 @@ func TestLostRunnerJobIsStoppedByTheServer(t *testing.T) {
 	if say("while holding the claim") {
 		t.Fatal("the run's runner was told to stop")
 	}
+	// A claim made by the version before claims recorded their run holds for its runner, which must
+	// keep working while that version is replaced.
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = NULL WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var legacy runnerapi.JobStatus
+	post("/jobs/"+job.ID+"/heartbeat", struct{}{}, &legacy)
+	if legacy.Cancel || say("under the old claim") {
+		t.Fatal("a claim with no run recorded stopped its runner")
+	}
 	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +442,8 @@ func TestLostRunnerJobIsStoppedByTheServer(t *testing.T) {
 	if len(jobs_) != 1 || jobs_[0].Status != store.JobCanceling {
 		t.Fatalf("jobs %+v", jobs_)
 	}
-	if thread := threadText(t, e, task.ID.String()); !strings.Contains(thread, "while holding the claim") || strings.Contains(thread, "after losing it") {
+	if thread := threadText(t, e, task.ID.String()); !strings.Contains(thread, "while holding the claim") || !strings.Contains(thread, "under the old claim") ||
+		strings.Contains(thread, "after losing it") {
 		t.Fatalf("thread:\n%s", thread)
 	}
 }

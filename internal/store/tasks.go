@@ -539,12 +539,16 @@ func (s *Store) TaskRunID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	return runID, NotFound(err)
 }
 
-// HoldsClaim reports whether runID may still act on the task: it is IN_PROGRESS under runID's claim
-// (see Claim), as ExtendTaskLease requires. A task that is gone is held by no one.
+// HoldsClaim reports whether runID may still act on the task: it is IN_PROGRESS, and its claim (see
+// Claim) is runID's. A claim with no run recorded (run_id NULL) was made by a version from before
+// claims recorded their run: nothing tells its runs apart, so it holds for any of them, as before
+// (the lease and the status still fence them). Such a claim must not stop a healthy run working it
+// while that version is replaced; resumeRun adopts it, after which it is fenced. A task that is gone
+// is held by no one.
 func (s *Store) HoldsClaim(ctx context.Context, id, runID uuid.UUID) (bool, error) {
 	var ok bool
-	err := s.pool.QueryRow(ctx, `SELECT COALESCE(status = 'IN_PROGRESS' AND run_id = $2, false) FROM tasks WHERE id=$1`,
-		id, runID).Scan(&ok)
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(status = 'IN_PROGRESS' AND (run_id IS NULL OR run_id = $2), false)
+		FROM tasks WHERE id=$1`, id, runID).Scan(&ok)
 	if NotFound(err) == domain.ErrNotFound {
 		return false, nil
 	}
