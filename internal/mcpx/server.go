@@ -20,9 +20,12 @@ func StatelessCapabilities() *mcp.ServerCapabilities {
 }
 
 // Stateless fronts a stateless Streamable HTTP handler: it refuses the GET stream (NoStandaloneStream) and
-// cancels any request still open after maxRequest (CUEFLOW_MCP_REQUEST_TIMEOUT), so no message shape can hold a
-// request slot for good. It is a last resort: a tool call cut off by it is canceled where it stands, and its
-// client gets no answer. maxRequest <= 0 sets no deadline.
+// gives every request a deadline maxRequest away (CUEFLOW_MCP_REQUEST_TIMEOUT), so no message shape can hold a
+// request slot for good. maxRequest <= 0 sets no deadline.
+//
+// The SDK runs handlers on a ctx detached from the request's (it neither ends nor has a deadline), and the
+// request lasts until its handler returns, so a tool handler must take the deadline back with RequestContext.
+// A tool call cut off by it is canceled where it stands.
 func Stateless(h http.Handler, maxRequest time.Duration) http.Handler {
 	h = NoStandaloneStream(h)
 	if maxRequest <= 0 {
@@ -31,12 +34,25 @@ func Stateless(h http.Handler, maxRequest time.Duration) http.Handler {
 	return withDeadline(h, maxRequest)
 }
 
+type deadlineKey struct{}
+
 func withDeadline(h http.Handler, d time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), d)
+		at := time.Now().Add(d)
+		ctx, cancel := context.WithDeadline(context.WithValue(r.Context(), deadlineKey{}, at), at)
 		defer cancel()
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// RequestContext is a tool handler's ctx with its request's deadline (see Stateless) put back: the SDK
+// hands handlers a ctx that keeps the request's values but not its deadline. Without one it only adds
+// a cancel.
+func RequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if at, ok := ctx.Value(deadlineKey{}).(time.Time); ok {
+		return context.WithDeadline(ctx, at)
+	}
+	return context.WithCancel(ctx)
 }
 
 // NoStandaloneStream answers GET with 405 Method Not Allowed in front of a stateless Streamable HTTP handler.

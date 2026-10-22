@@ -148,8 +148,8 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("CUEFLOW_PUBSUB_DELETE_TIMEOUT must be > 0, got %s", c.PubSubDeleteTimeout)
 	}
 	c.MCPRequestTimeout = envDuration("CUEFLOW_MCP_REQUEST_TIMEOUT", DefaultMCPRequestTimeout)
-	if c.MCPRequestTimeout <= 0 {
-		return nil, fmt.Errorf("CUEFLOW_MCP_REQUEST_TIMEOUT must be > 0, got %s", c.MCPRequestTimeout)
+	if c.MCPRequestTimeout < MinMCPRequestTimeout {
+		return nil, fmt.Errorf("CUEFLOW_MCP_REQUEST_TIMEOUT must be at least %s, got %s", MinMCPRequestTimeout, c.MCPRequestTimeout)
 	}
 	if c.MCPRequestTimeout >= 30*time.Minute {
 		warn(fmt.Sprintf("CUEFLOW_MCP_REQUEST_TIMEOUT=%s is not under Cloud Run's 30 min request timeout, which then cuts the request first", c.MCPRequestTimeout))
@@ -265,6 +265,10 @@ const DefaultPubSubDeleteTimeout = 8 * time.Second
 // DefaultMCPRequestTimeout is CUEFLOW_MCP_REQUEST_TIMEOUT's default: longer than any built-in tool call
 // takes, well under Cloud Run's 30-minute request timeout.
 const DefaultMCPRequestTimeout = 10 * time.Minute
+
+// MinMCPRequestTimeout is the shortest CUEFLOW_MCP_REQUEST_TIMEOUT: a connector call ends 5 s before its
+// request does, and a tool call needs time left after that.
+const MinMCPRequestTimeout = 30 * time.Second
 
 // DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
 const DefaultContextHandOffAt = 0.8

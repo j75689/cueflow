@@ -189,6 +189,8 @@ func TestMCPRequestTimeout(t *testing.T) {
 		{v: "29m", want: 29 * time.Minute},
 		{v: "30m", want: 30 * time.Minute, warn: true},
 		{v: "1h", want: time.Hour, warn: true},
+		{v: "30s", want: 30 * time.Second},
+		{v: "29s", err: true},
 		{v: "0", err: true},
 		{v: "-1m", err: true},
 	} {

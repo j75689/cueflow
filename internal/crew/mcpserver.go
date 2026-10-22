@@ -208,6 +208,8 @@ func (r *mcpRun) turnCh() chan struct{} {
 }
 
 func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name string, args json.RawMessage) *mcp.CallToolResult {
+	ctx, cancelReq := mcpToolContext(ctx)
+	defer cancelReq()
 	waitCtx, cancel := context.WithTimeout(ctx, toolTurnWait)
 	ok := r.acquire(waitCtx)
 	cancel()
@@ -232,7 +234,7 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	out, isErr := c.execTool(guard.WithAgent(withRequestBudget(ctx)), r.env, byName, llm.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
+	out, isErr := c.execTool(guard.WithAgent(ctx), r.env, byName, llm.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
 	if r.env.outcome != nil {
 		_ = c.store.SetRunTokenOutcome(context.WithoutCancel(ctx), r.token,
 			outcomeRecord{Kind: r.env.outcome.kind, Text: r.env.outcome.text})
@@ -249,7 +251,7 @@ func (c *Crew) MCPHandler(maxRequest time.Duration) http.Handler {
 			return run.server
 		}
 		return nil
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true})
 	serve := mcpx.Stateless(h, maxRequest) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)) == nil {

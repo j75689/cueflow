@@ -46,7 +46,9 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 				if len(args) == 0 {
 					args = json.RawMessage(`{}`)
 				}
-				text, isErr := fn(withRequestBudget(ctx), args)
+				ctx, cancel := mcpToolContext(ctx)
+				defer cancel()
+				text, isErr := fn(ctx, args)
 				return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil
 			})
 	}

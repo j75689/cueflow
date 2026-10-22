@@ -2,11 +2,16 @@ package crew
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/j75689/cueflow/internal/mcpx"
 )
 
 // A tool call queued behind a slow one of the same run gives up when its request ends, rather than
@@ -76,5 +81,61 @@ func TestExternalTimeoutFollowsTheMCPRequest(t *testing.T) {
 	}
 	if d, by := externalTimeout(context.Background(), own); by || d != own {
 		t.Errorf("in-process run: %s %v", d, by)
+	}
+}
+
+// servedOverMCP serves one tool through the SDK's real stateless handler behind mcpx.Stateless, as
+// MCPHandler does, and calls it once; it returns the tool's text (or the error) and how long it took.
+// Without PropagateRequestCancellation, as for a client on an older protocol: the tool's ctx then
+// carries no deadline but what mcpx.RequestContext puts back.
+func servedOverMCP(t *testing.T, maxRequest time.Duration, fn func(ctx context.Context) string) (string, time.Duration) {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: mcpx.StatelessCapabilities()})
+	srv.AddTool(&mcp.Tool{Name: "x", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fn(ctx)}}}, nil
+	})
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	ts := httptest.NewServer(mcpx.Stateless(h, maxRequest))
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: ts.URL, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cs.Close()
+	start := time.Now()
+	out, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "x"})
+	if err != nil {
+		return err.Error(), time.Since(start)
+	}
+	return out.Content[0].(*mcp.TextContent).Text, time.Since(start)
+}
+
+// Through the real handler, a call queued behind one in progress gives up at the request's deadline.
+func TestQueuedToolCallEndsWithItsRequestOverMCP(t *testing.T) {
+	run := &mcpRun{done: make(chan struct{})}
+	run.acquire(context.Background()) // a call in progress
+	var text string
+	_, d := servedOverMCP(t, 300*time.Millisecond, func(ctx context.Context) string {
+		text = run.call(ctx, nil, nil, "list_tasks", nil).Content[0].(*mcp.TextContent).Text
+		return text
+	})
+	if d > 3*time.Second || !strings.Contains(text, "request ended") {
+		t.Fatalf("after %s: %q", d, text)
+	}
+}
+
+// Through the real handler, a connector call sees what is left of its request.
+func TestExternalTimeoutSeesTheRequestOverMCP(t *testing.T) {
+	text, _ := servedOverMCP(t, time.Minute, func(ctx context.Context) string {
+		ctx, cancel := mcpToolContext(ctx)
+		defer cancel()
+		d, by := externalTimeout(ctx, 20*time.Minute)
+		return fmt.Sprintf("%v %v", by, d > 50*time.Second && d <= time.Minute-requestBudgetMargin)
+	})
+	if text != "true true" {
+		t.Fatalf("capped, in range: %q", text)
 	}
 }

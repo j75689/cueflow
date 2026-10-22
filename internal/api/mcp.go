@@ -39,7 +39,7 @@ func (s *Server) mcpHandler() http.Handler {
 			return s.Crew.AgentMCPServer(a)
 		}
 		return operator
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true})
 	serve := mcpx.Stateless(h, s.MCPRequestTimeout) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")

@@ -109,3 +109,38 @@ func TestRequestDeadline(t *testing.T) {
 		t.Fatalf("request ended after %s", d)
 	}
 }
+
+// The SDK runs a tool on a ctx detached from its request; RequestContext gives it the deadline back,
+// so a tool that waits on its ctx ends when the request's time is up, through the real handler.
+func TestDeadlineReachesTheTool(t *testing.T) {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: StatelessCapabilities()})
+	mcp.AddTool(srv, &mcp.Tool{Name: "wait"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
+		ctx, cancel := RequestContext(ctx)
+		defer cancel()
+		<-ctx.Done()
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ended"}}}, struct{}{}, nil
+	})
+	// Without PropagateRequestCancellation (or on an older protocol), the tool's ctx never ends by itself.
+	for _, propagate := range []bool{true, false} {
+		h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+			&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: propagate})
+		callUntilDone(t, Stateless(h, 300*time.Millisecond), propagate)
+	}
+}
+
+func callUntilDone(t *testing.T, h http.Handler, propagate bool) {
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: ts.URL, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cs.Close()
+	start := time.Now()
+	_, _ = cs.CallTool(ctx, &mcp.CallToolParams{Name: "wait"}) // the answer may not make it; the request must end
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("propagate %v: the call ended after %s, not near the 300ms deadline", propagate, d)
+	}
+}

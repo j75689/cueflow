@@ -15,6 +15,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
+	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -128,6 +129,13 @@ type requestBudgetKey struct{}
 
 func withRequestBudget(ctx context.Context) context.Context {
 	return context.WithValue(ctx, requestBudgetKey{}, true)
+}
+
+// mcpToolContext is the ctx a tool call served over MCP runs on: its request's deadline, which the SDK
+// does not pass on (mcpx.RequestContext), marked as the request's budget.
+func mcpToolContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := mcpx.RequestContext(ctx)
+	return withRequestBudget(ctx), cancel
 }
 
 // requestBudgetMargin is left of the request's time for the answer to reach the agent.

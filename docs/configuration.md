@@ -14,7 +14,7 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
-| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | The longest one request to the MCP endpoints (`/mcp`, `/mcp/run/…`) may stay open (a Go duration, > 0); a tool call still running then is canceled. Keep it under Cloud Run's 30 min request timeout; 30 min or more logs a warning at startup. A tool connector's call made for such a request (an `mcp_tools` server's tool, say) ends 5 s before the request does, if that comes before its own timeout, and the agent is told which limit ran out; in-process runs keep the connector's own timeout |
+| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | The longest one request to the MCP endpoints (`/mcp`, `/mcp/run/…`) may stay open (a Go duration, at least `30s`); a tool call still running then is canceled. Keep it under Cloud Run's 30 min request timeout; 30 min or more logs a warning at startup. A tool connector's call made for such a request (an `mcp_tools` server's tool, say) ends 5 s before the request does, if that comes before its own timeout, and the agent is told which limit ran out; in-process runs keep the connector's own timeout |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
