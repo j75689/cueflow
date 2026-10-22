@@ -253,6 +253,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 | GET | `/tasks/{id}` | | → `Task` + `"subtasks":[Task]`, `"parent":Task|null`, `"deliverables":[{"id","kind","title","status"}]` |
 | PATCH | `/tasks/{id}` | any of `{title, description, status, priority, labels, assignee_agent_id, due_at, position}` | `status: IN_PROGRESS` is rejected. Moving to `TODO` with an agent queues a run; moving a running task elsewhere stops the run |
 | DELETE | `/tasks/{id}` | | stops a run; deletes subtasks |
+| POST | `/tasks/bulk` | `{"action":"move"\|"delete","ids":[id,...],"status"?}` | Up to 500 ids of the request's org, each as its own `PATCH {"status"}` (`move`, needs `status`) or `DELETE` (so the same run stops, system messages and events; the crew is woken once for the batch; a repeated id is applied once): `{"ok":[id],"failed":[{"id","code","message"}]}` with the single endpoints' codes (`invalid_argument`, `not_found`; an id in another org is `not_found`, as is a subtask already deleted with its parent); `200` even when every id failed. A database error stops the batch: that id is `internal`, the rest `not_attempted` |
 | GET | `/tasks/{id}/messages` | | → `[TaskMessage]` oldest first |
 | POST | `/tasks/{id}/messages` | `{content}` | human comment. A leading `@slug` reassigns to that agent. If the task has an agent and is not `BACKLOG`/`CANCELED`, it moves to `TODO` and the agent responds |
 | POST | `/tasks/{id}/run` | | start now (→ `TODO`) |

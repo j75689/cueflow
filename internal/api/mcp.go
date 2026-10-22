@@ -306,7 +306,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 				}
 				patch.AssigneeAgentID = &id
 			}
-			after, err := s.updateTaskOp(ctx, t.ID, patch)
+			after, err := s.updateTaskOp(ctx, t.ID, patch, true)
 			if err != nil {
 				return MCPErr(err)
 			}
