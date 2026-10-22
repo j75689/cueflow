@@ -145,7 +145,7 @@ export function BoardList({
       assigned > 0 &&
       !(await dialog.confirm({
         title: `Move ${plural(chosen.length, "task")} to To do?`,
-        message: `${plural(assigned, "assigned agent")} ${assigned === 1 ? "starts" : "start"} working right away.`,
+        message: `${plural(assigned, "assigned agent")} ${assigned === 1 ? "is" : "are"} queued to start working.`,
         confirmLabel: "Move to To do",
       }))
     )
@@ -154,7 +154,11 @@ export function BoardList({
   };
 
   const remove = async () => {
-    const subtasks = chosen.reduce((n, t) => n + (t.subtask_counts?.total ?? 0), 0);
+    // A chosen subtask of a chosen card is already in the title's count, not one more under it.
+    const ids = new Set(chosen.map((t) => t.id));
+    const subtasks =
+      chosen.reduce((n, t) => n + (t.subtask_counts?.total ?? 0), 0) -
+      chosen.filter((t) => t.parent_id && ids.has(t.parent_id)).length;
     let message = "Their conversations and files are deleted too.";
     if (subtasks > 0) message += ` ${plural(subtasks, "subtask")} under them ${subtasks === 1 ? "is" : "are"} deleted as well.`;
     if (running > 0) message += ` ${plural(running, "running agent")} ${running === 1 ? "is" : "are"} stopped.`;
