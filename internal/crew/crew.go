@@ -863,14 +863,20 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 
 // TaskChanged lets the API notify the crew after a human edit (e.g. a subtask dragged to Done).
 func (c *Crew) TaskChanged(ctx context.Context, t *store.Task) {
+	c.TaskChangedInBatch(ctx, t)
+	if t.Status == store.TaskTodo {
+		c.Wake()
+	}
+}
+
+// TaskChangedInBatch is TaskChanged without the wake-up for a card now in TODO: a batch of edits
+// wakes the crew once at its end.
+func (c *Crew) TaskChangedInBatch(ctx context.Context, t *store.Task) {
 	if t.ParentID != nil && t.Status.Closed() {
 		c.resumeIfSubtasksDone(ctx, *t.ParentID)
 	}
 	if t.Status == store.TaskBlocked {
 		c.resumeIfSubtasksDone(ctx, t.ID)
-	}
-	if t.Status == store.TaskTodo {
-		c.Wake()
 	}
 }
 

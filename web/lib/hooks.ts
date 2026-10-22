@@ -44,11 +44,13 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
   return { data, error, loading, reload, setData };
 }
 
-// useDebounced returns a debounced version of a callback.
-export function useDebouncedCallback(fn: () => void, ms: number) {
+// useDebounced returns a debounced version of a callback. With maxWait, calls that keep coming still
+// run it at least that often.
+export function useDebouncedCallback(fn: () => void, ms: number, maxWait?: number) {
   const fnRef = useRef(fn);
   fnRef.current = fn;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstCall = useRef<number | null>(null);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -57,6 +59,12 @@ export function useDebouncedCallback(fn: () => void, ms: number) {
   );
   return useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => fnRef.current(), ms);
-  }, [ms]);
+    const now = Date.now();
+    firstCall.current ??= now;
+    const wait = maxWait === undefined ? ms : Math.min(ms, Math.max(0, firstCall.current + maxWait - now));
+    timer.current = setTimeout(() => {
+      firstCall.current = null;
+      fnRef.current();
+    }, wait);
+  }, [ms, maxWait]);
 }

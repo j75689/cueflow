@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { type DragEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentAvatar,
   AgentSelect,
@@ -10,34 +10,22 @@ import {
   TASK_STATUS_LABEL,
   useAgents,
 } from "@/components/agents";
+import {
+  BoardList,
+  CANCELED_COLUMN,
+  COLUMNS,
+  type Column,
+  FilterChip,
+  LIST_COLUMNS,
+  sortFinished,
+  sortTasks,
+} from "@/components/board";
 import { useServerEvent, useToast } from "@/components/providers";
 import { Button, Checkbox, ErrorBox, Icon, Input, Loading, PageHeader, Pill, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtRelative } from "@/lib/format";
-import { useAsync } from "@/lib/hooks";
+import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Agent, Task, TaskStatus } from "@/lib/types";
-
-interface Column {
-  key: string;
-  label: string;
-  statuses: TaskStatus[];
-  // Status assigned when a card is dropped here from another column; null = not a drop target.
-  drop: TaskStatus | null;
-  hint?: string;
-  addable?: boolean;
-  // Status color of the column's dot, matching the task status badges.
-  dot: string;
-}
-
-const COLUMNS: Column[] = [
-  { key: "backlog", label: "Backlog", statuses: ["BACKLOG"], drop: "BACKLOG", addable: true, dot: "bg-fg-4" },
-  { key: "todo", label: "To do", statuses: ["TODO"], drop: "TODO", addable: true, hint: "Assigned agents start automatically", dot: "bg-sky-500" },
-  { key: "progress", label: "In progress", statuses: ["IN_PROGRESS"], drop: null, hint: "Agents move tasks here", dot: "bg-indigo-500" },
-  { key: "waiting", label: "Waiting", statuses: ["WAITING_HUMAN", "BLOCKED"], drop: null, hint: "Needs you, or waiting on subtasks", dot: "bg-amber-500" },
-  { key: "review", label: "Review", statuses: ["REVIEW"], drop: "REVIEW", dot: "bg-teal-500" },
-  { key: "done", label: "Done", statuses: ["DONE"], drop: "DONE", dot: "bg-emerald-500" },
-];
-const CANCELED_COLUMN: Column = { key: "canceled", label: "Canceled", statuses: ["CANCELED"], drop: "CANCELED", dot: "bg-fg-4" };
 
 const DONE_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const STEP = 1024;
@@ -45,18 +33,13 @@ const STEP = 1024;
 // Cards a column shows before "Show more"; finished columns grow every day.
 const PAGE = 20;
 
-function sortTasks(a: Task, b: Task) {
-  if (a.position !== b.position) return a.position - b.position;
-  return a.created_at.localeCompare(b.created_at);
-}
-
-// Finished columns read like a log: most recently finished first.
-function sortFinished(a: Task, b: Task) {
-  return (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at);
-}
-
-export default function BoardPage() {
+function Board() {
   const router = useRouter();
+  const params = useSearchParams();
+  // List mode and its category live in the URL (?view=list&status=<column key>); no view = kanban.
+  const listMode = params.get("view") === "list";
+  const category = LIST_COLUMNS.find((c) => c.key === params.get("status")) ?? COLUMNS[1];
+  const showList = (key: string) => router.replace(`/board/?view=list&status=${key}`, { scroll: false });
   const toast = useToast();
   const agents = useAgents();
   const [showCanceled, setShowCanceled] = useState(false);
@@ -65,7 +48,10 @@ export default function BoardPage() {
   const [newFor, setNewFor] = useState<TaskStatus | null>(null);
 
   const tasks = useAsync(() => api.listTasks({ all: true }), []);
-  useServerEvent(["task.updated", "task.deleted"], () => void tasks.reload());
+  // A bulk action sends one event per card; one reload covers them all, and a steady stream still
+  // reloads every second.
+  const reload = useDebouncedCallback(() => void tasks.reload(), 250, 1000);
+  useServerEvent(["task.updated", "task.deleted"], reload);
 
   const columns = showCanceled ? [...COLUMNS, CANCELED_COLUMN] : COLUMNS;
 
@@ -115,7 +101,7 @@ export default function BoardPage() {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
     // Re-measure when the board first renders and when the filter chips (one per agent) may wrap.
-  }, [tasks.data === undefined, showCanceled, agents.data?.length]);
+  }, [tasks.data === undefined, showCanceled, agents.data?.length, listMode]);
 
   // Scroll the board sideways while a card is held near its left or right edge.
   function autoScroll(e: DragEvent) {
@@ -199,11 +185,31 @@ export default function BoardPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Board"
-        subtitle="Assign tasks to agents and track their work. Drag cards between columns."
+        subtitle={`Assign tasks to agents and track their work. ${listMode ? "Select cards to move or delete them." : "Drag cards between columns."}`}
         actions={
-          <Button variant="primary" onClick={() => setNewFor("TODO")}>
-            <Icon name="plus" className="h-4 w-4" /> New task
-          </Button>
+          <>
+            <div className="inline-flex rounded-md border border-line-strong p-0.5" role="group" aria-label="View">
+              {[
+                { list: false, label: "Board" },
+                { list: true, label: "List" },
+              ].map((v) => (
+                <button
+                  key={v.label}
+                  aria-pressed={listMode === v.list}
+                  onClick={() => (v.list ? showList(category.key) : router.replace("/board/", { scroll: false }))}
+                  className={cx(
+                    "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium",
+                    listMode === v.list ? "bg-inverse text-on-inverse" : "text-fg-2 hover:text-fg",
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <Button variant="primary" onClick={() => setNewFor("TODO")}>
+              <Icon name="plus" className="h-4 w-4" /> New task
+            </Button>
+          </>
         }
       />
 
@@ -227,9 +233,11 @@ export default function BoardPage() {
             Unassigned
           </FilterChip>
         </div>
-        <div className="ml-auto">
-          <Checkbox checked={showCanceled} onChange={setShowCanceled} label="Show canceled" />
-        </div>
+        {!listMode && (
+          <div className="ml-auto">
+            <Checkbox checked={showCanceled} onChange={setShowCanceled} label="Show canceled" />
+          </div>
+        )}
       </div>
 
       {tasks.error && (
@@ -239,6 +247,8 @@ export default function BoardPage() {
       )}
       {tasks.loading && !tasks.data ? (
         <Loading />
+      ) : listMode ? (
+        <BoardList tasks={filtered} category={category} onCategory={showList} onChanged={() => void tasks.reload()} />
       ) : (
         <div
           ref={boardRef}
@@ -349,24 +359,16 @@ export default function BoardPage() {
   );
 }
 
-function DropLine() {
-  return <div className="my-1 h-0.5 rounded bg-indigo-500" />;
+export default function BoardPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <Board />
+    </Suspense>
+  );
 }
 
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cx(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors",
-        active
-          ? "border-accent-line bg-accent-soft text-accent"
-          : "border-line bg-surface text-fg-2 hover:bg-subtle",
-      )}
-    >
-      {children}
-    </button>
-  );
+function DropLine() {
+  return <div className="my-1 h-0.5 rounded bg-indigo-500" />;
 }
 
 function TaskCard({
