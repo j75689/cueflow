@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,10 +16,24 @@ import (
 	"github.com/j75689/cueflow/internal/store"
 )
 
+// listTasks returns {"items"}; with counts=1 it adds "total" (matches over every page) and "counts" per status
+// (the same filters without status).
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.TaskFilter{Query: q.Get("q"), All: q.Get("all") == "1" || q.Get("all") == "true",
-		CreatedBy: q.Get("created_by"), Limit: QueryInt(r, "limit", 500)}
+		CreatedBy: q.Get("created_by"), Limit: QueryInt(r, "limit", 500), Offset: QueryInt(r, "offset", 0)}
+	if f.Offset < 0 {
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "offset must be 0 or more")
+		return
+	}
+	switch q.Get("sort") {
+	case "", "position":
+	case "recent":
+		f.Sort = store.TaskSortRecent
+	default:
+		WriteError(w, http.StatusBadRequest, "invalid_argument", "sort must be position or recent")
+		return
+	}
 	for _, raw := range q["status"] {
 		for _, st := range strings.Split(raw, ",") {
 			ts := store.TaskStatus(strings.ToUpper(strings.TrimSpace(st)))
@@ -56,7 +71,22 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": tasks})
+	if c := q.Get("counts"); c != "1" && c != "true" {
+		WriteJSON(w, http.StatusOK, map[string]any{"items": tasks})
+		return
+	}
+	counts, err := s.Store.CountTasks(r.Context(), f)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	total := 0
+	for st, n := range counts {
+		if len(f.Statuses) == 0 || slices.Contains(f.Statuses, st) {
+			total += n
+		}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": tasks, "total": total, "counts": counts})
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {

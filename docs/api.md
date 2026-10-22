@@ -248,7 +248,7 @@ Suggested board columns: Backlog | To do | In progress | Waiting (BLOCKED + WAIT
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| GET | `/tasks?status=&assignee=<agentId|none>&parent_id=&q=&all=1` | | → `{"items":[Task]}` ordered by status then `position`; `DONE`/`CANCELED` older than 14 days omitted unless `all=1` |
+| GET | `/tasks?status=&assignee=<agentId|none>&parent_id=&q=&all=1&limit=&offset=&sort=&counts=1` | | → `{"items":[Task]}` ordered by `position`, `created_at`, `id` (`sort=position`, the default; `sort=recent`: newest `completed_at` first, which is set when a task last moved to `REVIEW` or `DONE`, else `updated_at`, which a new thread message also bumps; then `id`); `DONE`/`CANCELED` older than 14 days omitted unless `all=1`. `q` matches title or description, and `#12` or `12` also the task number. `limit` 1-1000 (default 500; other values use 500), `offset` ≥ 0 (default 0). A negative `offset` or another `sort` → 400 `invalid_argument`. `counts=1` adds `"total"` (matches over every page) and `"counts"`: per status, every one present, with the same filters except `status` |
 | POST | `/tasks` | `{title, description?, assignee_agent_id?, priority?, labels?, due_at?, status?, parent_id?}` | default status: `TODO` if assigned else `BACKLOG`. This is also the "command" entry point (assign to the manager agent) |
 | GET | `/tasks/{id}` | | → `Task` + `"subtasks":[Task]`, `"parent":Task|null`, `"deliverables":[{"id","kind","title","status"}]` |
 | PATCH | `/tasks/{id}` | any of `{title, description, status, priority, labels, assignee_agent_id, due_at, position}` | `status: IN_PROGRESS` is rejected. Moving to `TODO` with an agent queues a run; moving a running task elsewhere stops the run |
@@ -426,7 +426,7 @@ off unless `CUEFLOW_MCP_TOKEN` is set (404 `mcp_disabled`) and requires `Authori
 |---|---|
 | `list_orgs` | Orgs: slug, name, whether it is the default |
 | `list_agents` | The org's crew: slug, name, role, description, active |
-| `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query`, `all`, `limit` |
+| `list_tasks` | Tasks filtered by `status[]`, `assignee` (slug or `none`), `query` (also matches `#12` or `12`), `all`, `limit` |
 | `get_task` | One task (`#12`, `12` or id) with description, subtasks, its deliverables and the last 30 thread messages |
 | `create_task` | `title`, `description`, `assignee` slug, `status` `TODO` (default) or `BACKLOG`, `priority`, `labels` |
 | `update_task` | Title, description, priority, labels, assignee (`none` unassigns), status `BACKLOG`/`TODO`/`REVIEW`/`DONE`/`CANCELED` |

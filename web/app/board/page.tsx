@@ -28,8 +28,6 @@ import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Agent, Task, TaskStatus } from "@/lib/types";
 
 const DONE_WINDOW_MS = 14 * 24 * 3600 * 1000;
-// GET /tasks returns at most this many tasks (the server's default limit).
-const TASK_LIMIT = 500;
 const STEP = 1024;
 
 // Cards a column shows before "Show more"; finished columns grow every day.
@@ -38,21 +36,44 @@ const PAGE = 20;
 function Board() {
   const router = useRouter();
   const params = useSearchParams();
-  // List mode and its category live in the URL (?view=list&status=<column key>); no view = kanban.
+  // List mode, its category and page live in the URL (?view=list&status=<column key>&page=N, no page
+  // = 1); no view = kanban.
   const listMode = params.get("view") === "list";
   const category = LIST_COLUMNS.find((c) => c.key === params.get("status")) ?? COLUMNS[1];
-  const showList = (key: string) => router.replace(`/board/?view=list&status=${key}`, { scroll: false });
+  const page = Math.max(1, Math.floor(Number(params.get("page"))) || 1);
+  const showList = (key: string, page = 1) =>
+    router.replace(`/board/?view=list&status=${key}${page > 1 ? `&page=${page}` : ""}`, { scroll: false });
   const toast = useToast();
   const agents = useAgents();
   const [showCanceled, setShowCanceled] = useState(false);
   const [filterAgent, setFilterAgent] = useState<string | "none" | null>(null);
   const [q, setQ] = useState("");
   const [newFor, setNewFor] = useState<TaskStatus | null>(null);
+  // List mode searches the server once typing pauses, not on every key; a new search or agent filter
+  // starts it over at page 1. The search resets the page with the query it applies, so no page is
+  // fetched with the old query.
+  const [query, setQuery] = useState(q);
+  useEffect(() => {
+    if (q === query) return;
+    const t = setTimeout(() => {
+      setQuery(q);
+      if (listMode && page > 1) showList(category.key);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, listMode, page, category.key]);
+  const pickAgent = (a: string | "none" | null) => {
+    setFilterAgent(a);
+    if (listMode && page > 1) showList(category.key);
+  };
 
-  const tasks = useAsync(() => api.listTasks({ all: true }), []);
+  // List mode loads its own pages (BoardList); the board loads every task once.
+  const tasks = useAsync(() => (listMode ? Promise.resolve(undefined) : api.listTasks({ all: true })), [listMode]);
   // A bulk action sends one event per card; one reload covers them all, and a steady stream still
   // reloads every second.
-  const reload = useDebouncedCallback(() => void tasks.reload(), 250, 1000);
+  const reload = useDebouncedCallback(() => {
+    if (!listMode) void tasks.reload();
+  }, 250, 1000);
   useServerEvent(["task.updated", "task.deleted"], reload);
 
   const columns = showCanceled ? [...COLUMNS, CANCELED_COLUMN] : COLUMNS;
@@ -61,8 +82,7 @@ function Board() {
     const needle = q.trim().toLowerCase();
     const now = Date.now();
     return (tasks.data?.items ?? []).filter((t) => {
-      // List mode keeps old finished cards, so they can be moved or deleted in bulk.
-      if (!listMode && (t.status === "DONE" || t.status === "CANCELED") && t.completed_at) {
+      if ((t.status === "DONE" || t.status === "CANCELED") && t.completed_at) {
         if (now - new Date(t.completed_at).getTime() > DONE_WINDOW_MS) return false;
       }
       if (filterAgent === "none" && t.assignee_agent_id) return false;
@@ -71,7 +91,7 @@ function Board() {
         return false;
       return true;
     });
-  }, [tasks.data, q, filterAgent, listMode]);
+  }, [tasks.data, q, filterAgent]);
 
   const byColumn = useMemo(() => {
     const m: Record<string, Task[]> = {};
@@ -224,15 +244,15 @@ function Board() {
           className="w-full max-w-xs"
         />
         <div className="flex flex-wrap items-center gap-1.5">
-          <FilterChip active={filterAgent === null} onClick={() => setFilterAgent(null)}>
+          <FilterChip active={filterAgent === null} onClick={() => pickAgent(null)}>
             All
           </FilterChip>
           {agentList.map((a) => (
-            <FilterChip key={a.id} active={filterAgent === a.id} onClick={() => setFilterAgent(filterAgent === a.id ? null : a.id)}>
+            <FilterChip key={a.id} active={filterAgent === a.id} onClick={() => pickAgent(filterAgent === a.id ? null : a.id)}>
               <AgentAvatar agent={a} size="xs" /> {a.name}
             </FilterChip>
           ))}
-          <FilterChip active={filterAgent === "none"} onClick={() => setFilterAgent(filterAgent === "none" ? null : "none")}>
+          <FilterChip active={filterAgent === "none"} onClick={() => pickAgent(filterAgent === "none" ? null : "none")}>
             Unassigned
           </FilterChip>
         </div>
@@ -243,26 +263,22 @@ function Board() {
         )}
       </div>
 
-      {tasks.error && (
+      {!listMode && tasks.error && (
         <div className="mb-3">
           <ErrorBox onRetry={tasks.reload}>{tasks.error}</ErrorBox>
         </div>
       )}
-      {tasks.loading && !tasks.data ? (
+      {listMode ? (
+        <BoardList
+          category={category}
+          page={page}
+          onCategory={showList}
+          onPage={(n) => showList(category.key, n)}
+          q={query}
+          assignee={filterAgent}
+        />
+      ) : tasks.loading && !tasks.data ? (
         <Loading />
-      ) : listMode ? (
-        <>
-          {(tasks.data?.items.length ?? 0) >= TASK_LIMIT && (
-            <p className="mb-2 text-xs text-fg-3">Showing the first {TASK_LIMIT} tasks; some may be missing.</p>
-          )}
-          <BoardList
-            tasks={filtered}
-            all={tasks.data?.items ?? []}
-            category={category}
-            onCategory={showList}
-            onChanged={() => void tasks.reload()}
-          />
-        </>
       ) : (
         <div
           ref={boardRef}

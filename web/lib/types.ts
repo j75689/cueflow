@@ -451,6 +451,13 @@ export interface Task {
   completed_at: string | null;
 }
 
+/** GET /tasks; total and counts (per status, every filter but status) come with counts=1. */
+export interface TaskList {
+  items: Task[];
+  total?: number;
+  counts?: Record<TaskStatus, number>;
+}
+
 export interface TaskPostRef {
   id: string;
   title: string;
