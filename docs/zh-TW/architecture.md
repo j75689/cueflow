@@ -342,7 +342,7 @@ flowchart LR
 | 時鐘 | `Scheduler.Tick` 用排程與模組登記的 cron 表（`store.ClockTables`）的 `next_run_at`。到期的列以 `FOR UPDATE SKIP LOCKED` 認領並在同一交易內推進，多個 tick 同時進來也只觸發一次。沒有 `next_run_at` 的列（新增或剛編輯過）只排程、不觸發；遲到超過 15 分鐘的觸發會被略過 |
 | 清理 | 雲端不做啟動時「所有執行中都算過期」的清理；由 tick 的 `Store.FailAbandoned` 依租約與時間關閉主人已消失的工作 |
 | Per-run MCP | 執行的 token 是 `run_tokens` 的一列，任何實例都能據此重建工具伺服器。終止型工具把結果寫進去，等待中的實例輪詢取得，所以呼叫可以由別的實例處理 |
-| 取消 | 執行中的實例用心跳發現任務不再是 `IN_PROGRESS` 就取消該次執行，所以在任一實例按取消，一個租約間隔內就會生效 |
+| 取消 | 執行中的實例用心跳發現任務在該次認領下不再是 `IN_PROGRESS` 就取消該次執行，所以在任一實例按取消，一個租約間隔內就會生效；卡住超過租約、任務已被重新認領的實例也會停下，不會跟新的執行同時處理 |
 | 內部端點 | `/internal/*` 只在雲端模式存在，需要帶有指定 audience、來自白名單服務帳號的 Google ID token（`internal/internalauth`） |
 | 事件 | PostgreSQL `LISTEN/NOTIFY`（見第 7 節）：每個實例把每個事件推給自己的瀏覽器。資料庫請用 session pooler，不要用 transaction pooler |
 | 媒體 | `gcs://bucket/prefix`（`internal/blob`）：`/media/{id}` 回 302 到短效的簽名網址（IAM 簽署，不需金鑰檔） |
