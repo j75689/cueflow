@@ -334,6 +334,14 @@ func serve() error {
 
 // newPubSub creates this instance's events subscription; PUBSUB_EMULATOR_HOST points it at the
 // emulator, as Google's own clients do.
+func newPubSub(ctx context.Context, topic string) (*pubsub.Transport, error) {
+	cfg := pubsub.Config{Topic: topic}
+	if h := os.Getenv("PUBSUB_EMULATOR_HOST"); h != "" {
+		cfg.Endpoint, cfg.Client = "http://"+h, http.DefaultClient
+	}
+	return pubsub.New(ctx, cfg)
+}
+
 // subscriptionCloser deletes the instance's events subscription once, bounded by timeout
 // (CUEFLOW_PUBSUB_DELETE_TIMEOUT); a failure is only logged, as the subscription expires on its own.
 func subscriptionCloser(t *pubsub.Transport, timeout time.Duration, logger *slog.Logger) func() {
@@ -347,14 +355,6 @@ func subscriptionCloser(t *pubsub.Transport, timeout time.Duration, logger *slog
 			}
 		})
 	}
-}
-
-func newPubSub(ctx context.Context, topic string) (*pubsub.Transport, error) {
-	cfg := pubsub.Config{Topic: topic}
-	if h := os.Getenv("PUBSUB_EMULATOR_HOST"); h != "" {
-		cfg.Endpoint, cfg.Client = "http://"+h, http.DefaultClient
-	}
-	return pubsub.New(ctx, cfg)
 }
 
 // connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
