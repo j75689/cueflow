@@ -31,12 +31,25 @@ type outcome struct {
 	text string
 	// noted is set on a handoff whose note was saved: only then may it continue on its own.
 	noted bool
+	// job and token are a handed-over runner run's job and run token, for handOver to stop and revoke
+	// if the run turns out to have lost its claim.
+	job   uuid.UUID
+	token string
 }
 
 type runEnv struct {
-	c        *Crew
-	task     *store.Task
-	agent    *store.Agent
+	c     *Crew
+	task  *store.Task
+	agent *store.Agent
+	// runID is the run working the task's claim: every tool call checks the run still holds it
+	// (execTool). nil is not fenced: a self-driven agent's calls (the claim is the agent's, see
+	// ExtendAgentTaskLease) and run tokens from before the run was recorded on them.
+	runID *uuid.UUID
+	// stop cancels the run when a tool call finds the claim lost; nil where the instance serving the
+	// call doesn't own the run (its heartbeat stops it there).
+	stop context.CancelCauseFunc
+	// lost is set once a tool call found the claim lost: later calls are refused without asking again.
+	lost     bool
 	outcome  *outcome
 	subtasks int
 	counts   map[string]int // per-run counters of module tools (see Run.Inc)

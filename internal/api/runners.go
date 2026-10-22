@@ -271,7 +271,8 @@ func (s *Server) runnerEvents(w http.ResponseWriter, r *http.Request) {
 	if len(req.Events) > 200 {
 		req.Events = req.Events[:200]
 	}
-	if job.Status == store.JobRunning || job.Status == store.JobCanceling {
+	lost := s.Crew.RunnerJobLost(r.Context(), job)
+	if !lost && (job.Status == store.JobRunning || job.Status == store.JobCanceling) {
 		s.Crew.ApplyRunnerEvents(r.Context(), job, req.Events)
 	}
 	status, err := s.Store.HeartbeatRunnerJob(r.Context(), job.ID, runner.ID)
@@ -279,7 +280,7 @@ func (s *Server) runnerEvents(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
+	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: lost || status != store.JobRunning})
 }
 
 func (s *Server) runnerHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -287,12 +288,14 @@ func (s *Server) runnerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A quiet runner is stopped too; one already told to stop needs no check.
+	lost := job.Status == store.JobRunning && s.Crew.RunnerJobLost(r.Context(), job)
 	status, err := s.Store.HeartbeatRunnerJob(r.Context(), job.ID, runner.ID)
 	if err != nil {
 		s.Fail(w, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: status != store.JobRunning})
+	WriteJSON(w, http.StatusOK, runnerapi.JobStatus{Cancel: lost || status != store.JobRunning})
 }
 
 func (s *Server) runnerComplete(w http.ResponseWriter, r *http.Request) {

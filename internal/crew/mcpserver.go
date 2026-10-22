@@ -99,7 +99,7 @@ func (c *Crew) newMCPRun(ctx context.Context, env *runEnv, token string) *mcpRun
 // recorded in the database, so any instance can serve the run's tool calls and a terminal call
 // made on another instance still ends this one's wait. Call the returned func when the run ends.
 func (c *Crew) registerMCPRun(ctx context.Context, env *runEnv) (string, *mcpRun, func()) {
-	token, err := c.store.CreateRunToken(ctx, env.task.ID, env.agent.ID, runTokenTTL)
+	token, err := c.store.CreateRunToken(ctx, env.task.ID, env.agent.ID, env.runID, runTokenTTL)
 	if err != nil {
 		// Without the database record only this instance can serve the run: fine locally.
 		c.logger.Warn("record run token", "err", err)
@@ -166,7 +166,7 @@ func (c *Crew) lookupMCPRun(ctx context.Context, token string) *mcpRun {
 	if err != nil {
 		return nil
 	}
-	env := &runEnv{c: c, task: task, agent: agent}
+	env := &runEnv{c: c, task: task, agent: agent, runID: rt.RunID}
 	run := c.newMCPRun(ctx, env, token)
 	var rec outcomeRecord
 	if len(rt.Outcome) > 0 && json.Unmarshal(rt.Outcome, &rec) == nil {

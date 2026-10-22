@@ -33,7 +33,7 @@ const runnerPoll = time.Second
 // same as acpLoop's; only the agent process lives elsewhere. It queues a job, then waits for the
 // runner to finish it, for a terminal tool call, for cancellation, or for the job to be lost.
 func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, pool runnerPool) *outcome {
-	env := &runEnv{c: c, task: task, agent: a}
+	env := &runEnv{c: c, task: task, agent: a, runID: &run.ID, stop: runStop(ctx)}
 	token, mrun, unregister := c.registerMCPRun(ctx, env)
 	handedOver := false
 	defer func() {
@@ -114,11 +114,12 @@ func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runE
 			return &outcome{kind: "canceled"}
 		case <-mrun.done:
 			// A terminal tool (complete_task / ask_human / ...) ended the task; the runner stops its
-			// agent and reports the tail of the conversation before we move on.
-			c.stopRunnerJob(ctx, job.ID, 20*time.Second)
+			// agent and reports the tail of the conversation before we move on. Not with ctx: a call refused
+			// for a lost claim closes done and cancels the run together, and the job must stop either way.
+			c.stopRunnerJob(context.WithoutCancel(ctx), job.ID, 20*time.Second)
 			return c.acpOutcome(ctx, run, env, acpdrive.Result{}, timeout)
 		case <-handOver:
-			return &outcome{kind: "handover"}
+			return &outcome{kind: "handover", job: job.ID, token: mrun.token}
 		case <-t.C:
 		}
 		cur, err := c.store.GetRunnerJob(ctx, job.ID)
@@ -158,6 +159,30 @@ func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runE
 		}
 	}
 	return c.acpOutcome(ctx, run, env, res, timeout)
+}
+
+// RunnerJobLost reports whether a runner job's run may no longer act on its task (see HoldsClaim),
+// and then marks the job canceling, so the runner stops its agent at its next events or heartbeat
+// even when no instance is watching the run any more. Its events are then not applied: after a human
+// stop that drops the tail the agent reports while it stops, which is fine, as it is what the run did
+// after the human stopped it. A hand-over and the tail after a terminal tool keep the task
+// IN_PROGRESS under the run, so they pass. Jobs from before the run was recorded on them are not
+// fenced, nor are finished ones (their events are not applied anyway), and the check fails open
+// (holdsClaim). A canceling job is still checked, as its events are applied, but not stopped again.
+func (c *Crew) RunnerJobLost(ctx context.Context, job *store.RunnerJob) bool {
+	if job.AgentRunID == nil || store.JobFinished(job.Status) {
+		return false
+	}
+	if c.holdsClaim(ctx, job.TaskID, *job.AgentRunID) {
+		return false
+	}
+	if job.Status == store.JobCanceling {
+		return true
+	}
+	if err := c.store.StopRunnerJob(context.WithoutCancel(ctx), job.ID); err != nil {
+		c.logger.Warn("stop a runner job whose run lost its task", "job", job.ID, "err", err)
+	}
+	return true
 }
 
 // ApplyRunnerEvents writes what a runner's agent did into the task thread.
