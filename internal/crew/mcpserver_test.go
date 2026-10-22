@@ -86,8 +86,7 @@ func TestExternalTimeoutFollowsTheMCPRequest(t *testing.T) {
 
 // servedOverMCP serves one tool through the SDK's real stateless handler behind mcpx.Stateless, as
 // MCPHandler does, and calls it once; it returns the tool's text (or the error) and how long it took.
-// Without PropagateRequestCancellation, as for a client on an older protocol: the tool's ctx then
-// carries no deadline but what mcpx.RequestContext puts back.
+// As MCPHandler configures it, the tool's ctx carries no deadline but what mcpx.RequestContext puts back.
 func servedOverMCP(t *testing.T, maxRequest time.Duration, fn func(ctx context.Context) string) (string, time.Duration) {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: mcpx.StatelessCapabilities()})

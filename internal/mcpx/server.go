@@ -24,8 +24,9 @@ func StatelessCapabilities() *mcp.ServerCapabilities {
 // request slot for good. maxRequest <= 0 sets no deadline.
 //
 // The SDK runs handlers on a ctx detached from the request's (it neither ends nor has a deadline), and the
-// request lasts until its handler returns, so a tool handler must take the deadline back with RequestContext.
-// A tool call cut off by it is canceled where it stands.
+// request lasts until its handler returns. A tool handler that takes the deadline back with RequestContext
+// (run and agent-token tool calls) is canceled where it stands when it passes; others (the operator's /mcp
+// tools) run to the end. A client that goes away cancels nothing: a tool call is not stopped halfway for it.
 func Stateless(h http.Handler, maxRequest time.Duration) http.Handler {
 	h = NoStandaloneStream(h)
 	if maxRequest <= 0 {

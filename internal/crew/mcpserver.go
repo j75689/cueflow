@@ -251,7 +251,7 @@ func (c *Crew) MCPHandler(maxRequest time.Duration) http.Handler {
 			return run.server
 		}
 		return nil
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true})
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	serve := mcpx.Stateless(h, maxRequest) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)) == nil {
