@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.0](https://github.com/j75689/cueflow/compare/v1.1.0...v1.2.0) (2026-10-22)
+
+
+### Features
+
+* alert an org's notifier (Telegram or email) when a task needs a human ([#69](https://github.com/j75689/cueflow/issues/69)) ([478518c](https://github.com/j75689/cueflow/commit/478518cef9e43d85f0a3db10da833e9006f97a8a))
+* **db:** run behind a transaction-mode pooler with a session URL for LISTEN ([#73](https://github.com/j75689/cueflow/issues/73)) ([44d4184](https://github.com/j75689/cueflow/commit/44d4184557e7c8adcda95bdca405d9d76cebfd7d))
+* **events:** optional Google Pub/Sub transport for live updates ([#74](https://github.com/j75689/cueflow/issues/74)) ([b9b66f9](https://github.com/j75689/cueflow/commit/b9b66f9c2703687a699180e822bab85240d53ad8))
+* **templates:** give the developer team's pull requests a Summary, Evidence, Merge Danger body ([#65](https://github.com/j75689/cueflow/issues/65)) ([d9eca9b](https://github.com/j75689/cueflow/commit/d9eca9b286de8b5bd6edf8342d10d9de83c9a926))
+
+
+### Bug Fixes
+
+* **crew:** fence task leases by claim so a stalled run can't keep a re-claimed task ([#76](https://github.com/j75689/cueflow/issues/76)) ([c2636e4](https://github.com/j75689/cueflow/commit/c2636e4fe55e8c91480aa9d9f5f226576f711fe5))
+* **crew:** keep cloud runs alive past the 30-minute delivery limit ([#70](https://github.com/j75689/cueflow/issues/70)) ([0b18aa4](https://github.com/j75689/cueflow/commit/0b18aa477cbd548defe433cec99d0678354f95a9))
+* **crew:** refuse a tool call once its run has lost the task's claim ([#78](https://github.com/j75689/cueflow/issues/78)) ([1d5c495](https://github.com/j75689/cueflow/commit/1d5c49566f7509b16ace7636dca061cb4cec9551))
+* **web:** portal modals to the body so the page can't paint over them ([#68](https://github.com/j75689/cueflow/issues/68)) ([8828bf9](https://github.com/j75689/cueflow/commit/8828bf95a1e12b327048a5ea918770bd582c22b3))
+
 ## [1.1.0](https://github.com/j75689/cueflow/compare/v1.0.1...v1.1.0) (2026-10-20)
 
 
