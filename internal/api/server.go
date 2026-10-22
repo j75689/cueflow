@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/tasks", s.listTasks)
 		r.Post("/tasks", s.createTask)
+		r.Post("/tasks/bulk", s.bulkTasks)
 		r.Get("/tasks/{id}", s.getTask)
 		r.Patch("/tasks/{id}", s.updateTask)
 		r.Delete("/tasks/{id}", s.deleteTask)

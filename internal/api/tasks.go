@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -232,14 +234,107 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		s.Fail(w, err)
 		return
 	}
-	s.Crew.Cancel(id)
-	org := s.Store.TaskOrg(r.Context(), id)
-	if err := s.Store.DeleteTask(r.Context(), id); err != nil {
+	if err := s.deleteTaskOp(r.Context(), id); err != nil {
 		s.Fail(w, err)
 		return
 	}
-	s.Broker.Publish(org, "task.deleted", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteTaskOp stops the task's run and deletes it with its subtasks; the single endpoint and bulk
+// both go through it.
+func (s *Server) deleteTaskOp(ctx context.Context, id uuid.UUID) error {
+	s.Crew.Cancel(id)
+	org := s.Store.TaskOrg(ctx, id)
+	if err := s.Store.DeleteTask(ctx, id); err != nil {
+		return err
+	}
+	s.Broker.Publish(org, "task.deleted", map[string]any{"id": id})
+	return nil
+}
+
+// taskBulkLimit is how many ids one bulk request takes: the board's page size.
+const taskBulkLimit = 500
+
+// bulkTasks moves or deletes many tasks in one request. Each id goes through the single endpoint's
+// op (run cancellation, system message, agent wake-up, event), so one that fails does so alone, with
+// the single endpoint's code, and the rest go through; ids outside the request's org are not found.
+// A database error stops the batch, and the answer is still the per-id result: what was applied
+// before it, the id it hit, and the ids not tried.
+func (s *Server) bulkTasks(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Action string           `json:"action"`
+		IDs    []string         `json:"ids"`
+		Status store.TaskStatus `json:"status"`
+	}
+	if err := Decode(r, &req); err != nil {
+		s.Fail(w, err)
+		return
+	}
+	switch req.Action {
+	case "move":
+		if !req.Status.Valid() {
+			s.Fail(w, store.Invalid("move needs a valid status"))
+			return
+		}
+	case "delete":
+	default:
+		s.Fail(w, store.Invalid(`action must be "move" or "delete"`))
+		return
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > taskBulkLimit {
+		s.Fail(w, store.Invalid(fmt.Sprintf("ids must name 1 to %d tasks", taskBulkLimit)))
+		return
+	}
+	org, err := s.ReqOrg(r)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	ctx := r.Context()
+	type failure struct {
+		ID      string `json:"id"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	apply := func(id uuid.UUID) error {
+		if s.Store.TaskOrg(ctx, id) != org.ID { // also uuid.Nil for a task that does not exist
+			return domain.ErrNotFound
+		}
+		if req.Action == "delete" {
+			return s.deleteTaskOp(ctx, id)
+		}
+		_, err := s.updateTaskOp(ctx, id, store.TaskPatch{Status: &req.Status})
+		return err
+	}
+	ok, failed := []uuid.UUID{}, []failure{}
+	seen := map[uuid.UUID]bool{}
+	var stopped error
+	for _, raw := range req.IDs {
+		if stopped != nil {
+			failed = append(failed, failure{raw, "not_attempted", "not attempted after an earlier error"})
+			continue
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			err = domain.ErrNotFound
+		} else if seen[id] {
+			continue
+		} else {
+			seen[id] = true
+			if err = apply(id); err == nil {
+				ok = append(ok, id)
+				continue
+			}
+		}
+		status, code, msg := ErrorStatus(err)
+		if status >= http.StatusInternalServerError || code == "canceled" {
+			s.Logger.Error("bulk task op failed", "id", raw, "err", err)
+			stopped = err
+		}
+		failed = append(failed, failure{raw, code, msg})
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"ok": ok, "failed": failed})
 }
 
 func (s *Server) taskMessages(w http.ResponseWriter, r *http.Request) {

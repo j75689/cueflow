@@ -1,0 +1,113 @@
+package e2e
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/j75689/cueflow/internal/store"
+)
+
+// POST /tasks/bulk moves or deletes many tasks in one request, each through the single endpoint's
+// op: one that fails (missing, in another org, a move PATCH refuses) fails alone with PATCH's or
+// DELETE's code, the rest go through, and the response says which was which.
+func TestTaskBulk(t *testing.T) {
+	e := setup(t)
+	newTask := func(body map[string]any) store.Task {
+		t.Helper()
+		var task store.Task
+		if code := e.do("POST", "/tasks", body, &task); code != 201 {
+			t.Fatalf("create %v: %d", body["title"], code)
+		}
+		return task
+	}
+	type result struct {
+		OK     []uuid.UUID `json:"ok"`
+		Failed []struct {
+			ID, Code, Message string
+		} `json:"failed"`
+	}
+
+	a := newTask(map[string]any{"title": "a", "status": "BACKLOG"})
+	b := newTask(map[string]any{"title": "b", "status": "BACKLOG"})
+	var dev store.Org
+	if code := e.do("POST", "/orgs", map[string]any{"name": "Other"}, &dev); code != 201 {
+		t.Fatalf("create org: %d", code)
+	}
+	var other store.Task
+	if code := e.do("POST", "/tasks?org="+dev.Slug, map[string]any{"title": "other", "status": "BACKLOG"}, &other); code != 201 {
+		t.Fatalf("create other-org task: %d", code)
+	}
+
+	// b appears twice, the second time upper-cased: one move, no failure for the duplicate. The
+	// other org's task is not found from the default org, and stays where it was.
+	var res result
+	ids := []string{a.ID.String(), b.ID.String(), strings.ToUpper(b.ID.String()), other.ID.String(), uuid.NewString(), "not-a-uuid"}
+	if code := e.do("POST", "/tasks/bulk", map[string]any{"action": "move", "ids": ids, "status": "REVIEW"}, &res); code != 200 {
+		t.Fatalf("bulk move: %d", code)
+	}
+	if len(res.OK) != 2 || res.OK[0] != a.ID || res.OK[1] != b.ID {
+		t.Fatalf("ok: %v", res.OK)
+	}
+	if len(res.Failed) != 3 || res.Failed[0].ID != other.ID.String() || res.Failed[0].Code != "not_found" ||
+		res.Failed[1].Code != "not_found" || res.Failed[2].ID != "not-a-uuid" || res.Failed[2].Code != "not_found" {
+		t.Fatalf("failed: %+v", res.Failed)
+	}
+	var got store.Task
+	for _, task := range []store.Task{a, b} {
+		if e.do("GET", "/tasks/"+task.ID.String(), nil, &got); got.Status != store.TaskReview {
+			t.Fatalf("%s after bulk move: %s", task.Title, got.Status)
+		}
+	}
+	var msgs []store.TaskMessage
+	if e.do("GET", "/tasks/"+a.ID.String()+"/messages", nil, &msgs); len(msgs) == 0 || msgs[len(msgs)-1].Content != "Moved to REVIEW by a human." {
+		t.Fatalf("messages: %+v", msgs)
+	}
+	if e.do("GET", "/tasks/"+other.ID.String(), nil, &got); got.Status != store.TaskBacklog {
+		t.Fatalf("other-org task after bulk move: %s", got.Status)
+	}
+
+	// A move PATCH refuses fails per id, still with 200: the caller reads the per-id results.
+	if code := e.do("POST", "/tasks/bulk", map[string]any{"action": "move", "ids": []string{a.ID.String(), b.ID.String()}, "status": "IN_PROGRESS"}, &res); code != 200 ||
+		len(res.OK) != 0 || len(res.Failed) != 2 || res.Failed[0].Code != "invalid_argument" {
+		t.Fatalf("bulk move to IN_PROGRESS: %d %+v", code, res)
+	}
+
+	// Deleting a parent deletes its subtask too, so the subtask, named after it, is not found.
+	parent := newTask(map[string]any{"title": "parent", "status": "BACKLOG"})
+	child := newTask(map[string]any{"title": "child", "status": "BACKLOG", "parent_id": parent.ID})
+	ids = []string{parent.ID.String(), child.ID.String(), a.ID.String(), other.ID.String()}
+	if code := e.do("POST", "/tasks/bulk", map[string]any{"action": "delete", "ids": ids}, &res); code != 200 {
+		t.Fatalf("bulk delete: %d", code)
+	}
+	if len(res.OK) != 2 || res.OK[0] != parent.ID || res.OK[1] != a.ID ||
+		len(res.Failed) != 2 || res.Failed[0].ID != child.ID.String() || res.Failed[0].Code != "not_found" ||
+		res.Failed[1].ID != other.ID.String() || res.Failed[1].Code != "not_found" {
+		t.Fatalf("bulk delete: %+v", res)
+	}
+	for _, task := range []store.Task{parent, child, a} {
+		if code := e.do("GET", "/tasks/"+task.ID.String(), nil, nil); code != 404 {
+			t.Fatalf("%s after bulk delete: %d", task.Title, code)
+		}
+	}
+	for _, task := range []store.Task{b, other} {
+		if code := e.do("GET", "/tasks/"+task.ID.String(), nil, nil); code != 200 {
+			t.Fatalf("%s after bulk delete: %d", task.Title, code)
+		}
+	}
+
+	for name, body := range map[string]map[string]any{
+		"no action":   {"ids": []string{b.ID.String()}},
+		"bad action":  {"action": "archive", "ids": []string{b.ID.String()}},
+		"no status":   {"action": "move", "ids": []string{b.ID.String()}},
+		"bad status":  {"action": "move", "ids": []string{b.ID.String()}, "status": "LATER"},
+		"no ids":      {"action": "delete", "ids": []string{}},
+		"too many":    {"action": "delete", "ids": make([]string, 501)},
+		"ids missing": {"action": "delete"},
+	} {
+		if code := e.do("POST", "/tasks/bulk", body, nil); code != 400 {
+			t.Fatalf("%s: %d", name, code)
+		}
+	}
+}
