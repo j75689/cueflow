@@ -29,7 +29,7 @@ type mcpRun struct {
 	env    *runEnv
 	server *mcp.Server
 	token  string
-	mu     sync.Mutex // serializes tool calls within a run (counters, outcome)
+	turn   chan struct{} // serializes tool calls within a run (counters, outcome); a call waits for it only while its request lasts
 	done   chan struct{}
 	once   sync.Once
 	// born is when this instance learned of the run (for pruning runs it does not own).
@@ -80,8 +80,8 @@ type outcomeRecord struct {
 
 // newMCPRun exposes env's tools as an MCP server for the run identified by token.
 func (c *Crew) newMCPRun(ctx context.Context, env *runEnv, token string) *mcpRun {
-	run := &mcpRun{env: env, token: token, done: make(chan struct{}), born: time.Now()}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: version.Version}, nil)
+	run := &mcpRun{env: env, token: token, turn: make(chan struct{}, 1), done: make(chan struct{}), born: time.Now()}
+	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: version.Version}, &mcp.ServerOptions{Capabilities: mcpx.StatelessCapabilities()})
 	byName := map[string]tool{}
 	for _, t := range c.agentTools(ctx, env.agent) {
 		t := t
@@ -138,11 +138,11 @@ func (c *Crew) watchOutcome(ctx context.Context, run *mcpRun) {
 		if json.Unmarshal(rt.Outcome, &rec) != nil {
 			continue
 		}
-		run.mu.Lock()
+		run.turn <- struct{}{}
 		if run.env.outcome == nil {
 			run.env.outcome = &outcome{kind: rec.Kind, text: rec.Text}
 		}
-		run.mu.Unlock()
+		<-run.turn
 		run.once.Do(func() { close(run.done) })
 		return
 	}
@@ -178,8 +178,13 @@ func (c *Crew) lookupMCPRun(ctx context.Context, token string) *mcpRun {
 }
 
 func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name string, args json.RawMessage) *mcp.CallToolResult {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	select {
+	case r.turn <- struct{}{}:
+		defer func() { <-r.turn }()
+	case <-ctx.Done():
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
+			Text: "Timed out waiting for this run's previous tool call to finish; try again."}}}
+	}
 	select {
 	case <-r.done:
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
@@ -206,7 +211,7 @@ func (c *Crew) MCPHandler() http.Handler {
 		}
 		return nil
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	serve := mcpx.NoStandaloneStream(h) // no GET stream held open (Cloud Run bills an open request)
+	serve := mcpx.Stateless(h) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.lookupMCPRun(r.Context(), tokenFromPath(r.URL.Path)) == nil {
 			http.Error(w, "unknown or finished run", http.StatusNotFound)

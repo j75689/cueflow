@@ -1,6 +1,41 @@
 package mcpx
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// StatelessCapabilities are what a stateless server advertises: tools, but no list-changed notifications.
+//
+// The SDK advertises tools.listChanged as soon as a server has a tool. A client on protocol 2026-07-28 then opens
+// subscriptions/listen, a POST the SDK holds open until the client goes away, as no other request can reach it to
+// end it. A stateless server never sends those notifications, and on Cloud Run the POST held a request slot for
+// 30 minutes; enough of them used up the instances. Without the capability the client opens no listen, and one it
+// opens anyway is answered at once.
+func StatelessCapabilities() *mcp.ServerCapabilities {
+	return &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}, Tools: &mcp.ToolCapabilities{}}
+}
+
+// MaxRequestTime bounds one request to a stateless MCP server (see Stateless): longer than any tool call takes,
+// well under Cloud Run's 30-minute request timeout.
+const MaxRequestTime = 10 * time.Minute
+
+// Stateless fronts a stateless Streamable HTTP handler: it refuses the GET stream (NoStandaloneStream) and
+// cancels any request still open after MaxRequestTime, so no message shape can hold a request slot for good.
+func Stateless(h http.Handler) http.Handler {
+	return withDeadline(NoStandaloneStream(h), MaxRequestTime)
+}
+
+func withDeadline(h http.Handler, d time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), d)
+		defer cancel()
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
 
 // NoStandaloneStream answers GET with 405 Method Not Allowed in front of a stateless Streamable HTTP handler.
 //
