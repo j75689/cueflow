@@ -52,3 +52,29 @@ func TestToolCallWhoseRequestEndedIsNotRun(t *testing.T) {
 		t.Fatal("the turn was not released")
 	}
 }
+
+// A connector call served over MCP ends before its request does; anywhere else it keeps its own
+// timeout, whatever the deadline on its ctx.
+func TestExternalTimeoutFollowsTheMCPRequest(t *testing.T) {
+	own := 20 * time.Minute
+	short, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	long, cancelLong := context.WithTimeout(context.Background(), time.Hour)
+	defer cancelLong()
+
+	if d, by := externalTimeout(withRequestBudget(short), own); !by || d > time.Minute-requestBudgetMargin || d < 50*time.Second {
+		t.Errorf("served over MCP, 1 min left: %s %v", d, by)
+	}
+	if d, by := externalTimeout(withRequestBudget(long), own); by || d != own {
+		t.Errorf("served over MCP, more time left than the connector's own: %s %v", d, by)
+	}
+	if d, by := externalTimeout(withRequestBudget(context.Background()), own); by || d != own {
+		t.Errorf("served over MCP, no deadline: %s %v", d, by)
+	}
+	if d, by := externalTimeout(short, own); by || d != own {
+		t.Errorf("in-process run with a deadline: %s %v", d, by)
+	}
+	if d, by := externalTimeout(context.Background(), own); by || d != own {
+		t.Errorf("in-process run: %s %v", d, by)
+	}
+}

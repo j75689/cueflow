@@ -232,7 +232,7 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	out, isErr := c.execTool(guard.WithAgent(ctx), r.env, byName, llm.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
+	out, isErr := c.execTool(guard.WithAgent(withRequestBudget(ctx)), r.env, byName, llm.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
 	if r.env.outcome != nil {
 		_ = c.store.SetRunTokenOutcome(context.WithoutCancel(ctx), r.token,
 			outcomeRecord{Kind: r.env.outcome.kind, Text: r.env.outcome.text})
