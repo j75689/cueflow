@@ -184,10 +184,11 @@ func (c *Crew) lookupMCPRun(ctx context.Context, token string) *mcpRun {
 	return run
 }
 
-// toolTurnWait bounds how long a tool call waits for the run's previous one, well under the request
-// timeout (CUEFLOW_MCP_REQUEST_TIMEOUT, which also bounds the wait when shorter): an agent calls tools
-// in parallel, and each call waiting holds a request slot.
-var toolTurnWait = 90 * time.Second
+// toolTurnWait bounds how long a tool call waits for the run's previous one: past a connector call's
+// usual limit (externalCallTimeout), so a call queued behind one does not fail for nothing, and well
+// under the request timeout (CUEFLOW_MCP_REQUEST_TIMEOUT, which also bounds the wait when shorter).
+// An agent calls tools in parallel, and each call waiting holds a request slot.
+var toolTurnWait = externalCallTimeout + 30*time.Second
 
 // acquire takes the run's turn, giving up when ctx ends; release gives it back.
 func (r *mcpRun) acquire(ctx context.Context) bool {
@@ -210,9 +211,16 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	waitCtx, cancel := context.WithTimeout(ctx, toolTurnWait)
 	ok := r.acquire(waitCtx)
 	cancel()
+	if ok && ctx.Err() != nil { // the turn came as the request ended: run nothing for no one
+		r.release()
+		ok = false
+	}
 	if !ok {
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
-			Text: "Timed out waiting for this run's previous tool call to finish; try again."}}}
+		text := "Timed out waiting for this run's previous tool call to finish; try again."
+		if ctx.Err() != nil {
+			text = "The request ended before this tool call could run; it was not run."
+		}
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 	}
 	defer r.release()
 	select {
