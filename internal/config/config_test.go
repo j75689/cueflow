@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // base sets the one required variable (a 32-byte key, hex) and clears everything cloud-related.
@@ -12,7 +13,7 @@ func base(t *testing.T) {
 	for _, k := range []string{"CUEFLOW_QUEUE", "CUEFLOW_TICK", "CUEFLOW_TASKS_QUEUE", "CUEFLOW_TASKS_TARGET_URL",
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
-		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD"} {
+		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -139,6 +140,39 @@ func TestContextHandOff(t *testing.T) {
 		valid := v == "" || v == "0.6" || v == "0.95"
 		if c.ContextHandOffAt != want || valid != (len(c.Warnings) == 0) {
 			t.Errorf("%q: %v, warnings %v", v, c.ContextHandOffAt, c.Warnings)
+		}
+	}
+}
+
+func TestPubSubDeleteTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want time.Duration
+		warn bool
+		err  bool
+	}{
+		{v: "", want: 8 * time.Second},
+		{v: "5s", want: 5 * time.Second},
+		{v: "9.5s", want: 9500 * time.Millisecond},
+		{v: "10s", want: 10 * time.Second, warn: true},
+		{v: "1m", want: time.Minute, warn: true},
+		{v: "0", err: true},
+		{v: "-2s", err: true},
+	} {
+		base(t)
+		t.Setenv("CUEFLOW_PUBSUB_DELETE_TIMEOUT", tc.v)
+		c, err := Load()
+		if tc.err {
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_PUBSUB_DELETE_TIMEOUT") {
+				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: %v", tc.v, err)
+		}
+		if c.PubSubDeleteTimeout != tc.want || tc.warn != (len(c.Warnings) > 0) {
+			t.Errorf("%q: %v, warnings %v", tc.v, c.PubSubDeleteTimeout, c.Warnings)
 		}
 	}
 }

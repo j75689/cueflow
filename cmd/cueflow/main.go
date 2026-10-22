@@ -188,16 +188,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		var once sync.Once
-		closeEvents = func() {
-			once.Do(func() {
-				closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				if err := t.Close(closeCtx); err != nil {
-					logger.Warn("delete events subscription (it expires on its own)", "subscription", t.Subscription(), "err", err)
-				}
-			})
-		}
+		closeEvents = subscriptionCloser(t, cfg.PubSubDeleteTimeout, logger)
 		defer closeEvents() // a startup error after this point
 		broker.Use(t, logger)
 	} else {
@@ -349,6 +340,21 @@ func newPubSub(ctx context.Context, topic string) (*pubsub.Transport, error) {
 		cfg.Endpoint, cfg.Client = "http://"+h, http.DefaultClient
 	}
 	return pubsub.New(ctx, cfg)
+}
+
+// subscriptionCloser deletes the instance's events subscription once, bounded by timeout
+// (CUEFLOW_PUBSUB_DELETE_TIMEOUT); a failure is only logged, as the subscription expires on its own.
+func subscriptionCloser(t *pubsub.Transport, timeout time.Duration, logger *slog.Logger) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := t.Close(ctx); err != nil {
+				logger.Warn("delete events subscription (it expires on its own)", "subscription", t.Subscription(), "timeout", timeout, "err", err)
+			}
+		})
+	}
 }
 
 // connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
