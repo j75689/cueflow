@@ -147,6 +147,15 @@ func TestRunnerRunIsHandedOverToTheNextDelivery(t *testing.T) {
 // anything, with a registered runner polling for its jobs until ctx ends.
 func slowRunnerAgent(ctx context.Context, t *testing.T, e *env) store.Agent {
 	t.Helper()
+	agent, cfg := runnerAgent(t, e)
+	go func() { _ = runner.New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx) }()
+	return agent
+}
+
+// runnerAgent is an agent on a runner pool, and the config of a runner registered for it (whose
+// agent is the fake ACP one, taking 5 s before it does anything).
+func runnerAgent(t *testing.T, e *env) (store.Agent, *runner.Config) {
+	t.Helper()
 	e.crew.MCPBaseURL = e.api.URL
 	var pool store.Connector
 	if code := e.do("POST", "/connectors", map[string]any{"name": "Laptop", "type": "runner_pool", "config": map[string]any{
@@ -175,7 +184,5 @@ func slowRunnerAgent(ctx context.Context, t *testing.T, e *env) store.Agent {
 	cfg.Env = map[string]string{"CUEFLOW_FAKE_ACP": "1", "CUEFLOW_FAKE_ACP_DELAY": "5s"}
 	every := 1
 	cfg.PollInterval = &every
-	go func() { _ = runner.New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx) }()
-
-	return agent
+	return agent, cfg
 }

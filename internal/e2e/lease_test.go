@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/mcpx"
+	"github.com/j75689/cueflow/internal/runnerapi"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -329,5 +332,105 @@ func TestStalledTurnsReplyIsNotWritten(t *testing.T) {
 				t.Fatalf("%d turns, %s %q, runs %+v, thread:\n%s", turns, got.Status, got.Result, runs, thread)
 			}
 		})
+	}
+}
+
+// A runner agent's tool call refused on the instance that owns the run (the task was claimed again
+// while the agent worked) ends the run and stops the runner job, instead of leaving the agent to run
+// into its timeout.
+func TestRefusedRunnerCallStopsTheJob(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := slowRunnerAgent(ctx, t, e) // makes its first tool call after 5 s
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
+	go func() {
+		time.Sleep(2 * time.Second)
+		_, _ = e.pool.Exec(context.Background(), `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID)
+	}()
+	done := make(chan struct{})
+	go func() { defer close(done); e.crew.RunPending(ctx, 1) }()
+	select {
+	case <-done:
+	case <-time.After(40 * time.Second):
+		t.Fatal("the run kept going after its tool call was refused")
+	}
+
+	runs, _ := e.store.ListAgentRuns(ctx, task.ID)
+	var jobs_ []store.RunnerJob
+	e.do("GET", "/tasks/"+task.ID.String()+"/runner-jobs", nil, &jobs_)
+	if len(runs) != 1 || runs[0].Status != "CANCELED" || len(jobs_) != 1 || !store.JobFinished(jobs_[0].Status) {
+		t.Fatalf("runs %+v, jobs %+v", runs, jobs_)
+	}
+	if thread := threadText(t, e, task.ID.String()); strings.Contains(thread, "Done via ACP") {
+		t.Fatalf("the refused agent's work reached the thread:\n%s", thread)
+	}
+}
+
+// A runner whose run lost its task is told to stop by its own events and heartbeats, so it stops
+// even when no instance watches the run any more, and what it reports is not written.
+func TestLostRunnerJobIsStoppedByTheServer(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent, cfg := runnerAgent(t, e) // this test plays the runner itself
+	post := func(path string, in, out any) {
+		t.Helper()
+		raw, _ := json.Marshal(in)
+		req, _ := http.NewRequest(http.MethodPost, cfg.URL+runnerapi.BasePath+path, bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+cfg.Token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNoContent {
+			return // a claim with nothing queued yet
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d", path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
+	go e.crew.RunPending(ctx, 1) // queues the job and waits on it until ctx ends
+
+	var job runnerapi.Job
+	wait := 0
+	for deadline := time.Now().Add(10 * time.Second); job.ID == "" && time.Now().Before(deadline); {
+		post("/jobs/claim", runnerapi.ClaimRequest{Protocol: runnerapi.ProtocolVersion, Wait: &wait}, &job)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if job.ID == "" {
+		t.Fatal("no job was queued")
+	}
+	say := func(text string) bool {
+		var st runnerapi.JobStatus
+		post("/jobs/"+job.ID+"/events", runnerapi.EventsRequest{Events: []runnerapi.Event{{Kind: "message", Content: text}}}, &st)
+		return st.Cancel
+	}
+	if say("while holding the claim") {
+		t.Fatal("the run's runner was told to stop")
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var beat runnerapi.JobStatus
+	post("/jobs/"+job.ID+"/heartbeat", struct{}{}, &beat)
+	if !beat.Cancel || !say("after losing it") {
+		t.Fatalf("the runner of a lost run should be told to stop: heartbeat %+v", beat)
+	}
+	var jobs_ []store.RunnerJob
+	e.do("GET", "/tasks/"+task.ID.String()+"/runner-jobs", nil, &jobs_)
+	if len(jobs_) != 1 || jobs_[0].Status != store.JobCanceling {
+		t.Fatalf("jobs %+v", jobs_)
+	}
+	if thread := threadText(t, e, task.ID.String()); !strings.Contains(thread, "while holding the claim") || strings.Contains(thread, "after losing it") {
+		t.Fatalf("thread:\n%s", thread)
 	}
 }
