@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/j75689/cueflow/internal/jobs"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -158,6 +159,41 @@ func TestTaskBulkStopsOnDatabaseError(t *testing.T) {
 	for _, task := range []store.Task{a, b} {
 		if code := e.do("GET", "/tasks/"+task.ID.String(), nil, nil); code != 200 {
 			t.Fatalf("%s after the failed bulk delete: %d", task.Title, code)
+		}
+	}
+}
+
+// Bulk-moving assigned cards to To do queues their runs like PATCH does, with the system message,
+// but wakes the crew once for the batch: with a queue, a wake-up is a Cloud Tasks call.
+func TestTaskBulkMoveAssignedToTodo(t *testing.T) {
+	e, team := crewSetup(t)
+	q := &fakeQueue{}
+	e.crew.Queue = q
+	var a, b store.Task
+	for _, task := range []*store.Task{&a, &b} {
+		if code := e.do("POST", "/tasks", map[string]any{"title": "assigned", "status": "BACKLOG", "assignee_agent_id": team["chief"].ID}, task); code != 201 {
+			t.Fatalf("create: %d", code)
+		}
+	}
+	before := q.count(jobs.KindCrew)
+
+	var res struct {
+		OK []uuid.UUID `json:"ok"`
+	}
+	if code := e.do("POST", "/tasks/bulk", map[string]any{"action": "move", "ids": []string{a.ID.String(), b.ID.String()}, "status": "TODO"}, &res); code != 200 || len(res.OK) != 2 {
+		t.Fatalf("bulk move to TODO: %d %+v", code, res)
+	}
+	if n := q.count(jobs.KindCrew) - before; n != 1 {
+		t.Fatalf("crew wake-ups for the batch: %d", n)
+	}
+	for _, task := range []store.Task{a, b} {
+		var got store.Task
+		if e.do("GET", "/tasks/"+task.ID.String(), nil, &got); got.Status != store.TaskTodo {
+			t.Fatalf("after bulk move: %s", got.Status)
+		}
+		var msgs []store.TaskMessage
+		if e.do("GET", "/tasks/"+task.ID.String()+"/messages", nil, &msgs); len(msgs) == 0 || msgs[len(msgs)-1].Content != "Moved to TODO by a human." {
+			t.Fatalf("messages: %+v", msgs)
 		}
 	}
 }

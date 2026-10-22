@@ -193,7 +193,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		patch.PublisherConnectorID = &req.PublisherConnectorID.Value
 	}
 	patch.PublishAccounts = req.PublishAccounts
-	after, err := s.updateTaskOp(r.Context(), id, patch)
+	after, err := s.updateTaskOp(r.Context(), id, patch, true)
 	if err != nil {
 		s.Fail(w, err)
 		return
@@ -201,8 +201,9 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, after)
 }
 
-// updateTaskOp applies an operator edit; moving or reassigning a running card stops its run.
-func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.TaskPatch) (*store.Task, error) {
+// updateTaskOp applies an operator edit; moving or reassigning a running card stops its run. wake is
+// false for a batch, which wakes the crew once at its end instead of once per card.
+func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.TaskPatch, wake bool) (*store.Task, error) {
 	before, after, err := s.Store.UpdateTask(ctx, id, patch)
 	if err != nil {
 		return nil, err
@@ -215,7 +216,11 @@ func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.Tas
 			_, _ = s.Store.AddTaskMessage(ctx, id, "system", nil, "status",
 				"Moved to "+string(after.Status)+" by a human.", nil)
 		}
-		s.Crew.TaskChanged(ctx, after)
+		if wake {
+			s.Crew.TaskChanged(ctx, after)
+		} else {
+			s.Crew.TaskChangedInBatch(ctx, after)
+		}
 	}
 	s.Broker.Publish(after.OrgID, "task.updated", map[string]any{"id": after.ID, "status": after.Status})
 	return after, nil
@@ -260,8 +265,9 @@ func (s *Server) deleteTaskOp(ctx context.Context, id uuid.UUID) error {
 const taskBulkLimit = 500
 
 // bulkTasks moves or deletes many tasks in one request. Each id goes through the single endpoint's
-// op (run cancellation, system message, agent wake-up, event), so one that fails does so alone, with
-// the single endpoint's code, and the rest go through; ids outside the request's org are not found.
+// op (run cancellation, system message, event; the crew is woken once, at the end), so one that
+// fails does so alone, with the single endpoint's code, and the rest go through; ids outside the
+// request's org are not found.
 // A database error stops the batch, and the answer is still the per-id result: what was applied
 // before it, the id it hit, and the ids not tried.
 func (s *Server) bulkTasks(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +317,7 @@ func (s *Server) bulkTasks(w http.ResponseWriter, r *http.Request) {
 		if req.Action == "delete" {
 			return s.deleteTaskOp(ctx, id)
 		}
-		_, err = s.updateTaskOp(ctx, id, store.TaskPatch{Status: &req.Status})
+		_, err = s.updateTaskOp(ctx, id, store.TaskPatch{Status: &req.Status}, false)
 		return err
 	}
 	ok, failed := []uuid.UUID{}, []failure{}
@@ -340,6 +346,9 @@ func (s *Server) bulkTasks(w http.ResponseWriter, r *http.Request) {
 			stopped = err
 		}
 		failed = append(failed, failure{raw, code, msg})
+	}
+	if req.Action == "move" && req.Status == store.TaskTodo && len(ok) > 0 {
+		s.Crew.Wake() // once for the batch: with a queue, each wake-up is a Cloud Tasks call
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"ok": ok, "failed": failed})
 }
