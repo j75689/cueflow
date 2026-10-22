@@ -76,7 +76,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 
 ## 使用介面
 
-- **儀表板**：Command、Board、Agents、Deliverables、Schedules、Connectors、Runners 與 Usage，內嵌在伺服器 binary 裡。
+- **儀表板**：Command、Board、Agents、Deliverables、Schedules、Connectors、Runners 與 Usage，內嵌在伺服器 binary 裡。Board 另有 List 檢視，可一次移動或刪除多張卡片。
 - **MCP 端點**：其他 agent（Claude Code、Codex⋯）可以透過 CueFlow 自己的 MCP 伺服器列出、建立、留言、執行與停止任務，也能讀 deliverable。核准仍然只能在儀表板做。
 - **REST API**：儀表板做得到的都能用 bearer token 呼叫。[docs/api.md](docs/api.md)（英文）
 - **Runner**：在你自己的機器上跑 `cueflow runner`，替外部 agent 接任務；它只做主動連線。[docs/zh-TW/external-agents.md](docs/zh-TW/external-agents.md)

@@ -123,6 +123,8 @@ stateDiagram-v2
 
 Unlike the deliverable state machine, task status is permissive for humans: cards can be dragged freely on the board (except into In progress). The strict part is when an agent finishes: the new status is applied only if the task is **still `IN_PROGRESS`** (`SetTaskStatusIf`). If a human drags the card away during a run, the agent's result is written to the thread but the card is not pulled back.
 
+The board's **List** view (Board → *List*, or `/board/?view=list&status=<column>` with `backlog`, `todo`, `progress`, `waiting`, `review`, `done` or `canceled`) shows one column at a time as rows, with chips to switch between them; the search box and agent chips filter it as they do the board. Done and Canceled show the cards finished in the last 14 days, as on the board. Select cards (or *Select all*) and pick **Move to…** (Backlog, To do, Review, Done or Canceled) or **Delete**; each card is changed as if it were moved or deleted on its own (`POST /api/v1/tasks/bulk`, see [api.md](api.md#tasks-kanban-board)). The same rule applies: running cards can't be moved until they are stopped.
+
 ## 6. Lifecycle of a run
 
 ```mermaid
@@ -274,6 +276,7 @@ Rules:
 | Send a request in Command | Creates a `TODO` task assigned to the chosen agent (Chief by default) and opens the task page |
 | Add a card on the board and assign it | Starts in `TODO` if assigned to an agent, otherwise `BACKLOG` |
 | Drag a card to To do | Starts automatically if an agent is assigned |
+| Move or delete selected cards in the List view | Moving assigned cards to To do asks first and says how many agents will start; Delete asks first and says how many subtasks go with the cards and how many running agents are stopped. Cards that could not be changed stay selected, with the reason |
 | Comment in the thread | If the task has an agent and is not in `BACKLOG` / `CANCELED` → moves to `TODO` and the agent continues after reading the comment; if a run is in progress, it reruns automatically when the run ends |
 | Start a comment with `@slug` | First hands the task to that agent (a running run is stopped), then behaves as above |
 | Press Stop or drag a running card away | Cancels the run's context, aborting the LLM call; the task stays in `WAITING_HUMAN` or the column you dropped it in |

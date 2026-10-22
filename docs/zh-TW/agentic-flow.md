@@ -122,6 +122,8 @@ stateDiagram-v2
 
 和 deliverable 狀態機不同，任務狀態對人是寬鬆的：看板上可以自由拖動（除了「進行中」）。嚴格的部分是 agent 結束時：只有在任務**仍是 `IN_PROGRESS`** 時才會套用新狀態（`SetTaskStatusIf`）；如果人在 agent 執行中把卡片拖走，agent 的結果會寫進對話串，但不會把卡片拉回去。
 
+看板的 **List** 檢視（Board → *List*，或 `/board/?view=list&status=<column>`，`<column>` 為 `backlog`、`todo`、`progress`、`waiting`、`review`、`done` 或 `canceled`）一次以列表顯示一個欄位，用分類標籤切換；搜尋框與 agent 篩選和看板一樣適用。Done 與 Canceled 和看板一樣，只顯示最近 14 天內完成的卡片。勾選卡片（或 *Select all*）後選 **Move to…**（Backlog、To do、Review、Done 或 Canceled）或 **Delete**；每張卡片都和單獨移動或刪除時一樣處理（`POST /api/v1/tasks/bulk`，見 [api.md](../api.md#tasks-kanban-board)，英文）。規則也相同：執行中的卡片要先停止才能移動。
+
 ## 6. 一次執行（Run）的生命週期
 
 ```mermaid
@@ -242,6 +244,7 @@ sequenceDiagram
 | 在 Command 送出需求 | 建立指派給所選 agent（預設 Chief）的 `TODO` 任務，開啟任務頁 |
 | 在看板新增卡片並指派 | 指派了 agent 就從 `TODO` 開始，否則進 `BACKLOG` |
 | 把卡片拖到「待辦」 | 有指派 agent 就自動開始 |
+| 在 List 檢視移動或刪除勾選的卡片 | 把有指派的卡片移到 To do 前會先確認，並說明有幾個 agent 會開始工作；Delete 前會先確認，並說明有幾個子任務會一起刪除、幾個執行中的 agent 會被停止。沒能變更的卡片會保持勾選並顯示原因 |
 | 在對話串留言 | 任務有 agent 且不在 `BACKLOG` / `CANCELED` → 移到 `TODO`，agent 讀到留言後繼續；若正在執行中，結束後自動重跑 |
 | 留言以 `@slug` 開頭 | 先把任務轉給該 agent（正在執行的會被停止），再照上一列處理 |
 | 按「Stop」或把執行中的卡片拖走 | 取消該次執行的 context，LLM 呼叫中止，任務停在 `WAITING_HUMAN` 或你拖到的欄位 |

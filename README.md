@@ -92,7 +92,7 @@ Capabilities and tools, the task state machine, delegation and guardrails: [docs
 ## Interfaces
 
 - **Dashboard**: Command, Board, Agents, Deliverables, Schedules, Connectors, Runners and Usage, embedded in the
-  server binary.
+  server binary. The Board also has a List view for moving or deleting many cards at once.
 - **MCP endpoint**: other agents (Claude Code, Codex...) can list, create, comment on, run and stop tasks and read
   deliverables through CueFlow's own MCP server. Approving stays in the dashboard.
 - **REST API**: everything the dashboard does, with a bearer token. [docs/api.md](docs/api.md)
