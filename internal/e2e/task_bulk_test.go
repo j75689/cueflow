@@ -1,8 +1,13 @@
 package e2e
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -108,6 +113,51 @@ func TestTaskBulk(t *testing.T) {
 	} {
 		if code := e.do("POST", "/tasks/bulk", body, nil); code != 400 {
 			t.Fatalf("%s: %d", name, code)
+		}
+	}
+}
+
+// A database error while looking a task up stops the batch as internal, not as not_found: the board
+// counts a delete's not_found as done, so a lookup that failed must not read as a task already gone.
+func TestTaskBulkStopsOnDatabaseError(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	var a, b store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "a"}, &a)
+	e.do("POST", "/tasks", map[string]any{"title": "b"}, &b)
+
+	// Another transaction holds the tasks table, so the lookup outlives the request's deadline.
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "LOCK TABLE tasks IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	rctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{"action": "delete", "ids": []string{a.ID.String(), b.ID.String()}})
+	req := httptest.NewRequestWithContext(rctx, "POST", "/api/v1/tasks/bulk", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.server.Handler().ServeHTTP(rec, req)
+	_ = tx.Rollback(ctx)
+
+	var res struct {
+		OK     []uuid.UUID `json:"ok"`
+		Failed []struct{ ID, Code string }
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); rec.Code != 200 || err != nil {
+		t.Fatalf("bulk delete: %d %s", rec.Code, rec.Body)
+	}
+	if len(res.OK) != 0 || len(res.Failed) != 2 || res.Failed[0].ID != a.ID.String() || res.Failed[0].Code != "internal" ||
+		res.Failed[1].ID != b.ID.String() || res.Failed[1].Code != "not_attempted" {
+		t.Fatalf("bulk delete under a lock: %+v", res)
+	}
+	for _, task := range []store.Task{a, b} {
+		if code := e.do("GET", "/tasks/"+task.ID.String(), nil, nil); code != 200 {
+			t.Fatalf("%s after the failed bulk delete: %d", task.Title, code)
 		}
 	}
 }

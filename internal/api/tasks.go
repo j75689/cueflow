@@ -245,11 +245,14 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 // both go through it.
 func (s *Server) deleteTaskOp(ctx context.Context, id uuid.UUID) error {
 	s.Crew.Cancel(id)
-	org := s.Store.TaskOrg(ctx, id)
+	t, err := s.Store.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.Store.DeleteTask(ctx, id); err != nil {
 		return err
 	}
-	s.Broker.Publish(org, "task.deleted", map[string]any{"id": id})
+	s.Broker.Publish(t.OrgID, "task.deleted", map[string]any{"id": id})
 	return nil
 }
 
@@ -298,13 +301,17 @@ func (s *Server) bulkTasks(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	apply := func(id uuid.UUID) error {
-		if s.Store.TaskOrg(ctx, id) != org.ID { // also uuid.Nil for a task that does not exist
+		t, err := s.Store.GetTask(ctx, id)
+		if err != nil {
+			return err
+		}
+		if t.OrgID != org.ID {
 			return domain.ErrNotFound
 		}
 		if req.Action == "delete" {
 			return s.deleteTaskOp(ctx, id)
 		}
-		_, err := s.updateTaskOp(ctx, id, store.TaskPatch{Status: &req.Status})
+		_, err = s.updateTaskOp(ctx, id, store.TaskPatch{Status: &req.Status})
 		return err
 	}
 	ok, failed := []uuid.UUID{}, []failure{}
