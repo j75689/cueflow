@@ -28,6 +28,8 @@ import { useAsync, useDebouncedCallback } from "@/lib/hooks";
 import type { Agent, Task, TaskStatus } from "@/lib/types";
 
 const DONE_WINDOW_MS = 14 * 24 * 3600 * 1000;
+// GET /tasks returns at most this many tasks (the server's default limit).
+const TASK_LIMIT = 500;
 const STEP = 1024;
 
 // Cards a column shows before "Show more"; finished columns grow every day.
@@ -59,7 +61,8 @@ function Board() {
     const needle = q.trim().toLowerCase();
     const now = Date.now();
     return (tasks.data?.items ?? []).filter((t) => {
-      if ((t.status === "DONE" || t.status === "CANCELED") && t.completed_at) {
+      // List mode keeps old finished cards, so they can be moved or deleted in bulk.
+      if (!listMode && (t.status === "DONE" || t.status === "CANCELED") && t.completed_at) {
         if (now - new Date(t.completed_at).getTime() > DONE_WINDOW_MS) return false;
       }
       if (filterAgent === "none" && t.assignee_agent_id) return false;
@@ -68,7 +71,7 @@ function Board() {
         return false;
       return true;
     });
-  }, [tasks.data, q, filterAgent]);
+  }, [tasks.data, q, filterAgent, listMode]);
 
   const byColumn = useMemo(() => {
     const m: Record<string, Task[]> = {};
@@ -248,13 +251,18 @@ function Board() {
       {tasks.loading && !tasks.data ? (
         <Loading />
       ) : listMode ? (
-        <BoardList
-          tasks={filtered}
-          all={tasks.data?.items ?? []}
-          category={category}
-          onCategory={showList}
-          onChanged={() => void tasks.reload()}
-        />
+        <>
+          {(tasks.data?.items.length ?? 0) >= TASK_LIMIT && (
+            <p className="mb-2 text-xs text-fg-3">Showing the first {TASK_LIMIT} tasks; some may be missing.</p>
+          )}
+          <BoardList
+            tasks={filtered}
+            all={tasks.data?.items ?? []}
+            category={category}
+            onCategory={showList}
+            onChanged={() => void tasks.reload()}
+          />
+        </>
       ) : (
         <div
           ref={boardRef}
