@@ -37,6 +37,7 @@ services:
       CUEFLOW_SECRET_KEY_PREVIOUS: ${CUEFLOW_SECRET_KEY_PREVIOUS:-}
       CUEFLOW_ADMIN_TOKEN: ${CUEFLOW_ADMIN_TOKEN:-}
       CUEFLOW_MCP_TOKEN: ${CUEFLOW_MCP_TOKEN:-}
+      CUEFLOW_MCP_REQUEST_TIMEOUT: ${CUEFLOW_MCP_REQUEST_TIMEOUT:-}
       CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
       # Where publishers fetch media stored in CueFlow; a publisher in this compose file reaches CueFlow by its service name.
       CUEFLOW_MEDIA_BASE_URL: ${CUEFLOW_MEDIA_BASE_URL:-http://cueflow:3000}

@@ -252,7 +252,7 @@ func serve() error {
 	}
 	apiSrv := &api.Server{
 		Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team,
-		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
+		Logger: logger, AdminToken: cfg.AdminToken, MCPToken: cfg.MCPToken, MCPRequestTimeout: cfg.MCPRequestTimeout, PublicURL: cfg.PublicURL, DirectURL: cfg.DirectURL,
 		Modules: modules,
 	}
 	if cfg.CFAccessTeamDomain != "" {

@@ -13,6 +13,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
+| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | 單一 MCP 請求（`/mcp`、`/mcp/run/…`）最長可開著的時間（Go duration，至少 `30s`）。屆時仍在執行的 run 或 agent token 工具呼叫（`/mcp/run/…`、用 agent token 的 `/mcp`）會在當下被取消；操作者 `/mcp` 的工具不受影響。client 斷線不會取消工具呼叫。請小於 Cloud Run 的 30 分鐘請求逾時；設 30 分鐘以上會在啟動時警告。這類請求中呼叫的工具連接器（例如 `mcp_tools` 伺服器的工具）若自身逾時晚於請求，會在請求結束前 5 秒先停止，並告訴 agent 是哪個上限到了；程序內的執行仍照連接器自己的逾時 |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |

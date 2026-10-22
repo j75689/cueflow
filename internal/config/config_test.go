@@ -13,7 +13,7 @@ func base(t *testing.T) {
 	for _, k := range []string{"CUEFLOW_QUEUE", "CUEFLOW_TICK", "CUEFLOW_TASKS_QUEUE", "CUEFLOW_TASKS_TARGET_URL",
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
-		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT"} {
+		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -173,6 +173,41 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 		}
 		if c.PubSubDeleteTimeout != tc.want || tc.warn != (len(c.Warnings) > 0) {
 			t.Errorf("%q: %v, warnings %v", tc.v, c.PubSubDeleteTimeout, c.Warnings)
+		}
+	}
+}
+
+func TestMCPRequestTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want time.Duration
+		warn bool
+		err  bool
+	}{
+		{v: "", want: 10 * time.Minute},
+		{v: "5m", want: 5 * time.Minute},
+		{v: "29m", want: 29 * time.Minute},
+		{v: "30m", want: 30 * time.Minute, warn: true},
+		{v: "1h", want: time.Hour, warn: true},
+		{v: "30s", want: 30 * time.Second},
+		{v: "29s", err: true},
+		{v: "0", err: true},
+		{v: "-1m", err: true},
+	} {
+		base(t)
+		t.Setenv("CUEFLOW_MCP_REQUEST_TIMEOUT", tc.v)
+		c, err := Load()
+		if tc.err {
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MCP_REQUEST_TIMEOUT") {
+				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: %v", tc.v, err)
+		}
+		if c.MCPRequestTimeout != tc.want || tc.warn != (len(c.Warnings) > 0) {
+			t.Errorf("%q: %v, warnings %v", tc.v, c.MCPRequestTimeout, c.Warnings)
 		}
 	}
 }

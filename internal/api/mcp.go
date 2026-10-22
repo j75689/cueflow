@@ -40,7 +40,7 @@ func (s *Server) mcpHandler() http.Handler {
 		}
 		return operator
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	serve := mcpx.NoStandaloneStream(h) // no GET stream held open (Cloud Run bills an open request)
+	serve := mcpx.Stateless(h, s.MCPRequestTimeout) // no request held open (Cloud Run bills one, and each takes a slot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		// An agent token acts as that agent: it sees and works only that agent's tasks.
@@ -134,6 +134,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Title: "CueFlow", Version: version.Version}, &mcp.ServerOptions{
 		Instructions: strings.Join(instructions, " "),
+		Capabilities: mcpx.StatelessCapabilities(),
 	})
 	tool := MCPTool
 

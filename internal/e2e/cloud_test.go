@@ -253,7 +253,7 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 
 	b := crew.New(e.store, hub.New(e.store, logger), events.NewBroker(), logger, false)
 	mux := http.NewServeMux()
-	mux.Handle(crew.MCPPathPrefix, b.MCPHandler())
+	mux.Handle(crew.MCPPathPrefix, b.MCPHandler(0))
 	instanceB := httptest.NewServer(mux)
 	defer instanceB.Close()
 

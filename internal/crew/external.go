@@ -15,6 +15,7 @@ import (
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/jobs"
+	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -103,13 +104,58 @@ func (c *Crew) callExternal(ctx context.Context, id uuid.UUID, name string, args
 	if !ok {
 		return "", false, errors.New("not a tool server")
 	}
-	timeout := externalCallTimeout
-	if t, ok := inst.(interface{ CallTimeout() time.Duration }); ok && t.CallTimeout() > timeout {
-		timeout = t.CallTimeout()
+	own := externalCallTimeout
+	if t, ok := inst.(interface{ CallTimeout() time.Duration }); ok && t.CallTimeout() > own {
+		own = t.CallTimeout()
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	timeout, byRequest := externalTimeout(ctx, own)
+	budgetErr := fmt.Errorf("the call to %s was stopped: this MCP request's time (CUEFLOW_MCP_REQUEST_TIMEOUT) ran out before the tool's own %s limit", name, own)
+	if timeout <= 0 {
+		return "", false, budgetErr
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return p.CallTool(ctx, name, args)
+	text, isErr, err := p.CallTool(callCtx, name, args)
+	if byRequest && errors.Is(callCtx.Err(), context.DeadlineExceeded) && (err != nil || isErr) {
+		return "", false, fmt.Errorf("%w (stopped after %s)", budgetErr, timeout.Round(time.Second))
+	}
+	return text, isErr, err
+}
+
+// requestBudgetKey marks a tool call served over MCP (/mcp/run, or /mcp with an agent token): its
+// ctx deadline is the request's (CUEFLOW_MCP_REQUEST_TIMEOUT), which a connector call must end
+// before, so the agent gets an answer rather than a request cut off.
+type requestBudgetKey struct{}
+
+func withRequestBudget(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requestBudgetKey{}, true)
+}
+
+// mcpToolContext is the ctx a tool call served over MCP runs on: its request's deadline, which the SDK
+// does not pass on (mcpx.RequestContext), marked as the request's budget.
+func mcpToolContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := mcpx.RequestContext(ctx)
+	return withRequestBudget(ctx), cancel
+}
+
+// requestBudgetMargin is left of the request's time for the answer to reach the agent.
+const requestBudgetMargin = 5 * time.Second
+
+// externalTimeout is how long a connector call may take: its own timeout, or for a call served over
+// MCP, what is left of the request less requestBudgetMargin if that is shorter (byRequest).
+// In-process runs keep the connector's own timeout, whatever their ctx's deadline.
+func externalTimeout(ctx context.Context, own time.Duration) (d time.Duration, byRequest bool) {
+	if ctx.Value(requestBudgetKey{}) == nil {
+		return own, false
+	}
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return own, false
+	}
+	if left := time.Until(dl) - requestBudgetMargin; left < own {
+		return left, true
+	}
+	return own, false
 }
 
 // externalRun calls the MCP tool name on connID; calledAs is the name the agent knows it by.

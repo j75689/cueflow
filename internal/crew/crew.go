@@ -671,14 +671,15 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 		res = "error: " + err.Error()
 	} else if t.saveLarge {
 		// Before the result reaches the model: what it sees is the stub, from the first time on.
-		if stub, name, ok := c.saveLargeResult(ctx, env.task.ID, env.agent.Slug, call.Name, call.Arguments, res); ok {
+		if stub, name, ok := c.saveLargeResult(context.WithoutCancel(ctx), env.task.ID, env.agent.Slug, call.Name, call.Arguments, res); ok {
 			res = stub
 			data["file"] = name
 		}
 	}
 	res = clipToolResult(res)
 	if !quietTools[call.Name] {
-		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
+		// Not with ctx: a call cut off by its request's deadline still leaves its result in the thread.
+		c.say(context.WithoutCancel(ctx), env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
 	}
 	return res, isErr
 }
