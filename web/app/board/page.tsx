@@ -49,11 +49,19 @@ function Board() {
   const [filterAgent, setFilterAgent] = useState<string | "none" | null>(null);
   const [q, setQ] = useState("");
   const [newFor, setNewFor] = useState<TaskStatus | null>(null);
-  // A new search or agent filter starts List mode over at page 1.
-  const search = (v: string) => {
-    setQ(v);
-    if (listMode && page > 1) showList(category.key);
-  };
+  // List mode searches the server once typing pauses, not on every key; a new search or agent filter
+  // starts it over at page 1. The search resets the page with the query it applies, so no page is
+  // fetched with the old query.
+  const [query, setQuery] = useState(q);
+  useEffect(() => {
+    if (q === query) return;
+    const t = setTimeout(() => {
+      setQuery(q);
+      if (listMode && page > 1) showList(category.key);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, listMode, page, category.key]);
   const pickAgent = (a: string | "none" | null) => {
     setFilterAgent(a);
     if (listMode && page > 1) showList(category.key);
@@ -231,7 +239,7 @@ function Board() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input
           value={q}
-          onChange={(e) => search(e.target.value)}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="Search tasks or #number…"
           className="w-full max-w-xs"
         />
@@ -266,7 +274,7 @@ function Board() {
           page={page}
           onCategory={showList}
           onPage={(n) => showList(category.key, n)}
-          q={q}
+          q={query}
           assignee={filterAgent}
         />
       ) : tasks.loading && !tasks.data ? (

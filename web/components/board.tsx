@@ -97,7 +97,7 @@ export function subtasksUnder(chosen: Task[], all: Task[]): { count: number; par
 
 // BoardList is the board's list mode: one category's cards as rows, a page at a time from the server
 // (filtered by q and assignee there), ticked ones moved or deleted with one bulk request. page is
-// 1-based.
+// 1-based; q comes already debounced.
 export function BoardList({
   category,
   page,
@@ -118,13 +118,6 @@ export function BoardList({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<"move" | "delete" | null>(null);
 
-  // Typing searches once it pauses, not on every key.
-  const [query, setQuery] = useState(q);
-  useEffect(() => {
-    const t = setTimeout(() => setQuery(q), 300);
-    return () => clearTimeout(t);
-  }, [q]);
-
   const finished = category.key === "done" || category.key === "canceled";
   const list = useAsync(
     () =>
@@ -132,13 +125,13 @@ export function BoardList({
         status: category.statuses,
         all: true,
         sort: finished ? "recent" : "position",
-        q: query,
+        q,
         assignee: assignee ?? undefined,
         limit: LIST_PAGE,
         offset: (page - 1) * LIST_PAGE,
         counts: true,
       }),
-    [category.key, page, query, assignee],
+    [category.key, page, q, assignee],
   );
   // A bulk action sends one event per card; one reload covers them all, and a steady stream still
   // reloads every second.
@@ -150,14 +143,16 @@ export function BoardList({
   const from = (page - 1) * LIST_PAGE;
   const range = `${from + 1}–${from + rows.length} of ${total}`;
 
-  // Past the last page (its cards were all moved or deleted): show the new last page.
+  // Past the last page (its cards were all moved or deleted): show the new last page. The count can
+  // run ahead of the empty page (a delete between the two queries), so always step back at least one.
   useEffect(() => {
-    if (list.data && !list.data.items.length && page > 1 && total > 0) onPage(Math.ceil(total / LIST_PAGE));
+    if (list.data && !list.data.items.length && page > 1)
+      onPage(Math.max(1, Math.min(page - 1, Math.ceil(total / LIST_PAGE))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.data]);
 
   // Another category, page, search or agent starts with nothing ticked.
-  useEffect(() => setSelected(new Set()), [category.key, page, query, assignee]);
+  useEffect(() => setSelected(new Set()), [category.key, page, q, assignee]);
   // A filter, a search or a live update that drops a row drops it from the selection too.
   useEffect(() => {
     setSelected((cur) => {
@@ -380,10 +375,10 @@ export function BoardList({
       {total > LIST_PAGE && (
         <nav aria-label="Pages" className="mt-3 flex items-center justify-end gap-2">
           <span className="text-xs tabular-nums text-fg-3">{range}</span>
-          <Button size="sm" onClick={() => onPage(page - 1)} disabled={page <= 1 || list.loading}>
+          <Button size="sm" onClick={() => onPage(page - 1)} disabled={page <= 1}>
             Previous
           </Button>
-          <Button size="sm" onClick={() => onPage(page + 1)} disabled={from + rows.length >= total || list.loading}>
+          <Button size="sm" onClick={() => onPage(page + 1)} disabled={from + rows.length >= total}>
             Next
           </Button>
         </nav>
