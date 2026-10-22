@@ -539,6 +539,17 @@ func (s *Store) TaskRunID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	return runID, NotFound(err)
 }
 
+// HoldsClaim reports whether runID still holds the task's latest claim (see Claim). A task that is
+// gone is held by no one.
+func (s *Store) HoldsClaim(ctx context.Context, id, runID uuid.UUID) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(run_id = $2, false) FROM tasks WHERE id=$1`, id, runID).Scan(&ok)
+	if NotFound(err) == domain.ErrNotFound {
+		return false, nil
+	}
+	return ok, err
+}
+
 // AdoptTaskRun records a running run as its task's claim when the claim recorded none (it was made
 // by a version that didn't), so the run is fenced like any other from then on.
 func (s *Store) AdoptTaskRun(ctx context.Context, id, runID uuid.UUID) error {

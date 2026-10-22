@@ -109,38 +109,9 @@ func TestRunnerRunIsHandedOverToTheNextDelivery(t *testing.T) {
 	e := setup(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e.crew.MCPBaseURL = e.api.URL
 	q := &fakeQueue{}
 	e.crew.Queue = q
-
-	var pool store.Connector
-	if code := e.do("POST", "/connectors", map[string]any{"name": "Laptop", "type": "runner_pool", "config": map[string]any{
-		"preset": "custom", "labels": []string{"fake"}, "timeout_minutes": 1,
-	}}, &pool); code != 201 {
-		t.Fatalf("create runner pool: %d", code)
-	}
-	var agent store.Agent
-	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer",
-		"capabilities": []string{"post_deliverables"}, "runtime_connector_id": pool.ID}, &agent); code != 201 {
-		t.Fatalf("create agent: %d", code)
-	}
-	var reg struct {
-		Token string `json:"token"`
-	}
-	e.do("POST", "/runners/registrations", map[string]any{"labels": []string{"fake"}}, &reg)
-	cfgPath := t.TempDir() + "/runner.json"
-	if err := runner.Main([]string{"register", "--url", e.api.URL, "--token", reg.Token, "--name", "box", "--config", cfgPath}, "test"); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := runner.LoadConfig(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Commands = map[string]string{"custom": os.Args[0]}
-	cfg.Env = map[string]string{"CUEFLOW_FAKE_ACP": "1", "CUEFLOW_FAKE_ACP_DELAY": "5s"}
-	every := 1
-	cfg.PollInterval = &every
-	go func() { _ = runner.New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx) }()
+	agent := slowRunnerAgent(ctx, t, e)
 
 	var task store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
@@ -170,4 +141,41 @@ func TestRunnerRunIsHandedOverToTheNextDelivery(t *testing.T) {
 		runs[0].Status != "SUCCEEDED" || len(jobs_) != 1 || strings.Contains(thread, "Stopped.") {
 		t.Fatalf("after the second delivery: %s %q, runs %+v, jobs %+v:\n%s", got.Status, got.Result, runs, jobs_, thread)
 	}
+}
+
+// slowRunnerAgent is an agent on a runner pool whose (fake ACP) agent takes 5 s before it does
+// anything, with a registered runner polling for its jobs until ctx ends.
+func slowRunnerAgent(ctx context.Context, t *testing.T, e *env) store.Agent {
+	t.Helper()
+	e.crew.MCPBaseURL = e.api.URL
+	var pool store.Connector
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Laptop", "type": "runner_pool", "config": map[string]any{
+		"preset": "custom", "labels": []string{"fake"}, "timeout_minutes": 1,
+	}}, &pool); code != 201 {
+		t.Fatalf("create runner pool: %d", code)
+	}
+	var agent store.Agent
+	if code := e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer",
+		"capabilities": []string{"post_deliverables"}, "runtime_connector_id": pool.ID}, &agent); code != 201 {
+		t.Fatalf("create agent: %d", code)
+	}
+	var reg struct {
+		Token string `json:"token"`
+	}
+	e.do("POST", "/runners/registrations", map[string]any{"labels": []string{"fake"}}, &reg)
+	cfgPath := t.TempDir() + "/runner.json"
+	if err := runner.Main([]string{"register", "--url", e.api.URL, "--token", reg.Token, "--name", "box", "--config", cfgPath}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := runner.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Commands = map[string]string{"custom": os.Args[0]}
+	cfg.Env = map[string]string{"CUEFLOW_FAKE_ACP": "1", "CUEFLOW_FAKE_ACP_DELAY": "5s"}
+	every := 1
+	cfg.PollInterval = &every
+	go func() { _ = runner.New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx) }()
+
+	return agent
 }

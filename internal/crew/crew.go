@@ -69,7 +69,7 @@ type Crew struct {
 	DeliveryLimit time.Duration
 
 	mu      sync.Mutex
-	running map[uuid.UUID]context.CancelCauseFunc
+	running map[uuid.UUID]*runSlot
 	wake    chan struct{}
 	wg      sync.WaitGroup
 }
@@ -78,7 +78,7 @@ func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, all
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
 		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
 		Lease: 2 * time.Minute, Every: 2 * time.Second, DeliveryLimit: 30 * time.Minute,
-		running: map[uuid.UUID]context.CancelCauseFunc{}, wake: make(chan struct{}, 1)}
+		running: map[uuid.UUID]*runSlot{}, wake: make(chan struct{}, 1)}
 }
 
 func (c *Crew) Wake() {
@@ -100,8 +100,8 @@ func (c *Crew) Wake() {
 func (c *Crew) Cancel(taskID uuid.UUID) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if cancel, ok := c.running[taskID]; ok {
-		cancel(errStopped)
+	if slot, ok := c.running[taskID]; ok {
+		slot.cancel(errStopped)
 		return true
 	}
 	return false
@@ -147,16 +147,12 @@ func (c *Crew) dispatch(ctx context.Context) {
 func (c *Crew) start(ctx context.Context, cl store.Claim) {
 	id := cl.ID
 	runCtx, cancel := context.WithCancelCause(ctx)
-	c.mu.Lock()
-	c.running[id] = cancel
-	c.mu.Unlock()
+	untrack := c.track(id, cancel)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		defer func() {
-			c.mu.Lock()
-			delete(c.running, id)
-			c.mu.Unlock()
+			untrack()
 			cancel(nil)
 			c.Wake()
 		}()
@@ -221,16 +217,29 @@ func (c *Crew) runNow(ctx context.Context, cl store.Claim) {
 // tracked runs work for task id synchronously, where Cancel can stop it.
 func (c *Crew) tracked(ctx context.Context, id uuid.UUID, work func(context.Context)) {
 	runCtx, cancel := context.WithCancelCause(ctx)
-	c.mu.Lock()
-	c.running[id] = cancel
-	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		delete(c.running, id)
-		c.mu.Unlock()
-		cancel(nil)
-	}()
+	defer cancel(nil)
+	defer c.track(id, cancel)()
 	work(runCtx)
+}
+
+// runSlot is a run's entry in c.running; its address tells the run's own entry from a newer one.
+type runSlot struct{ cancel context.CancelCauseFunc }
+
+// track records a run of task id as running here, where Cancel can stop it. The returned func
+// removes the entry, unless a newer run of the same task (the task claimed again while this run
+// was stalled) has replaced it.
+func (c *Crew) track(id uuid.UUID, cancel context.CancelCauseFunc) func() {
+	slot := &runSlot{cancel: cancel}
+	c.mu.Lock()
+	c.running[id] = slot
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		if c.running[id] == slot {
+			delete(c.running, id)
+		}
+		c.mu.Unlock()
+	}
 }
 
 // Sweep is the crew's part of the external clock: it returns interrupted tasks to the board and
@@ -383,6 +392,7 @@ func (c *Crew) runTask(ctx context.Context, cl store.Claim) {
 	}
 	ctx, cancelRun := context.WithCancelCause(ctx)
 	defer cancelRun(nil)
+	ctx = withRunStop(ctx, cancelRun)
 	stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.ID)
 	defer stopBeat()
 
@@ -401,8 +411,10 @@ func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run
 	bg := context.WithoutCancel(ctx)
 	if out.kind == "handover" {
 		stopBeat()
-		c.handOver(bg, task, run)
-		return
+		if c.handOver(bg, task, run) {
+			return
+		}
+		out = &outcome{kind: "canceled"} // stopped by a human, or the claim was lost (finish then records only the run)
 	}
 	if ctx.Err() != nil {
 		out = stopped(ctx)
@@ -465,7 +477,7 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 		byName[t.name] = t
 		llmTools = append(llmTools, llm.Tool{Name: t.name, Description: t.description, Schema: t.schema})
 	}
-	env := &runEnv{c: c, task: task, agent: a}
+	env := &runEnv{c: c, task: task, agent: a, runID: &run.ID, stop: runStop(ctx)}
 	defer func() {
 		if env.searcher != nil {
 			hub.Close(env.searcher)
@@ -596,6 +608,20 @@ var loggedArgs = map[string]func(map[string]any) map[string]any{
 var quietTools = map[string]bool{"add_comment": true, "ask_human": true, "complete_task": true}
 
 func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool, call llm.ToolCall) (string, bool) {
+	// A run that lost its task's claim (it stalled past its lease and the task was claimed again)
+	// must not act on the task before its heartbeat notices: it stops here, writing nothing. This is a
+	// check before the call, not part of each write: what the tool does is not undone if the claim is
+	// lost while it runs (the irreversible actions wait for a human anyway, as deliverables or tool
+	// approvals). Not here: a self-driven agent's calls (runID nil), and RunApproval, which makes a
+	// call a human approved rather than one a live run makes.
+	if env.runID != nil {
+		if held, err := c.store.HoldsClaim(context.WithoutCancel(ctx), env.task.ID, *env.runID); err == nil && !held {
+			if env.stop != nil {
+				env.stop(errStopped)
+			}
+			return "This run no longer holds the task: it was claimed again by another run. Stop working.", true
+		}
+	}
 	t, ok := byName[call.Name]
 	if !ok {
 		// Models often call an MCP tool by its bare name ("render_reel" for "reels_renderer__render_reel").

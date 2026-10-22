@@ -112,23 +112,25 @@ func (s *Store) TodoTaskCount(ctx context.Context) (int, error) {
 // RunToken is the database record behind a per-run MCP URL.
 type RunToken struct {
 	TaskID, AgentID uuid.UUID
+	// RunID is the agent run the token serves (see HoldsClaim); nil for tokens from before it was kept.
+	RunID *uuid.UUID
 	// Outcome is what a terminal tool call decided ({"kind","text"}); nil while the run is open.
 	Outcome json.RawMessage
 }
 
 // CreateRunToken registers a run's MCP credential. The caller puts the returned plain token in the URL.
-func (s *Store) CreateRunToken(ctx context.Context, taskID, agentID uuid.UUID, ttl time.Duration) (string, error) {
+func (s *Store) CreateRunToken(ctx context.Context, taskID, agentID uuid.UUID, runID *uuid.UUID, ttl time.Duration) (string, error) {
 	plain, hash := NewToken("cfm_")
-	_, err := s.pool.Exec(ctx, `INSERT INTO run_tokens (token_hash, task_id, agent_id, expires_at)
-		VALUES ($1,$2,$3, NOW() + make_interval(secs => $4))`, hash, taskID, agentID, ttl.Seconds())
+	_, err := s.pool.Exec(ctx, `INSERT INTO run_tokens (token_hash, task_id, agent_id, run_id, expires_at)
+		VALUES ($1,$2,$3,$4, NOW() + make_interval(secs => $5))`, hash, taskID, agentID, runID, ttl.Seconds())
 	return plain, err
 }
 
 // RunTokenByPlain resolves a token from an MCP URL; it is ErrNotFound once expired or deleted.
 func (s *Store) RunTokenByPlain(ctx context.Context, plain string) (*RunToken, error) {
 	t := &RunToken{}
-	err := s.pool.QueryRow(ctx, `SELECT task_id, agent_id, outcome FROM run_tokens
-		WHERE token_hash=$1 AND expires_at > NOW()`, HashToken(plain)).Scan(&t.TaskID, &t.AgentID, &t.Outcome)
+	err := s.pool.QueryRow(ctx, `SELECT task_id, agent_id, run_id, outcome FROM run_tokens
+		WHERE token_hash=$1 AND expires_at > NOW()`, HashToken(plain)).Scan(&t.TaskID, &t.AgentID, &t.RunID, &t.Outcome)
 	if err != nil {
 		return nil, NotFound(err)
 	}

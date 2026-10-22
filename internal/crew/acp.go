@@ -75,7 +75,7 @@ func (c *Crew) acpLoop(ctx context.Context, task *store.Task, a *store.Agent, ru
 		return &outcome{kind: "error", text: "MCP base URL is not configured"}
 	}
 
-	env := &runEnv{c: c, task: task, agent: a}
+	env := &runEnv{c: c, task: task, agent: a, runID: &run.ID, stop: runStop(ctx)}
 	token, mrun, unregister := c.registerMCPRun(ctx, env)
 	defer unregister()
 	defer func() {

@@ -42,6 +42,18 @@ func stopped(ctx context.Context) *outcome {
 
 type deliveryKey struct{}
 
+// runStopKey carries the cancel func of the run a context belongs to, so its tool calls can stop it.
+type runStopKey struct{}
+
+func withRunStop(ctx context.Context, stop context.CancelCauseFunc) context.Context {
+	return context.WithValue(ctx, runStopKey{}, stop)
+}
+
+func runStop(ctx context.Context) context.CancelCauseFunc {
+	stop, _ := ctx.Value(runStopKey{}).(context.CancelCauseFunc)
+	return stop
+}
+
 type delivery struct {
 	start time.Time
 	limit time.Duration
@@ -70,15 +82,27 @@ func handOverAt(ctx context.Context) (time.Time, bool) {
 const handOverLease = 10 * time.Minute
 
 // handOver leaves a runner run running for the next delivery: the task keeps its lease, the run is
-// marked for ClaimHandedOverRuns, and a delivery is queued.
-func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentRun) {
-	if _, err := c.store.ExtendTaskLease(ctx, task.ID, run.ID, handOverLease); err != nil {
+// marked for ClaimHandedOverRuns, and a delivery is queued. It reports false, having stopped the
+// runner job, when the run no longer holds the task's claim (a human stopped or moved the task, or it
+// was claimed again): the run then ends here.
+func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentRun) bool {
+	ok, err := c.store.ExtendTaskLease(ctx, task.ID, run.ID, handOverLease)
+	if err != nil {
 		c.logger.Warn("hand over run: lease", "task", task.ID, "err", err)
+	} else if !ok {
+		if job, err := c.store.RunnerJobForRun(ctx, run.ID); err == nil {
+			c.stopRunnerJob(ctx, job.ID, 5*time.Second)
+			var payload runnerapi.Job
+			_ = json.Unmarshal(job.Payload, &payload)
+			_ = c.store.DeleteRunToken(ctx, strings.TrimPrefix(payload.MCPPath, MCPPathPrefix))
+		}
+		return false
 	}
 	if err := c.store.HandOverAgentRun(ctx, run.ID); err != nil {
 		c.logger.Error("hand over run", "task", task.ID, "err", err)
 	}
 	c.Wake()
+	return true
 }
 
 // resumeRun keeps watching a runner run an earlier delivery handed over.
@@ -106,6 +130,7 @@ func (c *Crew) resumeRun(ctx context.Context, runID uuid.UUID) {
 	c.tracked(ctx, task.ID, func(ctx context.Context) {
 		ctx, cancelRun := context.WithCancelCause(ctx)
 		defer cancelRun(nil)
+		ctx = withRunStop(ctx, cancelRun)
 		if ok, _ := c.store.ExtendTaskLease(bg, task.ID, run.ID, c.Lease); !ok {
 			cancelRun(errStopped) // a human stopped or moved the task between deliveries, or it was claimed again
 		}
@@ -140,6 +165,10 @@ func (c *Crew) rewatchRunner(ctx context.Context, task *store.Task, a *store.Age
 		c.stopRunnerJob(context.WithoutCancel(ctx), job.ID, 5*time.Second)
 		return &outcome{kind: "error", text: "the run's tool server could not be restored"}
 	}
+	// This instance owns the run again: a tool call that finds the claim lost stops it at once.
+	mrun.mu.Lock()
+	mrun.env.runID, mrun.env.stop = &run.ID, runStop(ctx)
+	mrun.mu.Unlock()
 	go c.watchOutcome(ctx, mrun)
 	handedOver := false
 	defer func() {

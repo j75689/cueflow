@@ -33,7 +33,7 @@ const runnerPoll = time.Second
 // same as acpLoop's; only the agent process lives elsewhere. It queues a job, then waits for the
 // runner to finish it, for a terminal tool call, for cancellation, or for the job to be lost.
 func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, pool runnerPool) *outcome {
-	env := &runEnv{c: c, task: task, agent: a}
+	env := &runEnv{c: c, task: task, agent: a, runID: &run.ID, stop: runStop(ctx)}
 	token, mrun, unregister := c.registerMCPRun(ctx, env)
 	handedOver := false
 	defer func() {

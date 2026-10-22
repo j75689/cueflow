@@ -256,7 +256,7 @@ func (c *Crew) selfDrivenEnv(task *store.Task, a *store.Agent) *runEnv {
 	if v, ok := c.selfEnvs.Load(task.ID); ok {
 		return v.(*runEnv)
 	}
-	env := &runEnv{c: c, task: task, agent: a}
+	env := &runEnv{c: c, task: task, agent: a} // runID nil: not fenced, see runEnv
 	c.selfEnvs.Store(task.ID, env)
 	return env
 }

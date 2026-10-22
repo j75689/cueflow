@@ -34,9 +34,16 @@ type outcome struct {
 }
 
 type runEnv struct {
-	c        *Crew
-	task     *store.Task
-	agent    *store.Agent
+	c     *Crew
+	task  *store.Task
+	agent *store.Agent
+	// runID is the run working the task's claim: every tool call checks the run still holds it
+	// (execTool). nil is not fenced: a self-driven agent's calls (the claim is the agent's, see
+	// ExtendAgentTaskLease) and run tokens from before the run was recorded on them.
+	runID *uuid.UUID
+	// stop cancels the run when a tool call finds the claim lost; nil where the instance serving the
+	// call doesn't own the run (its heartbeat stops it there).
+	stop     context.CancelCauseFunc
 	outcome  *outcome
 	subtasks int
 	counts   map[string]int // per-run counters of module tools (see Run.Inc)
