@@ -248,7 +248,13 @@ function Board() {
       {tasks.loading && !tasks.data ? (
         <Loading />
       ) : listMode ? (
-        <BoardList tasks={filtered} category={category} onCategory={showList} onChanged={() => void tasks.reload()} />
+        <BoardList
+          tasks={filtered}
+          all={tasks.data?.items ?? []}
+          category={category}
+          onCategory={showList}
+          onChanged={() => void tasks.reload()}
+        />
       ) : (
         <div
           ref={boardRef}

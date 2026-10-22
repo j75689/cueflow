@@ -62,15 +62,47 @@ export function FilterChip({ active, onClick, children }: { active: boolean; onC
   );
 }
 
+// subtasksUnder counts the tasks a delete of chosen takes with it. A delete removes a task's whole
+// subtree, so it walks parent_id over all (the board's unfiltered list) and counts every descendant
+// once; a chosen card under another chosen card is already in the chosen count. all stops at the
+// server's row limit, so a parent with more subtasks than all holds adds the missing children and
+// marks the count partial: their own subtasks can't be seen.
+export function subtasksUnder(chosen: Task[], all: Task[]): { count: number; partial: boolean } {
+  const children = new Map<string, Task[]>();
+  for (const t of all) if (t.parent_id) children.set(t.parent_id, [...(children.get(t.parent_id) ?? []), t]);
+  const seen = new Set(chosen.map((t) => t.id));
+  const queue = [...chosen];
+  let count = 0;
+  let partial = false;
+  for (const t of queue) {
+    const kids = children.get(t.id) ?? [];
+    const missing = (t.subtask_counts?.total ?? 0) - kids.length;
+    if (missing > 0) {
+      count += missing;
+      partial = true;
+    }
+    for (const c of kids) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      count++;
+      queue.push(c);
+    }
+  }
+  return { count, partial };
+}
+
 // BoardList is the board's list mode: one category's cards as rows, ticked ones moved or deleted
-// with one bulk request. tasks is the board's filtered list (agent, search, finished window).
+// with one bulk request. tasks is the board's filtered list (agent, search); all is every task the
+// board loaded, for counting what a delete takes with it.
 export function BoardList({
   tasks,
+  all,
   category,
   onCategory,
   onChanged,
 }: {
   tasks: Task[];
+  all: Task[];
   category: Column;
   onCategory: (key: string) => void;
   onChanged: () => void;
@@ -154,13 +186,10 @@ export function BoardList({
   };
 
   const remove = async () => {
-    // A chosen subtask of a chosen card is already in the title's count, not one more under it.
-    const ids = new Set(chosen.map((t) => t.id));
-    const subtasks =
-      chosen.reduce((n, t) => n + (t.subtask_counts?.total ?? 0), 0) -
-      chosen.filter((t) => t.parent_id && ids.has(t.parent_id)).length;
+    const { count: subtasks, partial } = subtasksUnder(chosen, all);
     let message = "Their conversations and files are deleted too.";
-    if (subtasks > 0) message += ` ${plural(subtasks, "subtask")} under them ${subtasks === 1 ? "is" : "are"} deleted as well.`;
+    if (subtasks > 0)
+      message += ` ${partial ? "At least " : ""}${plural(subtasks, "subtask")} under them ${subtasks === 1 ? "is" : "are"} deleted as well.`;
     if (running > 0) message += ` ${plural(running, "running agent")} ${running === 1 ? "is" : "are"} stopped.`;
     if (
       !(await dialog.confirm({
