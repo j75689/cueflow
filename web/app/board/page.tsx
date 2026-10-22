@@ -48,8 +48,9 @@ function Board() {
   const [newFor, setNewFor] = useState<TaskStatus | null>(null);
 
   const tasks = useAsync(() => api.listTasks({ all: true }), []);
-  // A bulk action sends one event per card; one reload covers them all.
-  const reload = useDebouncedCallback(() => void tasks.reload(), 250);
+  // A bulk action sends one event per card; one reload covers them all, and a steady stream still
+  // reloads every second.
+  const reload = useDebouncedCallback(() => void tasks.reload(), 250, 1000);
   useServerEvent(["task.updated", "task.deleted"], reload);
 
   const columns = showCanceled ? [...COLUMNS, CANCELED_COLUMN] : COLUMNS;
@@ -184,7 +185,7 @@ function Board() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Board"
-        subtitle="Assign tasks to agents and track their work. Drag cards between columns."
+        subtitle={`Assign tasks to agents and track their work. ${listMode ? "Select cards to move or delete them." : "Drag cards between columns."}`}
         actions={
           <>
             <div className="inline-flex rounded-md border border-line-strong p-0.5" role="group" aria-label="View">
