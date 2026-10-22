@@ -118,7 +118,7 @@ func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runE
 			c.stopRunnerJob(ctx, job.ID, 20*time.Second)
 			return c.acpOutcome(ctx, run, env, acpdrive.Result{}, timeout)
 		case <-handOver:
-			return &outcome{kind: "handover"}
+			return &outcome{kind: "handover", job: job.ID, token: mrun.token}
 		case <-t.C:
 		}
 		cur, err := c.store.GetRunnerJob(ctx, job.ID)

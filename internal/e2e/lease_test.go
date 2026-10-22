@@ -202,42 +202,59 @@ func TestStalledRunsToolCallIsRefused(t *testing.T) {
 }
 
 // The same through a run's MCP tool server, which runner and ACP agents call: a call made once the
-// run lost the claim is refused, whichever instance serves it.
+// run may no longer act on the task (claimed again, or stopped by a human) is refused, whichever
+// instance serves it, and ends the run: its outcome is recorded on the token for the instance that
+// owns the run, and later calls are told the run is over.
 func TestMCPToolCallIsRefusedOnceTheClaimIsLost(t *testing.T) {
-	e, team := crewSetup(t)
-	ctx := context.Background()
-	var task store.Task
-	e.do("POST", "/tasks", map[string]any{"title": "Remote", "assignee_agent_id": team["chief"].ID}, &task)
-	cl := claim(t, e, task)
-	token, err := e.store.CreateRunToken(ctx, task.ID, team["chief"].ID, &cl.RunID, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs, err := mcpx.Connect(ctx, mcpx.Options{Transport: mcpx.TransportStreamable,
-		Endpoint: e.api.URL + crew.MCPPathPrefix + token, HTTPClient: &http.Client{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cs.Close()
-	comment := func(text string) bool {
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "add_comment", Arguments: map[string]any{"content": text}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res.IsError
-	}
+	for _, tc := range []struct{ name, lose string }{
+		{"claimed again", `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`},
+		{"stopped by a human", `UPDATE tasks SET status = 'CANCELED' WHERE id=$1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, team := crewSetup(t)
+			ctx := context.Background()
+			var task store.Task
+			e.do("POST", "/tasks", map[string]any{"title": "Remote", "assignee_agent_id": team["chief"].ID}, &task)
+			cl := claim(t, e, task)
+			token, err := e.store.CreateRunToken(ctx, task.ID, team["chief"].ID, &cl.RunID, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cs, err := mcpx.Connect(ctx, mcpx.Options{Transport: mcpx.TransportStreamable,
+				Endpoint: e.api.URL + crew.MCPPathPrefix + token, HTTPClient: &http.Client{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cs.Close()
+			comment := func(text string) (string, bool) {
+				res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "add_comment", Arguments: map[string]any{"content": text}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return res.Content[0].(*mcp.TextContent).Text, res.IsError
+			}
 
-	if comment("while holding the claim") {
-		t.Fatal("the claim's run was refused")
-	}
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
-		t.Fatal(err)
-	}
-	if !comment("after losing it") {
-		t.Fatal("a run that lost the claim was let through")
-	}
-	if thread := threadText(t, e, task.ID.String()); !strings.Contains(thread, "while holding the claim") || strings.Contains(thread, "after losing it") {
-		t.Fatalf("thread:\n%s", thread)
+			if _, refused := comment("while holding the claim"); refused {
+				t.Fatal("the claim's run was refused")
+			}
+			if _, err := e.pool.Exec(ctx, tc.lose, task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, refused := comment("after losing it"); !refused {
+				t.Fatal("a run that lost the claim was let through")
+			}
+			rt, err := e.store.RunTokenByPlain(ctx, token)
+			if err != nil || !strings.Contains(string(rt.Outcome), `"canceled"`) {
+				t.Fatalf("the refusal should end the run on its token: %s %v", rt.Outcome, err)
+			}
+			if text, refused := comment("and again"); !refused || !strings.Contains(text, "already finished") {
+				t.Fatalf("a call after the refusal: %q", text)
+			}
+			if thread := threadText(t, e, task.ID.String()); !strings.Contains(thread, "while holding the claim") ||
+				strings.Contains(thread, "after losing it") || strings.Contains(thread, "and again") {
+				t.Fatalf("thread:\n%s", thread)
+			}
+		})
 	}
 }
 

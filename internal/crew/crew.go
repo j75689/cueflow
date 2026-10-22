@@ -411,7 +411,7 @@ func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run
 	bg := context.WithoutCancel(ctx)
 	if out.kind == "handover" {
 		stopBeat()
-		if c.handOver(bg, task, run) {
+		if c.handOver(bg, task, run, out) {
 			return
 		}
 		out = &outcome{kind: "canceled"} // stopped by a human, or the claim was lost (finish then records only the run)
@@ -614,12 +614,22 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 	// lost while it runs (the irreversible actions wait for a human anyway, as deliverables or tool
 	// approvals). Not here: a self-driven agent's calls (runID nil), and RunApproval, which makes a
 	// call a human approved rather than one a live run makes.
+	// A refusal ends the run: as a canceled outcome (on a run token it is recorded, so the instance
+	// that owns the run ends it too, and the runner's agent is stopped) and, where this instance owns
+	// the run, by canceling it at once.
 	if env.runID != nil {
-		if held, err := c.store.HoldsClaim(context.WithoutCancel(ctx), env.task.ID, *env.runID); err == nil && !held {
+		if !env.lost {
+			held, err := c.store.HoldsClaim(context.WithoutCancel(ctx), env.task.ID, *env.runID)
+			env.lost = err == nil && !held
+		}
+		if env.lost {
+			if env.outcome == nil {
+				env.outcome = &outcome{kind: "canceled"}
+			}
 			if env.stop != nil {
 				env.stop(errStopped)
 			}
-			return "This run no longer holds the task: it was claimed again by another run. Stop working.", true
+			return "This run may no longer work on the task: it was stopped, moved, deleted or taken over by a newer run. Stop working.", true
 		}
 	}
 	t, ok := byName[call.Name]

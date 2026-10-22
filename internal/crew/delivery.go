@@ -85,16 +85,14 @@ const handOverLease = 10 * time.Minute
 // marked for ClaimHandedOverRuns, and a delivery is queued. It reports false, having stopped the
 // runner job, when the run no longer holds the task's claim (a human stopped or moved the task, or it
 // was claimed again): the run then ends here.
-func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentRun) bool {
+func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentRun, out *outcome) bool {
 	ok, err := c.store.ExtendTaskLease(ctx, task.ID, run.ID, handOverLease)
 	if err != nil {
 		c.logger.Warn("hand over run: lease", "task", task.ID, "err", err)
 	} else if !ok {
-		if job, err := c.store.RunnerJobForRun(ctx, run.ID); err == nil {
-			c.stopRunnerJob(ctx, job.ID, 5*time.Second)
-			var payload runnerapi.Job
-			_ = json.Unmarshal(job.Payload, &payload)
-			_ = c.store.DeleteRunToken(ctx, strings.TrimPrefix(payload.MCPPath, MCPPathPrefix))
+		c.stopRunnerJob(ctx, out.job, 5*time.Second)
+		if err := c.store.DeleteRunToken(ctx, out.token); err != nil {
+			c.logger.Warn("hand over run: revoke the run's token", "task", task.ID, "err", err)
 		}
 		return false
 	}
