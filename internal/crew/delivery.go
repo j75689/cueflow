@@ -164,9 +164,10 @@ func (c *Crew) rewatchRunner(ctx context.Context, task *store.Task, a *store.Age
 		return &outcome{kind: "error", text: "the run's tool server could not be restored"}
 	}
 	// This instance owns the run again: a tool call that finds the claim lost stops it at once.
-	mrun.turn <- struct{}{}
-	mrun.env.runID, mrun.env.stop = &run.ID, runStop(ctx)
-	<-mrun.turn
+	if mrun.acquire(ctx) { // else the run is stopping, and waitRunnerJob ends it
+		mrun.env.runID, mrun.env.stop = &run.ID, runStop(ctx)
+		mrun.release()
+	}
 	go c.watchOutcome(ctx, mrun)
 	handedOver := false
 	defer func() {

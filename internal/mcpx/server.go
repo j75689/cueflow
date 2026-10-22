@@ -20,7 +20,8 @@ func StatelessCapabilities() *mcp.ServerCapabilities {
 }
 
 // MaxRequestTime bounds one request to a stateless MCP server (see Stateless): longer than any tool call takes,
-// well under Cloud Run's 30-minute request timeout.
+// well under Cloud Run's 30-minute request timeout. It is a last resort: a tool call cut off by it is canceled
+// where it stands, and its client gets no answer.
 const MaxRequestTime = 10 * time.Minute
 
 // Stateless fronts a stateless Streamable HTTP handler: it refuses the GET stream (NoStandaloneStream) and
