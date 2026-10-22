@@ -87,23 +87,24 @@ func (s *Store) AgentByToken(ctx context.Context, plain string) (*Agent, error) 
 
 // ClaimTaskForAgent moves a TODO task assigned to the agent to IN_PROGRESS for a self-driving
 // agent, reserving it for lease. taskID nil takes the agent's most urgent TODO task. It returns
-// nil when there is nothing to claim.
-func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID *uuid.UUID, lease time.Duration) (*Task, error) {
-	var id uuid.UUID
+// nil when there is nothing to claim, else the task and the id its run is to have (see Claim).
+func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID *uuid.UUID, lease time.Duration) (*Task, uuid.UUID, error) {
+	var id, runID uuid.UUID
 	err := s.pool.QueryRow(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $3),
-		attempts = attempts + 1, started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
+		attempts = attempts + 1, run_id = gen_random_uuid(), started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
 		WHERE id = (
 			SELECT t.id FROM tasks t WHERE t.status='TODO' AND t.assignee_agent_id=$1 AND ($2::uuid IS NULL OR t.id=$2)
 			ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.updated_at
 			LIMIT 1 FOR UPDATE SKIP LOCKED)
-		RETURNING id`, agentID, taskID, lease.Seconds()).Scan(&id)
+		RETURNING id, run_id`, agentID, taskID, lease.Seconds()).Scan(&id, &runID)
 	if err != nil {
 		if NotFound(err) == domain.ErrNotFound {
-			return nil, nil
+			return nil, uuid.Nil, nil
 		}
-		return nil, err
+		return nil, uuid.Nil, err
 	}
-	return s.GetTask(ctx, id)
+	t, err := s.GetTask(ctx, id)
+	return t, runID, err
 }
 
 // RunningAgentRun is the open run of a task for an agent, if any.

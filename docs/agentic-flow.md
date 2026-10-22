@@ -318,7 +318,7 @@ target each time.
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
 | Parallel tasks | 3 (`CUEFLOW_AGENT_CONCURRENCY`) | `config` |
 | One model call | 10 minutes; every LLM connector streams the answer, so a long one isn't cut off by the 90-second timeout other connector requests have, nor by a proxy's idle timeout. Claude connectors wait up to 2 minutes for the answer to start and try again when a stream breaks off or reports an overload; an OpenAI-compatible server that doesn't stream is read the old way, within the 10 minutes | `llm/llm.go`, `connectors/anthropic`, `connectors/openai` |
-| Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN`. Each claim is numbered (`attempts`), and a run renews and finishes the task only under its own claim: a run that stalled past its lease while the task was claimed again stops at its next heartbeat and leaves the task to the new run | `crew/crew.go`, `store.Claim` |
+| Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN`. Each claim mints the id of the run that works it (`tasks.run_id`), and a run renews and finishes the task only under its own claim: a run that stalled past its lease while the task was claimed again stops at its next heartbeat and leaves the task to the new run | `crew/crew.go`, `store.Claim` |
 | `read_url` | http(s) only; blocks loopback / private / link-local / CGNAT / multicast at dial time; at most 5 redirects; 2 MB, 8,000 characters, 30 seconds; bypasses the system proxy (`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` relaxes this) | `crew/fetch.go` |
 | Publishing | Impossible for any agent, see §4 | `guard`, `connector` |
 

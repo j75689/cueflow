@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// claim claims TODO tasks until it gets id's claim.
+// claim claims the TODO tasks and returns task's claim.
 func claim(t *testing.T, e *env, task store.Task) store.Claim {
 	t.Helper()
 	claims, err := e.store.ClaimTodo(context.Background(), time.Minute, 10)
@@ -36,13 +38,12 @@ func TestLeaseIsFencedByClaim(t *testing.T) {
 	e.do("POST", "/tasks", map[string]any{"title": "Fenced", "assignee_agent_id": team["chief"].ID}, &task)
 
 	first := claim(t, e, task)
-	// A handed-over run is resumed under the claim it was started with, whatever the task says by then.
-	run, err := e.store.StartAgentRun(ctx, task.ID, team["chief"].ID, first.Attempt)
-	if err != nil {
+	// The claim's run is the run the claim minted, so a handed-over run is resumed under its own claim.
+	if _, err := e.store.StartAgentRun(ctx, first.RunID, task.ID, team["chief"].ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := e.store.GetAgentRun(ctx, run.ID); err != nil || got.Attempt != first.Attempt {
-		t.Fatalf("the run's claim: %+v %v", got, err)
+	if got, err := e.store.GetAgentRun(ctx, first.RunID); err != nil || got.TaskID != task.ID {
+		t.Fatalf("the claim's run: %+v %v", got, err)
 	}
 	// The holder stalls: the lease runs out, the sweep interrupts the task and a human reruns it.
 	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() - interval '1 second' WHERE id=$1`, task.ID); err != nil {
@@ -54,23 +55,23 @@ func TestLeaseIsFencedByClaim(t *testing.T) {
 		}
 	}
 	second := claim(t, e, task)
-	if second.Attempt != first.Attempt+1 {
-		t.Fatalf("attempts %d then %d", first.Attempt, second.Attempt)
+	if second.RunID == first.RunID {
+		t.Fatal("each claim needs its own run id")
 	}
 
-	if ok, err := e.store.ExtendTaskLease(ctx, task.ID, first.Attempt, time.Minute); err != nil || ok {
+	if ok, err := e.store.ExtendTaskLease(ctx, task.ID, first.RunID, time.Minute); err != nil || ok {
 		t.Fatalf("the lost claim extended the lease: %v %v", ok, err)
 	}
-	if ok, err := e.store.ExtendTaskLease(ctx, task.ID, second.Attempt, time.Minute); err != nil || !ok {
+	if ok, err := e.store.ExtendTaskLease(ctx, task.ID, second.RunID, time.Minute); err != nil || !ok {
 		t.Fatalf("the current claim could not extend the lease: %v %v", ok, err)
 	}
-	if ok, err := e.store.SetClaimedTaskStatus(ctx, task.ID, first.Attempt, store.TaskReview, nil); err != nil || ok {
+	if ok, err := e.store.SetClaimedTaskStatus(ctx, task.ID, first.RunID, store.TaskReview, nil); err != nil || ok {
 		t.Fatalf("the lost claim finished the task: %v %v", ok, err)
 	}
 	if got, _ := e.store.GetTask(ctx, task.ID); got.Status != store.TaskInProgress {
 		t.Fatalf("status %s", got.Status)
 	}
-	if ok, err := e.store.SetClaimedTaskStatus(ctx, task.ID, second.Attempt, store.TaskReview, nil); err != nil || !ok {
+	if ok, err := e.store.SetClaimedTaskStatus(ctx, task.ID, second.RunID, store.TaskReview, nil); err != nil || !ok {
 		t.Fatalf("the current claim could not finish the task: %v %v", ok, err)
 	}
 }
@@ -103,7 +104,7 @@ func TestStalledRunLosesAReclaimedTask(t *testing.T) {
 	<-started
 
 	// Another instance claimed the task after this run's lease ran out (as TestLeaseIsFencedByClaim).
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET attempts = attempts + 1 WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -119,5 +120,33 @@ func TestStalledRunLosesAReclaimedTask(t *testing.T) {
 	if got.Status != store.TaskInProgress || got.Result != "" || len(runs) != 1 || runs[0].Status != "CANCELED" ||
 		strings.Contains(thread, "Done by the stalled run") || strings.Contains(thread, "Stopped.") {
 		t.Fatalf("%s %q, runs %+v, thread:\n%s", got.Status, got.Result, runs, thread)
+	}
+}
+
+// A task claimed by a version that recorded no run takes the run that resumes it as its claim, once.
+func TestLegacyClaimIsAdoptedByItsRun(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Legacy", "assignee_agent_id": team["chief"].ID}, &task)
+	cl := claim(t, e, task)
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = NULL WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := e.store.ExtendTaskLease(ctx, task.ID, cl.RunID, time.Minute); ok {
+		t.Fatal("a claim with no run can't be extended before it is adopted")
+	}
+	if err := e.store.AdoptTaskRun(ctx, task.ID, cl.RunID); err != nil {
+		t.Fatal(err)
+	}
+	other := uuid.New()
+	if err := e.store.AdoptTaskRun(ctx, task.ID, other); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := e.store.ExtendTaskLease(ctx, task.ID, cl.RunID, time.Minute); err != nil || !ok {
+		t.Fatalf("the adopting run: %v %v", ok, err)
+	}
+	if ok, _ := e.store.ExtendTaskLease(ctx, task.ID, other, time.Minute); ok {
+		t.Fatal("a second adoption took over the claim")
 	}
 }

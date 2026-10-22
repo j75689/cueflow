@@ -354,8 +354,8 @@ func (c *Crew) llmFor(ctx context.Context, a *store.Agent) (connector.LLM, uuid.
 
 // --- the agent loop ---
 
-// runTask works the task of a claim. Everything it does to the task's lease and status is fenced by
-// the claim's attempt, never the task's current one: a newer claim means this one was lost.
+// runTask works the task of a claim, as the run the claim minted. Everything it does to the task's
+// lease and status is fenced by that run id: a newer claim means this one was lost.
 func (c *Crew) runTask(ctx context.Context, cl store.Claim) {
 	id := cl.ID
 	defer c.taskOrgs.Delete(id) // the run wrote most of the task's messages; don't keep the entry forever
@@ -367,23 +367,23 @@ func (c *Crew) runTask(ctx context.Context, cl store.Claim) {
 	}
 	c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": id, "status": task.Status})
 	if task.AssigneeAgentID == nil {
-		c.finish(bg, task, nil, nil, cl.Attempt, &outcome{kind: "error", text: "task has no assignee"})
+		c.finish(bg, task, nil, nil, &cl.RunID, &outcome{kind: "error", text: "task has no assignee"})
 		return
 	}
 	a, err := c.store.GetAgent(bg, *task.AssigneeAgentID)
 	if err != nil {
-		c.finish(bg, task, nil, nil, cl.Attempt, &outcome{kind: "error", text: "assigned agent not found"})
+		c.finish(bg, task, nil, nil, &cl.RunID, &outcome{kind: "error", text: "assigned agent not found"})
 		return
 	}
 
-	run, err := c.store.StartAgentRun(bg, task.ID, a.ID, cl.Attempt)
+	run, err := c.store.StartAgentRun(bg, cl.RunID, task.ID, a.ID)
 	if err != nil {
 		c.logger.Error("start run", "err", err)
 		return
 	}
 	ctx, cancelRun := context.WithCancelCause(ctx)
 	defer cancelRun(nil)
-	stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.Attempt)
+	stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.ID)
 	defer stopBeat()
 
 	var out *outcome
@@ -407,13 +407,13 @@ func (c *Crew) endRun(ctx context.Context, task *store.Task, a *store.Agent, run
 	if ctx.Err() != nil {
 		out = stopped(ctx)
 	}
-	c.finish(bg, task, a, run, run.Attempt, out)
+	c.finish(bg, task, a, run, &run.ID, out)
 }
 
-// heartbeat keeps the task's lease for the claim attempt. A lease it can't extend means the task
+// heartbeat keeps the task's lease for the claim's run. A lease it can't extend means the task
 // left IN_PROGRESS (a human stopped or moved it, possibly through another instance) or was claimed
 // again after this run stalled past its lease, so the run is stopped as by a human.
-func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id uuid.UUID, attempt int) func() {
+func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id, runID uuid.UUID) func() {
 	done, exited := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(exited)
@@ -426,7 +426,7 @@ func (c *Crew) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, id
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, attempt, c.Lease); err == nil && !ok {
+				if ok, err := c.store.ExtendTaskLease(context.WithoutCancel(ctx), id, runID, c.Lease); err == nil && !ok {
 					cancel(errStopped)
 					return
 				}
@@ -658,12 +658,13 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 }
 
 // finish records the outcome and moves the task, unless a human already moved it elsewhere. It ends
-// the claim attempt: if the task was claimed again since (this run stalled past its lease), the newer
-// claim owns the task and its thread, so only the run is recorded.
-func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, attempt int, out *outcome) {
+// the claim of runID: if the task was claimed again since (this run stalled past its lease), the newer
+// claim owns the task and its thread, so only the run is recorded. runID nil is a self-driven task's
+// end, which is not fenced (see ExtendAgentTaskLease).
+func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, runID *uuid.UUID, out *outcome) {
 	// Both run paths (runTask and a self-driven agent) end here, after writing most of the task's messages.
 	defer c.taskOrgs.Delete(task.ID)
-	if now, err := c.store.TaskAttempts(ctx, task.ID); err == nil && now != attempt {
+	if now, err := c.store.TaskRunID(ctx, task.ID); runID != nil && err == nil && (now == nil || *now != *runID) {
 		if run != nil {
 			run.Status, run.Outcome, run.Error = "CANCELED", "canceled", "the task was claimed again while this run was stalled"
 			if err := c.store.FinishAgentRun(ctx, run); err != nil {
@@ -767,7 +768,13 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		}
 	}
 
-	changed, err := c.store.SetClaimedTaskStatus(ctx, task.ID, attempt, next, result)
+	var changed bool
+	var err error
+	if runID != nil {
+		changed, err = c.store.SetClaimedTaskStatus(ctx, task.ID, *runID, next, result)
+	} else {
+		changed, err = c.store.SetTaskStatusIf(ctx, task.ID, []store.TaskStatus{store.TaskInProgress}, next, result)
+	}
 	if err != nil {
 		c.logger.Error("finish task", "task", task.ID, "err", err)
 		return

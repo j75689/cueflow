@@ -418,17 +418,17 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 // SetTaskStatusIf changes status only when the current status is one of from (guards races with
 // humans dragging cards while an agent finishes). It reports whether the change happened.
 func (s *Store) SetTaskStatusIf(ctx context.Context, id uuid.UUID, from []TaskStatus, to TaskStatus, result *string) (bool, error) {
-	return s.setTaskStatus(ctx, id, from, 0, to, result)
+	return s.setTaskStatus(ctx, id, from, nil, to, result)
 }
 
 // SetClaimedTaskStatus is how the holder of a claim finishes it: the task must still be IN_PROGRESS
 // under that claim (see Claim), so a run whose task was claimed again since can't move it.
-func (s *Store) SetClaimedTaskStatus(ctx context.Context, id uuid.UUID, attempt int, to TaskStatus, result *string) (bool, error) {
-	return s.setTaskStatus(ctx, id, []TaskStatus{TaskInProgress}, attempt, to, result)
+func (s *Store) SetClaimedTaskStatus(ctx context.Context, id, runID uuid.UUID, to TaskStatus, result *string) (bool, error) {
+	return s.setTaskStatus(ctx, id, []TaskStatus{TaskInProgress}, &runID, to, result)
 }
 
-// setTaskStatus is SetTaskStatusIf, fenced by the claim attempt unless it is 0.
-func (s *Store) setTaskStatus(ctx context.Context, id uuid.UUID, from []TaskStatus, attempt int, to TaskStatus, result *string) (bool, error) {
+// setTaskStatus is SetTaskStatusIf, fenced by the claim's run id unless it is nil.
+func (s *Store) setTaskStatus(ctx context.Context, id uuid.UUID, from []TaskStatus, runID *uuid.UUID, to TaskStatus, result *string) (bool, error) {
 	fs := make([]string, len(from))
 	for i, f := range from {
 		fs[i] = string(f)
@@ -438,7 +438,7 @@ func (s *Store) setTaskStatus(ctx context.Context, id uuid.UUID, from []TaskStat
 		result = COALESCE($4, result),
 		completed_at = CASE WHEN $5 THEN NOW() ELSE completed_at END,
 		position = COALESCE((SELECT max(o.position) FROM tasks o WHERE o.status=$3::text AND o.org_id=tasks.org_id), 0) + 1024
-		WHERE id=$1 AND status = ANY($2) AND ($6 = 0 OR attempts = $6)`, id, fs, string(to), result, completed, attempt)
+		WHERE id=$1 AND status = ANY($2) AND ($6::uuid IS NULL OR run_id = $6)`, id, fs, string(to), result, completed, runID)
 	if err != nil {
 		return false, err
 	}
@@ -486,12 +486,12 @@ func (s *Store) TaskDepth(ctx context.Context, id uuid.UUID) (int, error) {
 
 // --- runner support ---
 
-// Claim is one claim of a task. Every claim increments the task's attempts, so Attempt identifies
-// it: the claim's holder extends the lease and finishes the task only while attempts still matches,
-// and a holder that stalled past its lease while the task was claimed again finds it lost.
+// Claim is one claim of a task. Every claim mints the id of the run that works it and records it on
+// the task (tasks.run_id): the run extends the lease and finishes the task only while run_id is still
+// its own, so a run that stalled past its lease while the task was claimed again finds it lost.
 type Claim struct {
-	ID      uuid.UUID
-	Attempt int
+	ID    uuid.UUID
+	RunID uuid.UUID
 }
 
 // ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS.
@@ -500,34 +500,50 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit int) (
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1),
-		attempts = attempts + 1, started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
+		attempts = attempts + 1, run_id = gen_random_uuid(),
+		started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
 		WHERE id IN (
 			SELECT t.id FROM tasks t JOIN agents a ON a.id=t.assignee_agent_id AND a.is_active
 			LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id
 			WHERE t.status='TODO' AND COALESCE(rc.type,'') <> 'external'
 			ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.updated_at
 			LIMIT $2 FOR UPDATE OF t SKIP LOCKED)
-		RETURNING id, attempts`, lease.Seconds(), limit)
+		RETURNING id, run_id`, lease.Seconds(), limit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[Claim])
 }
 
-// ExtendTaskLease keeps a running task reserved for the claim attempt. It reports false when the
+// ExtendTaskLease keeps a running task reserved for the claim's run. It reports false when the
 // task is no longer IN_PROGRESS under that claim (a human canceled or moved it, possibly through
 // another instance, or it was claimed again after the lease ran out): the worker must stop.
-func (s *Store) ExtendTaskLease(ctx context.Context, id uuid.UUID, attempt int, lease time.Duration) (bool, error) {
+func (s *Store) ExtendTaskLease(ctx context.Context, id, runID uuid.UUID, lease time.Duration) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() + make_interval(secs => $2)
-		WHERE id=$1 AND status='IN_PROGRESS' AND attempts=$3`, id, lease.Seconds(), attempt)
+		WHERE id=$1 AND status='IN_PROGRESS' AND run_id=$3`, id, lease.Seconds(), runID)
 	return tag.RowsAffected() == 1, err
 }
 
-// TaskAttempts is the task's latest claim attempt (see Claim).
-func (s *Store) TaskAttempts(ctx context.Context, id uuid.UUID) (int, error) {
-	var n int
-	err := s.pool.QueryRow(ctx, `SELECT attempts FROM tasks WHERE id=$1`, id).Scan(&n)
-	return n, NotFound(err)
+// ExtendAgentTaskLease keeps a self-driven agent's task reserved. It is not fenced by a claim: the
+// claim belongs to the agent, not to a process that could stall and come back.
+func (s *Store) ExtendAgentTaskLease(ctx context.Context, id uuid.UUID, lease time.Duration) error {
+	_, err := s.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() + make_interval(secs => $2)
+		WHERE id=$1 AND status='IN_PROGRESS'`, id, lease.Seconds())
+	return err
+}
+
+// TaskRunID is the run of the task's latest claim (see Claim); nil if no claim recorded one.
+func (s *Store) TaskRunID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var runID *uuid.UUID
+	err := s.pool.QueryRow(ctx, `SELECT run_id FROM tasks WHERE id=$1`, id).Scan(&runID)
+	return runID, NotFound(err)
+}
+
+// AdoptTaskRun records a running run as its task's claim when the claim recorded none (it was made
+// by a version that didn't), so the run is fenced like any other from then on.
+func (s *Store) AdoptTaskRun(ctx context.Context, id, runID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE tasks SET run_id=$2 WHERE id=$1 AND run_id IS NULL AND status='IN_PROGRESS'`, id, runID)
+	return err
 }
 
 // ExpiredTaskLeases returns IN_PROGRESS tasks whose runner died.
@@ -673,29 +689,27 @@ type AgentRun struct {
 	ConnectorID *uuid.UUID `json:"connector_id"`
 	Model       string     `json:"model"`
 	Runtime     string     `json:"runtime"` // builtin | acp
-	// Attempt is the task's claim the run works under (see Claim); 0 for runs from before it was kept.
-	Attempt    int        `json:"attempt"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
+	StartedAt   time.Time  `json:"started_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
 }
 
 // agentRunColumns and scanDest keep every query that loads an AgentRun reading the same columns.
 const agentRunColumns = `id, task_id, agent_id, status, turns, tool_calls, input_tokens, output_tokens,
 	cache_read_tokens, cache_write_tokens, error, connector_id, model, runtime, started_at, finished_at,
-	context_tokens, context_window, outcome, attempt`
+	context_tokens, context_window, outcome`
 
 func (r *AgentRun) scanDest() []any {
 	return []any{&r.ID, &r.TaskID, &r.AgentID, &r.Status, &r.Turns, &r.ToolCalls, &r.InputTokens, &r.OutputTokens,
 		&r.CacheReadTokens, &r.CacheWriteTokens, &r.Error, &r.ConnectorID, &r.Model, &r.Runtime, &r.StartedAt, &r.FinishedAt,
-		&r.ContextTokens, &r.ContextWindow, &r.Outcome, &r.Attempt}
+		&r.ContextTokens, &r.ContextWindow, &r.Outcome}
 }
 
-// StartAgentRun opens a run of the task's claim attempt.
-func (s *Store) StartAgentRun(ctx context.Context, taskID, agentID uuid.UUID, attempt int) (*AgentRun, error) {
-	r := &AgentRun{TaskID: taskID, AgentID: &agentID, Status: "RUNNING", Runtime: "builtin", Attempt: attempt}
-	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (task_id, agent_id, org_id, attempt)
-		SELECT $1, $2, org_id, $3 FROM tasks WHERE id=$1 RETURNING id, started_at`,
-		taskID, agentID, attempt).Scan(&r.ID, &r.StartedAt)
+// StartAgentRun opens the run a claim minted (Claim.RunID).
+func (s *Store) StartAgentRun(ctx context.Context, runID, taskID, agentID uuid.UUID) (*AgentRun, error) {
+	r := &AgentRun{ID: runID, TaskID: taskID, AgentID: &agentID, Status: "RUNNING", Runtime: "builtin"}
+	err := s.pool.QueryRow(ctx, `INSERT INTO agent_runs (id, task_id, agent_id, org_id)
+		SELECT $1, $2, $3, org_id FROM tasks WHERE id=$2 RETURNING started_at`,
+		runID, taskID, agentID).Scan(&r.StartedAt)
 	return r, err
 }
 

@@ -72,7 +72,7 @@ const handOverLease = 10 * time.Minute
 // handOver leaves a runner run running for the next delivery: the task keeps its lease, the run is
 // marked for ClaimHandedOverRuns, and a delivery is queued.
 func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentRun) {
-	if _, err := c.store.ExtendTaskLease(ctx, task.ID, run.Attempt, handOverLease); err != nil {
+	if _, err := c.store.ExtendTaskLease(ctx, task.ID, run.ID, handOverLease); err != nil {
 		c.logger.Warn("hand over run: lease", "task", task.ID, "err", err)
 	}
 	if err := c.store.HandOverAgentRun(ctx, run.ID); err != nil {
@@ -99,16 +99,17 @@ func (c *Crew) resumeRun(ctx context.Context, runID uuid.UUID) {
 		return
 	}
 	defer c.taskOrgs.Delete(task.ID)
-	if run.Attempt == 0 {
-		run.Attempt = task.Attempts // handed over by a version that didn't record the claim
+	// A task claimed by a version that didn't record the claim's run takes this run as its claim.
+	if err := c.store.AdoptTaskRun(bg, task.ID, run.ID); err != nil {
+		c.logger.Warn("resume run: adopt claim", "task", task.ID, "err", err)
 	}
 	c.tracked(ctx, task.ID, func(ctx context.Context) {
 		ctx, cancelRun := context.WithCancelCause(ctx)
 		defer cancelRun(nil)
-		if ok, _ := c.store.ExtendTaskLease(bg, task.ID, run.Attempt, c.Lease); !ok {
+		if ok, _ := c.store.ExtendTaskLease(bg, task.ID, run.ID, c.Lease); !ok {
 			cancelRun(errStopped) // a human stopped or moved the task between deliveries, or it was claimed again
 		}
-		stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.Attempt)
+		stopBeat := c.heartbeat(ctx, cancelRun, task.ID, run.ID)
 		defer stopBeat()
 		c.endRun(ctx, task, a, run, c.rewatchRunner(ctx, task, a, run, job), stopBeat)
 	})
