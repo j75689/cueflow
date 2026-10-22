@@ -188,16 +188,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		var once sync.Once
-		closeEvents = func() {
-			once.Do(func() {
-				closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				if err := t.Close(closeCtx); err != nil {
-					logger.Warn("delete events subscription (it expires on its own)", "subscription", t.Subscription(), "err", err)
-				}
-			})
-		}
+		closeEvents = subscriptionCloser(t, cfg.PubSubDeleteTimeout, logger)
 		defer closeEvents() // a startup error after this point
 		broker.Use(t, logger)
 	} else {
@@ -343,6 +334,21 @@ func serve() error {
 
 // newPubSub creates this instance's events subscription; PUBSUB_EMULATOR_HOST points it at the
 // emulator, as Google's own clients do.
+// subscriptionCloser deletes the instance's events subscription once, bounded by timeout
+// (CUEFLOW_PUBSUB_DELETE_TIMEOUT); a failure is only logged, as the subscription expires on its own.
+func subscriptionCloser(t *pubsub.Transport, timeout time.Duration, logger *slog.Logger) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := t.Close(ctx); err != nil {
+				logger.Warn("delete events subscription (it expires on its own)", "subscription", t.Subscription(), "timeout", timeout, "err", err)
+			}
+		})
+	}
+}
+
 func newPubSub(ctx context.Context, topic string) (*pubsub.Transport, error) {
 	cfg := pubsub.Config{Topic: topic}
 	if h := os.Getenv("PUBSUB_EMULATOR_HOST"); h != "" {

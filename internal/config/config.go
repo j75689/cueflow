@@ -65,6 +65,9 @@ type Config struct {
 	Events string
 	// PubSubTopic is "projects/P/topics/T" for CUEFLOW_EVENTS=pubsub (CUEFLOW_PUBSUB_TOPIC).
 	PubSubTopic string
+	// PubSubDeleteTimeout bounds deleting this instance's subscription on shutdown
+	// (CUEFLOW_PUBSUB_DELETE_TIMEOUT, default 8 s).
+	PubSubDeleteTimeout time.Duration
 	// Tick is who runs the clock: "internal" (in-process cron and loops) or "external" (Cloud
 	// Scheduler calls /internal/tick every minute; no in-process loops start).
 	Tick string
@@ -137,6 +140,13 @@ func Load() (*Config, error) {
 	c.Queue = env("CUEFLOW_QUEUE", "local")
 	c.Events = env("CUEFLOW_EVENTS", "postgres")
 	c.PubSubTopic = os.Getenv("CUEFLOW_PUBSUB_TOPIC")
+	c.PubSubDeleteTimeout = envDuration("CUEFLOW_PUBSUB_DELETE_TIMEOUT", DefaultPubSubDeleteTimeout)
+	if c.PubSubDeleteTimeout <= 0 {
+		return nil, fmt.Errorf("CUEFLOW_PUBSUB_DELETE_TIMEOUT must be > 0, got %s", c.PubSubDeleteTimeout)
+	}
+	if c.PubSubDeleteTimeout >= 10*time.Second {
+		warn(fmt.Sprintf("CUEFLOW_PUBSUB_DELETE_TIMEOUT=%s is not under Cloud Run's 10 s shutdown grace: the instance may be killed before the delete returns", c.PubSubDeleteTimeout))
+	}
 	c.Tick = env("CUEFLOW_TICK", "internal")
 	c.TasksQueue = os.Getenv("CUEFLOW_TASKS_QUEUE")
 	c.TasksTargetURL = strings.TrimRight(env("CUEFLOW_TASKS_TARGET_URL", c.PublicURL), "/")
@@ -237,6 +247,10 @@ func envBool(k string) bool {
 	b, _ := strconv.ParseBool(os.Getenv(k))
 	return b
 }
+
+// DefaultPubSubDeleteTimeout is CUEFLOW_PUBSUB_DELETE_TIMEOUT's default. Pub/Sub can take a few
+// seconds to answer a delete it has already done, and the delete must fit in Cloud Run's 10 s after SIGTERM.
+const DefaultPubSubDeleteTimeout = 8 * time.Second
 
 // DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
 const DefaultContextHandOffAt = 0.8
