@@ -337,7 +337,8 @@ func TestCreatePostOutlastsTheSharedClientTimeout(t *testing.T) {
 }
 
 func TestCreatePostStopsAtItsDeadline(t *testing.T) {
-	f := &fakePublisher{createStatus: "published", delay: 5 * time.Second}
+	f := &fakePublisher{createStatus: "published", block: make(chan struct{})}
+	defer close(f.block)
 	p := newPublisherWithTimeout(t, f, 200*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
 	defer cancel()

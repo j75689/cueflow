@@ -371,7 +371,6 @@ func TestPublishTimeoutBelowLease(t *testing.T) {
 	}
 }
 
-// Unset durations take their defaults without a word: only a bad value warns.
 // CUEFLOW_CONNECTOR_HTTP_TIMEOUT is new, so a bad value stops startup: no floor, no warnings.
 func TestConnectorHTTPTimeout(t *testing.T) {
 	for _, tc := range []struct {
@@ -412,6 +411,7 @@ func TestConnectorHTTPTimeout(t *testing.T) {
 	}
 }
 
+// Unset durations take their defaults without a word: only a bad value warns.
 func TestUnsetDurationsDoNotWarn(t *testing.T) {
 	base(t)
 	c, err := Load()
