@@ -126,15 +126,21 @@ func TestRequestDeadline(t *testing.T) {
 	}
 }
 
-// The SDK runs a tool on a ctx detached from its request (as configured, without PropagateRequestCancellation);
-// RequestContext gives it the deadline back, so a tool that waits on its ctx ends when the request's time is up.
-func TestDeadlineReachesTheTool(t *testing.T) {
+// The SDK runs a tool on a ctx detached from its request (as configured, without PropagateRequestCancellation):
+// the tool reads its request's deadline with RequestDeadline, and its ctx has none, so nothing cuts it.
+func TestDeadlineIsReadableInTheTool(t *testing.T) {
+	type seen struct {
+		at, ctxDeadline time.Time
+		ok, hasDeadline bool
+	}
+	got := make(chan seen, 1)
 	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: StatelessCapabilities()})
-	mcp.AddTool(srv, &mcp.Tool{Name: "wait"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
-		ctx, cancel := RequestContext(ctx)
-		defer cancel()
-		<-ctx.Done()
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ended"}}}, struct{}{}, nil
+	mcp.AddTool(srv, &mcp.Tool{Name: "read"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
+		var s seen
+		s.at, s.ok = RequestDeadline(ctx)
+		s.ctxDeadline, s.hasDeadline = ctx.Deadline()
+		got <- s
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "read"}}}, struct{}{}, nil
 	})
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	ts := httptest.NewServer(Stateless(h, 300*time.Millisecond))
@@ -147,8 +153,18 @@ func TestDeadlineReachesTheTool(t *testing.T) {
 	}
 	defer cs.Close()
 	start := time.Now()
-	_, _ = cs.CallTool(ctx, &mcp.CallToolParams{Name: "wait"}) // the answer may not make it; the request must end
-	if d := time.Since(start); d > 3*time.Second {
-		t.Fatalf("the call ended after %s, not near the 300ms deadline", d)
+	_, _ = cs.CallTool(ctx, &mcp.CallToolParams{Name: "read"})
+	end := time.Now()
+	var s seen
+	select {
+	case s = <-got:
+	case <-ctx.Done():
+		t.Fatal("the tool was not called")
+	}
+	if d := 300 * time.Millisecond; !s.ok || !s.at.After(start.Add(d)) || s.at.After(end.Add(d)) {
+		t.Errorf("request deadline %v %v, called from %v to %v", s.at, s.ok, start, end)
+	}
+	if s.hasDeadline {
+		t.Errorf("the tool's ctx has a deadline (%v): it would cut the tool", s.ctxDeadline)
 	}
 }

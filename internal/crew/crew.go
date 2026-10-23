@@ -41,6 +41,9 @@ type Crew struct {
 	ContextHandOffAt float64
 	Lease            time.Duration
 	Every            time.Duration
+	// DetachedWriteTimeout bounds each thread write (say, system, taskOrg) and the other writes a tool call
+	// makes detached from its ctx (see detached); <= 0 means DefaultDetachedWriteTimeout.
+	DetachedWriteTimeout time.Duration
 	// ValidateSchedule checks cron expressions for agent-created schedules (set by main).
 	ValidateSchedule store.CronValidator
 	// OnSchedulesChanged reloads the scheduler after an agent creates/pauses a schedule.
@@ -78,7 +81,7 @@ func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, all
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
 		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
 		Lease: 2 * time.Minute, Every: 2 * time.Second, DeliveryLimit: 30 * time.Minute,
-		running: map[uuid.UUID]*runSlot{}, wake: make(chan struct{}, 1)}
+		DetachedWriteTimeout: DefaultDetachedWriteTimeout, running: map[uuid.UUID]*runSlot{}, wake: make(chan struct{}, 1)}
 }
 
 func (c *Crew) Wake() {
@@ -315,7 +318,9 @@ func (c *Crew) say(ctx context.Context, taskID uuid.UUID, a *store.Agent, kind, 
 	if kind == "tool_result" {
 		author = "tool"
 	}
-	m, err := c.store.AddTaskMessage(context.WithoutCancel(ctx), taskID, author, aid, kind, content, data)
+	wctx, cancel := c.detached(ctx)
+	defer cancel()
+	m, err := c.store.AddTaskMessage(wctx, taskID, author, aid, kind, content, data)
 	if err != nil {
 		c.logger.Warn("thread write failed", "task", taskID, "err", err)
 		return
@@ -324,7 +329,9 @@ func (c *Crew) say(ctx context.Context, taskID uuid.UUID, a *store.Agent, kind, 
 }
 
 func (c *Crew) system(ctx context.Context, taskID uuid.UUID, content string) {
-	m, err := c.store.AddTaskMessage(context.WithoutCancel(ctx), taskID, "system", nil, "status", content, nil)
+	wctx, cancel := c.detached(ctx)
+	defer cancel()
+	m, err := c.store.AddTaskMessage(wctx, taskID, "system", nil, "status", content, nil)
 	if err == nil {
 		c.broker.Publish(c.taskOrg(ctx, taskID), "task.message", map[string]any{"task_id": taskID, "id": m.ID})
 	}
@@ -335,7 +342,9 @@ func (c *Crew) taskOrg(ctx context.Context, taskID uuid.UUID) uuid.UUID {
 	if v, ok := c.taskOrgs.Load(taskID); ok {
 		return v.(uuid.UUID)
 	}
-	org := c.store.TaskOrg(context.WithoutCancel(ctx), taskID)
+	wctx, cancel := c.detached(ctx)
+	defer cancel()
+	org := c.store.TaskOrg(wctx, taskID)
 	if org != uuid.Nil {
 		c.taskOrgs.Store(taskID, org)
 	}
@@ -671,17 +680,33 @@ func (c *Crew) execTool(ctx context.Context, env *runEnv, byName map[string]tool
 		res = "error: " + err.Error()
 	} else if t.saveLarge {
 		// Before the result reaches the model: what it sees is the stub, from the first time on.
-		if stub, name, ok := c.saveLargeResult(context.WithoutCancel(ctx), env.task.ID, env.agent.Slug, call.Name, call.Arguments, res); ok {
+		sctx, cancel := c.detached(ctx)
+		if stub, name, ok := c.saveLargeResult(sctx, env.task.ID, env.agent.Slug, call.Name, call.Arguments, res); ok {
 			res = stub
 			data["file"] = name
 		}
+		cancel()
 	}
 	res = clipToolResult(res)
 	if !quietTools[call.Name] {
-		// Not with ctx: a call cut off by its request's deadline still leaves its result in the thread.
-		c.say(context.WithoutCancel(ctx), env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
+		// say detaches the write: a call whose run was stopped still leaves its result in the thread.
+		c.say(ctx, env.task.ID, env.agent, "tool_result", clip(res, 2000), data)
 	}
 	return res, isErr
+}
+
+// DefaultDetachedWriteTimeout is Crew.DetachedWriteTimeout's default.
+const DefaultDetachedWriteTimeout = 30 * time.Second
+
+// detached is ctx without its cancellation (a write a tool call makes must land even when its run is
+// stopped or its request has ended), bounded by DetachedWriteTimeout instead, so a hung database or
+// blob store can't hold the run's tool turn, and the request serving it, for good.
+func (c *Crew) detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := c.DetachedWriteTimeout
+	if timeout <= 0 {
+		timeout = DefaultDetachedWriteTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
 // claimCheckTimeout bounds holdsClaim, so a hung database doesn't hold up every turn, tool call and

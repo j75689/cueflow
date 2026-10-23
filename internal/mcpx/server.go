@@ -31,13 +31,17 @@ func StatelessCapabilities() *mcp.ServerCapabilities {
 }
 
 // Stateless fronts a stateless Streamable HTTP handler: it refuses the GET stream (NoStandaloneStream) and
-// gives every request a deadline maxRequest away (CUEFLOW_MCP_REQUEST_TIMEOUT), so no message shape can hold a
-// request slot for good. maxRequest <= 0 sets no deadline.
+// gives every request a deadline maxRequest away (CUEFLOW_MCP_REQUEST_TIMEOUT), which its tool call reads
+// with RequestDeadline. maxRequest <= 0 sets none.
 //
 // The SDK runs handlers on a ctx detached from the request's (it neither ends nor has a deadline), and the
-// request lasts until its handler returns. A tool handler that takes the deadline back with RequestContext
-// (run and agent-token tool calls) is canceled where it stands when it passes; others (the operator's /mcp
-// tools) run to the end. A client that goes away cancels nothing: a tool call is not stopped halfway for it.
+// request lasts until its handler returns. The deadline cuts no tool by itself: a run's or agent token's
+// tool call bounds by it what may run long (a connector call, the wait for the run's tool turn), and
+// built-in tools run to the end, so none stops halfway through its state writes (a thread message that
+// can't be written within crew's DetachedWriteTimeout is dropped). One that hangs elsewhere holds
+// its request until the platform's timeout (30 minutes on Cloud Run), and its answer, written after the
+// deadline, does not reach the client. The deadline is one request's, that is one tool call's: it does not
+// carry over to the requests a tool makes in turn. A client that goes away cancels nothing.
 func Stateless(h http.Handler, maxRequest time.Duration) http.Handler {
 	h = NoStandaloneStream(h)
 	if maxRequest <= 0 {
@@ -51,20 +55,25 @@ type deadlineKey struct{}
 func withDeadline(h http.Handler, d time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		at := time.Now().Add(d)
-		ctx, cancel := context.WithDeadline(context.WithValue(r.Context(), deadlineKey{}, at), at)
+		ctx, cancel := context.WithDeadline(WithRequestDeadline(r.Context(), at), at)
 		defer cancel()
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// RequestContext is a tool handler's ctx with its request's deadline (see Stateless) put back: the SDK
-// hands handlers a ctx that keeps the request's values but not its deadline. Without one it only adds
-// a cancel.
-func RequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if at, ok := ctx.Value(deadlineKey{}).(time.Time); ok {
-		return context.WithDeadline(ctx, at)
-	}
-	return context.WithCancel(ctx)
+// RequestDeadline is the deadline Stateless gave the request a tool handler serves: the SDK keeps the
+// request's values on the handler's ctx, but not its deadline, so a tool reads it here and bounds by it
+// only what may run long. ok is false without one (maxRequest <= 0, or a ctx from no such request).
+// It is a value, so it survives context.WithoutCancel: don't make connector calls on a ctx detached
+// from a tool call's.
+func RequestDeadline(ctx context.Context) (time.Time, bool) {
+	at, ok := ctx.Value(deadlineKey{}).(time.Time)
+	return at, ok
+}
+
+// WithRequestDeadline records at as ctx's request deadline (see RequestDeadline).
+func WithRequestDeadline(ctx context.Context, at time.Time) context.Context {
+	return context.WithValue(ctx, deadlineKey{}, at)
 }
 
 // NoStandaloneStream answers GET with 405 Method Not Allowed in front of a stateless Streamable HTTP handler.

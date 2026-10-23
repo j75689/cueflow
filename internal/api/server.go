@@ -41,7 +41,8 @@ type Server struct {
 	AdminToken string
 	// MCPToken enables the operator MCP endpoint (CUEFLOW_MCP_TOKEN); empty disables it.
 	MCPToken string
-	// MCPRequestTimeout bounds one request to the MCP endpoints (CUEFLOW_MCP_REQUEST_TIMEOUT); 0 sets none.
+	// MCPRequestTimeout is the deadline of one request to the MCP endpoints (CUEFLOW_MCP_REQUEST_TIMEOUT), which
+	// bounds a run's connector calls and its wait for the tool turn (see mcpx.Stateless); 0 sets none.
 	MCPRequestTimeout time.Duration
 	// PublicURL is how people reach this server (links in emails).
 	PublicURL string

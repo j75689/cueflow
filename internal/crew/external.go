@@ -122,37 +122,19 @@ func (c *Crew) callExternal(ctx context.Context, id uuid.UUID, name string, args
 	return text, isErr, err
 }
 
-// requestBudgetKey marks a tool call served over MCP (/mcp/run, or /mcp with an agent token): its
-// ctx deadline is the request's (CUEFLOW_MCP_REQUEST_TIMEOUT), which a connector call must end
-// before, so the agent gets an answer rather than a request cut off.
-type requestBudgetKey struct{}
-
-func withRequestBudget(ctx context.Context) context.Context {
-	return context.WithValue(ctx, requestBudgetKey{}, true)
-}
-
-// mcpToolContext is the ctx a tool call served over MCP runs on: its request's deadline, which the SDK
-// does not pass on (mcpx.RequestContext), marked as the request's budget.
-func mcpToolContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	ctx, cancel := mcpx.RequestContext(ctx)
-	return withRequestBudget(ctx), cancel
-}
-
 // requestBudgetMargin is left of the request's time for the answer to reach the agent.
 const requestBudgetMargin = 5 * time.Second
 
-// externalTimeout is how long a connector call may take: its own timeout, or for a call served over
-// MCP, what is left of the request less requestBudgetMargin if that is shorter (byRequest).
-// In-process runs keep the connector's own timeout, whatever their ctx's deadline.
+// externalTimeout is how long a connector call may take: its own timeout, or, for a call served over
+// MCP (one with an mcpx.RequestDeadline), what is left of its request less requestBudgetMargin if that
+// is shorter (byRequest). The tool's ctx has no deadline: this is the only place a connector call meets
+// the request's. In-process runs keep the connector's own timeout, whatever their ctx's deadline.
 func externalTimeout(ctx context.Context, own time.Duration) (d time.Duration, byRequest bool) {
-	if ctx.Value(requestBudgetKey{}) == nil {
-		return own, false
-	}
-	dl, ok := ctx.Deadline()
+	at, ok := mcpx.RequestDeadline(ctx)
 	if !ok {
 		return own, false
 	}
-	if left := time.Until(dl) - requestBudgetMargin; left < own {
+	if left := time.Until(at) - requestBudgetMargin; left < own {
 		return left, true
 	}
 	return own, false
