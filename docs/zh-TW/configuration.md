@@ -55,7 +55,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` 以 Cloud Tasks 派送背景工作（雲端模式，見 [`deploy/cloudrun`](../../deploy/cloudrun/README.md)） |
 | `CUEFLOW_EVENTS` | `postgres` | 後台即時更新如何送到每個實例：`postgres`（`LISTEN/NOTIFY`，每個實例一條 session 連線）或 `pubsub`（Google Pub/Sub，不占資料庫連線；見 [`deploy/cloudrun`](../../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)）。`PUBSUB_EMULATOR_HOST` 可指向模擬器 |
 | `CUEFLOW_PUBSUB_TOPIC` | 空 | `CUEFLOW_EVENTS=pubsub` 用的 topic，格式 `projects/PROJECT/topics/TOPIC` |
-| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | 關機時等待刪除本實例 Pub/Sub subscription 的時間（Go duration，須 > 0；不是 duration 的值（`600`、`5min`）會讓啟動失敗並報錯）。請小於 Cloud Run 收到 SIGTERM 後的 10 秒寬限；設 10 秒以上會在啟動時警告。刪除逾時只會記錄 log，subscription 一天後會自行過期 |
+| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | 關機時等待刪除本實例 Pub/Sub subscription 的時間（Go duration，須 > 0；不是 duration 的值（`8`、`5sec`）會讓啟動失敗並報錯）。請小於 Cloud Run 收到 SIGTERM 後的 10 秒寬限；設 10 秒以上會在啟動時警告。刪除逾時只會記錄 log，subscription 一天後會自行過期 |
 | `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |
