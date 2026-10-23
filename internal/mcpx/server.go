@@ -106,6 +106,8 @@ func KeepToolAnswers(srv *mcp.Server) {
 	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			if method == "tools/call" && !startTool(ctx) {
+				// The deadline already ended the request, so this text never reaches the client: it sees the
+				// request end with no answer (EOF). A retry is safe because this call did not run.
 				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{
 					Text: "This request's time ran out before this tool call could run; it was not run."}}}, nil
 			}
