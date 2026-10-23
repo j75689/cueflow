@@ -37,7 +37,8 @@ func StatelessCapabilities() *mcp.ServerCapabilities {
 // The SDK runs handlers on a ctx detached from the request's (it neither ends nor has a deadline), and the
 // request lasts until its handler returns. The deadline cuts no tool by itself: a run's or agent token's
 // tool call bounds by it what may run long (a connector call, the wait for the run's tool turn), and
-// built-in tools run to the end, so none stops halfway through its writes. One that hangs elsewhere holds
+// built-in tools run to the end, so none stops halfway through its state writes (a thread message that
+// can't be written within crew's DetachedWriteTimeout is dropped). One that hangs elsewhere holds
 // its request until the platform's timeout (30 minutes on Cloud Run), and its answer, written after the
 // deadline, does not reach the client. The deadline is one request's, that is one tool call's: it does not
 // carry over to the requests a tool makes in turn. A client that goes away cancels nothing.
