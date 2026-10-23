@@ -186,8 +186,9 @@ func (c *Crew) lookupMCPRun(ctx context.Context, token string) *mcpRun {
 
 // toolTurnWait bounds how long a tool call waits for the run's previous one: past a connector call's
 // usual limit (externalCallTimeout), so a call queued behind one does not fail for nothing, and well
-// under the request timeout (CUEFLOW_MCP_REQUEST_TIMEOUT, which also bounds the wait when shorter).
-// An agent calls tools in parallel, and each call waiting holds a request slot.
+// under the request timeout (CUEFLOW_MCP_REQUEST_TIMEOUT), and it ends requestBudgetMargin before the
+// request's deadline when that comes first. An agent calls tools in parallel, and each call waiting
+// holds a request slot.
 var toolTurnWait = externalCallTimeout + 30*time.Second
 
 // acquire takes the run's turn, giving up when ctx ends; release gives it back.
@@ -200,6 +201,16 @@ func (r *mcpRun) acquire(ctx context.Context) bool {
 	}
 }
 
+// tryAcquire takes the run's turn if it is free.
+func (r *mcpRun) tryAcquire() bool {
+	select {
+	case r.turnCh() <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *mcpRun) release() { <-r.turnCh() }
 
 func (r *mcpRun) turnCh() chan struct{} {
@@ -208,18 +219,24 @@ func (r *mcpRun) turnCh() chan struct{} {
 }
 
 func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name string, args json.RawMessage) *mcp.CallToolResult {
-	ctx, cancelReq := mcpToolContext(ctx)
-	defer cancelReq()
-	waitCtx, cancel := context.WithTimeout(ctx, toolTurnWait)
-	ok := r.acquire(waitCtx)
+	// Over MCP the request's deadline bounds the wait for the turn, not the tool: a built-in tool runs
+	// to the end. The wait ends requestBudgetMargin early, so its answer still reaches the agent.
+	wait := toolTurnWait
+	at, byRequest := mcpx.RequestDeadline(ctx)
+	if byRequest && time.Until(at)-requestBudgetMargin < wait {
+		wait = time.Until(at) - requestBudgetMargin
+	}
+	ended := func() bool { return ctx.Err() != nil || byRequest && !time.Now().Before(at) }
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	ok := r.tryAcquire() || r.acquire(waitCtx)
 	cancel()
-	if ok && ctx.Err() != nil { // the turn came as the request ended: run nothing for no one
+	if ok && ended() { // the turn came as the request ended: run nothing for no one
 		r.release()
 		ok = false
 	}
 	if !ok {
 		text := "Timed out waiting for this run's previous tool call to finish; try again."
-		if ctx.Err() != nil {
+		if ended() {
 			text = "The request ended before this tool call could run; it was not run."
 		}
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}

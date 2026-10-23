@@ -70,8 +70,8 @@ type Config struct {
 	// PubSubDeleteTimeout bounds deleting this instance's subscription on shutdown
 	// (CUEFLOW_PUBSUB_DELETE_TIMEOUT, default 8 s).
 	PubSubDeleteTimeout time.Duration
-	// MCPRequestTimeout bounds one request to the stateless MCP endpoints, /mcp and /mcp/run
-	// (CUEFLOW_MCP_REQUEST_TIMEOUT, default 10 min).
+	// MCPRequestTimeout is the deadline of one request to the stateless MCP endpoints, /mcp and /mcp/run, that is
+	// one tool call (CUEFLOW_MCP_REQUEST_TIMEOUT, default 10 min); see mcpx.Stateless.
 	MCPRequestTimeout time.Duration
 	// ConnectorHTTPTimeout bounds one HTTP request of a connector that uses the shared client as-is
 	// (CUEFLOW_CONNECTOR_HTTP_TIMEOUT, default 90 s). Model calls and the MCP publisher are bounded by

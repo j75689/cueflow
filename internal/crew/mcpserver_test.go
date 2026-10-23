@@ -58,35 +58,34 @@ func TestToolCallWhoseRequestEndedIsNotRun(t *testing.T) {
 	}
 }
 
-// A connector call served over MCP ends before its request does; anywhere else it keeps its own
-// timeout, whatever the deadline on its ctx.
+// A connector call served over MCP (one with an mcpx.RequestDeadline) ends before its request does;
+// anywhere else it keeps its own timeout, whatever the deadline on its ctx.
 func TestExternalTimeoutFollowsTheMCPRequest(t *testing.T) {
 	own := 20 * time.Minute
-	short, cancel := context.WithTimeout(context.Background(), time.Minute)
+	bg := context.Background()
+	inProcess, cancel := context.WithTimeout(bg, time.Minute)
 	defer cancel()
-	long, cancelLong := context.WithTimeout(context.Background(), time.Hour)
-	defer cancelLong()
 
-	if d, by := externalTimeout(withRequestBudget(short), own); !by || d > time.Minute-requestBudgetMargin || d < 50*time.Second {
+	if d, by := externalTimeout(mcpx.WithRequestDeadline(bg, time.Now().Add(time.Minute)), own); !by || d > time.Minute-requestBudgetMargin || d < 50*time.Second {
 		t.Errorf("served over MCP, 1 min left: %s %v", d, by)
 	}
-	if d, by := externalTimeout(withRequestBudget(long), own); by || d != own {
+	if d, by := externalTimeout(mcpx.WithRequestDeadline(bg, time.Now().Add(time.Hour)), own); by || d != own {
 		t.Errorf("served over MCP, more time left than the connector's own: %s %v", d, by)
 	}
-	if d, by := externalTimeout(withRequestBudget(context.Background()), own); by || d != own {
-		t.Errorf("served over MCP, no deadline: %s %v", d, by)
+	if d, by := externalTimeout(mcpx.WithRequestDeadline(bg, time.Now().Add(-time.Second)), own); !by || d > 0 {
+		t.Errorf("served over MCP, deadline passed: %s %v", d, by)
 	}
-	if d, by := externalTimeout(short, own); by || d != own {
+	if d, by := externalTimeout(inProcess, own); by || d != own {
 		t.Errorf("in-process run with a deadline: %s %v", d, by)
 	}
-	if d, by := externalTimeout(context.Background(), own); by || d != own {
+	if d, by := externalTimeout(bg, own); by || d != own {
 		t.Errorf("in-process run: %s %v", d, by)
 	}
 }
 
 // servedOverMCP serves one tool through the SDK's real stateless handler behind mcpx.Stateless, as
 // MCPHandler does, and calls it once; it returns the tool's text (or the error) and how long it took.
-// As MCPHandler configures it, the tool's ctx carries no deadline but what mcpx.RequestContext puts back.
+// As MCPHandler configures it, the tool's ctx has no deadline, only the request's mcpx.RequestDeadline.
 func servedOverMCP(t *testing.T, maxRequest time.Duration, fn func(ctx context.Context) string) (string, time.Duration) {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: mcpx.StatelessCapabilities()})
@@ -112,29 +111,42 @@ func servedOverMCP(t *testing.T, maxRequest time.Duration, fn func(ctx context.C
 	return out.Content[0].(*mcp.TextContent).Text, time.Since(start)
 }
 
-// Through the real handler, a call queued behind one in progress gives up at the request's deadline.
-func TestQueuedToolCallEndsWithItsRequestOverMCP(t *testing.T) {
+// Through the real handler, a call queued behind one in progress gives up requestBudgetMargin before
+// its request's deadline, so the agent gets the answer: one written after the deadline is lost.
+func TestQueuedToolCallAnswersBeforeItsRequestEnds(t *testing.T) {
 	run := &mcpRun{done: make(chan struct{})}
 	run.acquire(context.Background()) // a call in progress
-	var text string
-	_, d := servedOverMCP(t, 300*time.Millisecond, func(ctx context.Context) string {
-		text = run.call(ctx, nil, nil, "list_tasks", nil).Content[0].(*mcp.TextContent).Text
-		return text
+	text, d := servedOverMCP(t, requestBudgetMargin+300*time.Millisecond, func(ctx context.Context) string {
+		return run.call(ctx, nil, nil, "list_tasks", nil).Content[0].(*mcp.TextContent).Text
 	})
-	if d > 3*time.Second || !strings.Contains(text, "request ended") {
+	if d > 2*time.Second || !strings.Contains(text, "Timed out waiting") {
 		t.Fatalf("after %s: %q", d, text)
 	}
 }
 
-// Through the real handler, a connector call sees what is left of its request.
+// A free turn is taken even with less than requestBudgetMargin left of the request, when the wait for
+// one has already run out (the run has finished, so the call answers that without a Crew).
+func TestFreeTurnIsTakenWithItsRequestEnding(t *testing.T) {
+	run := &mcpRun{done: make(chan struct{})}
+	close(run.done)
+	for i := 0; i < 20; i++ { // a select between the turn and the ended wait would pick at random
+		ctx := mcpx.WithRequestDeadline(context.Background(), time.Now().Add(time.Second))
+		out := run.call(ctx, nil, nil, "list_tasks", nil)
+		if text := out.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "already finished") {
+			t.Fatalf("call %d: %q", i, text)
+		}
+	}
+}
+
+// Through the real handler, a connector call sees what is left of its request, and the tool itself has
+// no deadline: it runs to the end.
 func TestExternalTimeoutSeesTheRequestOverMCP(t *testing.T) {
 	text, _ := servedOverMCP(t, time.Minute, func(ctx context.Context) string {
-		ctx, cancel := mcpToolContext(ctx)
-		defer cancel()
 		d, by := externalTimeout(ctx, 20*time.Minute)
-		return fmt.Sprintf("%v %v", by, d > 50*time.Second && d <= time.Minute-requestBudgetMargin)
+		_, has := ctx.Deadline()
+		return fmt.Sprintf("%v %v %v", by, d > 50*time.Second && d <= time.Minute-requestBudgetMargin, has)
 	})
-	if text != "true true" {
-		t.Fatalf("capped, in range: %q", text)
+	if text != "true true false" {
+		t.Fatalf("capped, in range, tool ctx with a deadline: %q", text)
 	}
 }
