@@ -16,7 +16,7 @@ startup warnings are logged by `cueflow serve` only.
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
-| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | The longest one request to the MCP endpoints (`/mcp`, `/mcp/run/…`) may stay open (a Go duration, at least `30s`; a value that is not a duration (`600`, `5min`) stops startup with an error). A run's or agent token's tool call (`/mcp/run/…`, `/mcp` with an agent token) still running then is canceled where it stands; the operator's `/mcp` tools are not cut by it. A client that disconnects does not cancel a tool call. Keep it under Cloud Run's 30 min request timeout; 30 min or more logs a warning at startup. A tool connector's call made for such a request (an `mcp_tools` server's tool, say) ends 5 s before the request does, if that comes before its own timeout, and the agent is told which limit ran out; in-process runs keep the connector's own timeout |
+| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | The longest one request to the MCP endpoints (`/mcp`, `/mcp/run/…`) may stay open (a Go duration, at least `30s`; a value that is not a duration (`600`, `5min`) or is out of range (`99999999999h`) stops startup with an error). A run's or agent token's tool call (`/mcp/run/…`, `/mcp` with an agent token) still running then is canceled where it stands; the operator's `/mcp` tools are not cut by it. A client that disconnects does not cancel a tool call. Keep it under Cloud Run's 30 min request timeout; 30 min or more logs a warning at startup. A tool connector's call made for such a request (an `mcp_tools` server's tool, say) ends 5 s before the request does, if that comes before its own timeout, and the agent is told which limit ran out; in-process runs keep the connector's own timeout |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | Links in emails |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | How machines reach the server (runner registration and MCP commands, media URLs): they cannot pass a browser login such as Cloudflare Access |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
@@ -26,9 +26,9 @@ startup warnings are logged by `cueflow serve` only.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker poll interval. A Go duration; anything else keeps the default and logs a warning at startup |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time acting on one approved deliverable (publishing a post, running an action connector) may take before the worker is considered crashed. A Go duration; anything else keeps the default and logs a warning at startup |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease. A Go duration; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker poll interval. A positive Go duration; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time acting on one approved deliverable (publishing a post, running an action connector) may take before the worker is considered crashed. A positive Go duration; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease. A positive Go duration; anything else keeps the default and logs a warning at startup |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
 
 ## Agents
@@ -58,7 +58,7 @@ See [modules.md](modules.md#images-and-videos) for how media is stored, served a
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](../deploy/cloudrun/README.md)) |
 | `CUEFLOW_EVENTS` | `postgres` | How dashboard live updates reach every instance: `postgres` (`LISTEN/NOTIFY`, one session connection per instance) or `pubsub` (Google Pub/Sub, no database connection; see [`deploy/cloudrun`](../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)). `PUBSUB_EMULATOR_HOST` points it at the emulator |
 | `CUEFLOW_PUBSUB_TOPIC` | empty | The topic for `CUEFLOW_EVENTS=pubsub`, as `projects/PROJECT/topics/TOPIC` |
-| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | How long shutdown waits for deleting this instance's Pub/Sub subscription (a Go duration, > 0; a value that is not a duration (`8`, `5sec`) stops startup with an error). Keep it under Cloud Run's 10 s grace after SIGTERM; 10 s or more logs a warning at startup. A delete that times out is only logged: the subscription expires on its own a day later |
+| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | How long shutdown waits for deleting this instance's Pub/Sub subscription (a Go duration, > 0; a value that is not a duration (`8`, `5sec`) or is out of range (`99999999999h`) stops startup with an error). Keep it under Cloud Run's 10 s grace after SIGTERM; 10 s or more logs a warning at startup. A delete that times out is only logged: the subscription expires on its own a day later |
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
