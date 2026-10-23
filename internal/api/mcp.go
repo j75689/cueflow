@@ -136,6 +136,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 		Instructions: strings.Join(instructions, " "),
 		Capabilities: mcpx.StatelessCapabilities(),
 	})
+	mcpx.KeepToolAnswers(srv)
 	tool := MCPTool
 
 	mcp.AddTool(srv, tool("list_orgs", "List the orgs. Each org has its own crew, board, schedules and review queue; the first one is the default.", true),
