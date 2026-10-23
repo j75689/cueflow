@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,8 @@ func base(t *testing.T) {
 	for _, k := range []string{"CUEFLOW_QUEUE", "CUEFLOW_TICK", "CUEFLOW_TASKS_QUEUE", "CUEFLOW_TASKS_TARGET_URL",
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
-		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT"} {
+		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT",
+		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -146,10 +148,11 @@ func TestContextHandOff(t *testing.T) {
 
 func TestPubSubDeleteTimeout(t *testing.T) {
 	for _, tc := range []struct {
-		v    string
-		want time.Duration
-		warn bool
-		err  bool
+		v          string
+		want       time.Duration
+		warn       bool
+		err        bool
+		unparsable bool // the error must also quote the value
 	}{
 		{v: "", want: 8 * time.Second},
 		{v: "5s", want: 5 * time.Second},
@@ -158,12 +161,15 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 		{v: "1m", want: time.Minute, warn: true},
 		{v: "0", err: true},
 		{v: "-2s", err: true},
+		{v: "8", err: true, unparsable: true},
+		{v: "5sec", err: true, unparsable: true},
 	} {
 		base(t)
 		t.Setenv("CUEFLOW_PUBSUB_DELETE_TIMEOUT", tc.v)
 		c, err := Load()
 		if tc.err {
-			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_PUBSUB_DELETE_TIMEOUT") {
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_PUBSUB_DELETE_TIMEOUT") ||
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -179,10 +185,11 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 
 func TestMCPRequestTimeout(t *testing.T) {
 	for _, tc := range []struct {
-		v    string
-		want time.Duration
-		warn bool
-		err  bool
+		v          string
+		want       time.Duration
+		warn       bool
+		err        bool
+		unparsable bool // the error must also quote the value
 	}{
 		{v: "", want: 10 * time.Minute},
 		{v: "5m", want: 5 * time.Minute},
@@ -193,12 +200,16 @@ func TestMCPRequestTimeout(t *testing.T) {
 		{v: "29s", err: true},
 		{v: "0", err: true},
 		{v: "-1m", err: true},
+		{v: "600", err: true, unparsable: true},
+		{v: "5min", err: true, unparsable: true},
+		{v: " 5m ", want: 5 * time.Minute},
 	} {
 		base(t)
 		t.Setenv("CUEFLOW_MCP_REQUEST_TIMEOUT", tc.v)
 		c, err := Load()
 		if tc.err {
-			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MCP_REQUEST_TIMEOUT") {
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MCP_REQUEST_TIMEOUT") ||
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -208,6 +219,35 @@ func TestMCPRequestTimeout(t *testing.T) {
 		}
 		if c.MCPRequestTimeout != tc.want || tc.warn != (len(c.Warnings) > 0) {
 			t.Errorf("%q: %v, warnings %v", tc.v, c.MCPRequestTimeout, c.Warnings)
+		}
+	}
+}
+
+// The duration settings from before CUEFLOW_PUBSUB_DELETE_TIMEOUT took a bad value silently, so they
+// keep their default and warn instead of failing: a deployment that booted still boots.
+func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
+	for _, tc := range []struct {
+		k   string
+		def time.Duration
+		get func(*Config) time.Duration
+	}{
+		{"CUEFLOW_DISPATCH_INTERVAL", 3 * time.Second, func(c *Config) time.Duration { return c.DispatchEvery }},
+		{"CUEFLOW_DISPATCH_LEASE", 10 * time.Minute, func(c *Config) time.Duration { return c.DispatchLease }},
+		{"CUEFLOW_PUBLISH_TIMEOUT", 5 * time.Minute, func(c *Config) time.Duration { return c.PublishTimeout }},
+	} {
+		base(t)
+		t.Setenv(tc.k, "5min")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.k, err)
+		}
+		if got := tc.get(c); got != tc.def || len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], tc.k+`="5min"`) ||
+			!strings.Contains(c.Warnings[0], "using "+tc.def.String()) {
+			t.Errorf("%s=5min: %v, warnings %v", tc.k, got, c.Warnings)
+		}
+		t.Setenv(tc.k, "7s")
+		if c, err = Load(); err != nil || tc.get(c) != 7*time.Second || len(c.Warnings) != 0 {
+			t.Errorf("%s=7s: %v %v", tc.k, c, err)
 		}
 	}
 }
