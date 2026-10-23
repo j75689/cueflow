@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/config"
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
@@ -80,7 +81,7 @@ func setup(t *testing.T) *env {
 	cs := content.NewStore(st)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broker := events.NewBroker()
-	h := hub.New(st, logger)
+	h := hub.New(st, logger, config.DefaultConnectorHTTPTimeout)
 	sched := scheduler.New(st, logger)
 	module := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: "http://localhost:3000"}
 	module.Attach()

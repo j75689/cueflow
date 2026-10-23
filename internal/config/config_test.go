@@ -16,7 +16,7 @@ func base(t *testing.T) {
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
 		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT",
-		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT"} {
+		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT", "CUEFLOW_CONNECTOR_HTTP_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -371,6 +371,46 @@ func TestPublishTimeoutBelowLease(t *testing.T) {
 	}
 }
 
+// CUEFLOW_CONNECTOR_HTTP_TIMEOUT is new, so a bad value stops startup: no floor, no warnings.
+func TestConnectorHTTPTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		v          string
+		want       time.Duration
+		err        bool
+		unparsable bool // the error must also quote the value
+		overflow   bool // the error must say the value is out of range
+	}{
+		{v: "", want: 90 * time.Second},
+		{v: "3m", want: 3 * time.Minute},
+		{v: "1ms", want: time.Millisecond},
+		{v: " 2m ", want: 2 * time.Minute},
+		{v: "0", err: true},
+		{v: "-1s", err: true},
+		{v: "90", err: true, unparsable: true},
+		{v: "90sec", err: true, unparsable: true},
+		{v: "99999999999h", err: true, overflow: true},
+		{v: "-99999999999h", err: true, overflow: true},
+	} {
+		base(t)
+		t.Setenv("CUEFLOW_CONNECTOR_HTTP_TIMEOUT", tc.v)
+		c, err := Load()
+		if tc.err {
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_CONNECTOR_HTTP_TIMEOUT") ||
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+notADuration) ||
+				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+outOfRange) {
+				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: %v", tc.v, err)
+		}
+		if c.ConnectorHTTPTimeout != tc.want || len(c.Warnings) > 0 {
+			t.Errorf("%q: %v, warnings %v", tc.v, c.ConnectorHTTPTimeout, c.Warnings)
+		}
+	}
+}
+
 // Unset durations take their defaults without a word: only a bad value warns.
 func TestUnsetDurationsDoNotWarn(t *testing.T) {
 	base(t)
@@ -379,7 +419,7 @@ func TestUnsetDurationsDoNotWarn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.DispatchEvery != 3*time.Second || c.DispatchLease != 10*time.Minute || c.PublishTimeout != 5*time.Minute ||
-		len(c.Warnings) != 0 {
-		t.Errorf("defaults: %v %v %v, warnings %q", c.DispatchEvery, c.DispatchLease, c.PublishTimeout, c.Warnings)
+		c.ConnectorHTTPTimeout != 90*time.Second || len(c.Warnings) != 0 {
+		t.Errorf("defaults: %v %v %v %v, warnings %q", c.DispatchEvery, c.DispatchLease, c.PublishTimeout, c.ConnectorHTTPTimeout, c.Warnings)
 	}
 }

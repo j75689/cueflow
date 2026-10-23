@@ -73,6 +73,10 @@ type Config struct {
 	// MCPRequestTimeout bounds one request to the stateless MCP endpoints, /mcp and /mcp/run
 	// (CUEFLOW_MCP_REQUEST_TIMEOUT, default 10 min).
 	MCPRequestTimeout time.Duration
+	// ConnectorHTTPTimeout bounds one HTTP request of a connector that uses the shared client as-is
+	// (CUEFLOW_CONNECTOR_HTTP_TIMEOUT, default 90 s). Model calls and the MCP publisher are bounded by
+	// their own deadlines instead.
+	ConnectorHTTPTimeout time.Duration
 	// Tick is who runs the clock: "internal" (in-process cron and loops) or "external" (Cloud
 	// Scheduler calls /internal/tick every minute; no in-process loops start).
 	Tick string
@@ -160,6 +164,12 @@ func Load() (*Config, error) {
 	}
 	if c.MCPRequestTimeout < MinMCPRequestTimeout {
 		return nil, fmt.Errorf("CUEFLOW_MCP_REQUEST_TIMEOUT must be at least %s, got %s", MinMCPRequestTimeout, c.MCPRequestTimeout)
+	}
+	if c.ConnectorHTTPTimeout, err = envDuration("CUEFLOW_CONNECTOR_HTTP_TIMEOUT", DefaultConnectorHTTPTimeout); err != nil {
+		return nil, err
+	}
+	if c.ConnectorHTTPTimeout <= 0 {
+		return nil, fmt.Errorf("CUEFLOW_CONNECTOR_HTTP_TIMEOUT must be > 0, got %s", c.ConnectorHTTPTimeout)
 	}
 	if c.MCPRequestTimeout >= 30*time.Minute {
 		warn(fmt.Sprintf("CUEFLOW_MCP_REQUEST_TIMEOUT=%s is not under Cloud Run's 30 min request timeout, which then cuts the request first", c.MCPRequestTimeout))
@@ -319,6 +329,9 @@ const DefaultMCPRequestTimeout = 10 * time.Minute
 // MinMCPRequestTimeout is the shortest CUEFLOW_MCP_REQUEST_TIMEOUT: a connector call ends 5 s before its
 // request does, and a tool call needs time left after that.
 const MinMCPRequestTimeout = 30 * time.Second
+
+// DefaultConnectorHTTPTimeout is CUEFLOW_CONNECTOR_HTTP_TIMEOUT's default.
+const DefaultConnectorHTTPTimeout = 90 * time.Second
 
 // DefaultContextHandOffAt is CUEFLOW_CONTEXT_HANDOFF's default: hand off at 80% of the window.
 const DefaultContextHandOffAt = 0.8
