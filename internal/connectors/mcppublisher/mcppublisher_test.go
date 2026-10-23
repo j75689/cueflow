@@ -27,6 +27,8 @@ type fakePublisher struct {
 	rename       map[string]string // default tool name -> name this server uses
 	createStatus string
 	block        chan struct{}
+	delay        time.Duration // create_post answers after this long
+	listDelay    time.Duration // list_accounts answers after this long
 	calls        []string
 	lastCreate   map[string]any
 	headers      http.Header
@@ -56,8 +58,17 @@ func jsonResult(v any) *mcp.CallToolResult {
 func (f *fakePublisher) server(t *testing.T) *httptest.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "publisher", Version: "test"}, nil)
 	srv.AddTool(&mcp.Tool{Name: f.name("list_accounts"), InputSchema: map[string]any{"type": "object"}},
-		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			f.record("list_accounts")
+			f.mu.Lock()
+			delay := f.listDelay
+			f.mu.Unlock()
+			if delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+				}
+			}
 			return jsonResult(map[string]any{"accounts": []map[string]any{
 				{"id": "th1", "platform": "threads", "username": "brand", "tag": "brand"},
 				{"id": "th2", "platform": "threads", "username": "me"},
@@ -73,11 +84,17 @@ func (f *fakePublisher) server(t *testing.T) *httptest.Server {
 			_ = json.Unmarshal(req.Params.Arguments, &in)
 			f.mu.Lock()
 			f.lastCreate = in
-			status, block := f.createStatus, f.block
+			status, block, delay := f.createStatus, f.block, f.delay
 			f.mu.Unlock()
 			if block != nil {
 				select {
 				case <-block:
+				case <-ctx.Done():
+				}
+			}
+			if delay > 0 {
+				select {
+				case <-time.After(delay):
 				case <-ctx.Done():
 				}
 			}
@@ -141,6 +158,19 @@ func newPublisher(t *testing.T, f *fakePublisher) *Publisher {
 	ts := f.server(t)
 	inst, err := New(connector.Config{"endpoint_url": ts.URL, "cf_client_id": "cid", "cf_client_secret": "csecret"},
 		connector.Env{HTTPClient: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return inst.(*Publisher)
+}
+
+// newPublisherWithTimeout gives the connector a shared client with Timeout d, like the hub's.
+func newPublisherWithTimeout(t *testing.T, f *fakePublisher, d time.Duration) *Publisher {
+	ts := f.server(t)
+	hc := *ts.Client()
+	hc.Timeout = d
+	inst, err := New(connector.Config{"endpoint_url": ts.URL, "cf_client_id": "cid", "cf_client_secret": "csecret"},
+		connector.Env{HTTPClient: &hc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,6 +319,49 @@ func TestTimeoutWarnsItMayHaveGoneOut(t *testing.T) {
 	var partial *connector.PartialError
 	if err == nil || errors.As(err, &partial) || !strings.Contains(err.Error(), "may have been published") {
 		t.Fatalf("timeout: %v", err)
+	}
+}
+
+func TestCreatePostOutlastsTheSharedClientTimeout(t *testing.T) {
+	f := &fakePublisher{createStatus: "published", delay: 600 * time.Millisecond}
+	p := newPublisherWithTimeout(t, f, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := p.Publish(ctx, req("th1"))
+	if err != nil {
+		t.Fatalf("a create_post slower than the shared client's timeout was cut: %v", err)
+	}
+	if res.ExternalIDs[PostIDKey] != "post-1" || !slices.Contains(f.calls, "create_post") {
+		t.Fatalf("ids %v calls %v", res.ExternalIDs, f.calls)
+	}
+}
+
+func TestCreatePostStopsAtItsDeadline(t *testing.T) {
+	f := &fakePublisher{createStatus: "published", delay: 5 * time.Second}
+	p := newPublisherWithTimeout(t, f, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := p.Publish(ctx, req("th1"))
+	var partial *connector.PartialError
+	if err == nil || errors.As(err, &partial) || !strings.Contains(err.Error(), "may have been published") {
+		t.Fatalf("deadline: %v", err)
+	}
+	if took := time.Since(start); took < 500*time.Millisecond {
+		t.Fatalf("cut after %s, before the ctx deadline", took)
+	}
+}
+
+func TestTestAndAccountsIgnoreTheSharedClientTimeout(t *testing.T) {
+	f := &fakePublisher{createStatus: "published", listDelay: 600 * time.Millisecond}
+	p := newPublisherWithTimeout(t, f, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if res, _ := p.Test(ctx); !res.OK {
+		t.Fatalf("test: %+v", res)
+	}
+	if accts, err := p.ListAccounts(ctx); err != nil || len(accts) != 5 {
+		t.Fatalf("accounts: %+v %v", accts, err)
 	}
 }
 

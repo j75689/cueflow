@@ -126,7 +126,15 @@ func previousID(previous map[string]string) string {
 }
 
 func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
-	opts := mcpx.Options{Transport: mcpx.TransportStreamable, Endpoint: cfg.String("endpoint_url"), HTTPClient: env.HTTPClient,
+	// The MCP session has no overall timeout: a create_post can take minutes (an Instagram carousel), and
+	// cutting it after the publisher has posted makes the retry post twice. Each call is bounded by its
+	// ctx instead: the publish timeout, or the deadline of the Test and account-listing requests.
+	session := &http.Client{}
+	if env.HTTPClient != nil {
+		*session = *env.HTTPClient
+	}
+	session.Timeout = 0
+	opts := mcpx.Options{Transport: mcpx.TransportStreamable, Endpoint: cfg.String("endpoint_url"), HTTPClient: session,
 		Headers: map[string]string{}}
 	if opts.Endpoint == "" {
 		return nil, errors.New("mcp publisher: an MCP endpoint is required")
