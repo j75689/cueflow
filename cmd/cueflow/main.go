@@ -195,7 +195,7 @@ func serve() error {
 		broker.Use(&pg.Transport{Pool: pool, ListenURL: cfg.DatabaseSessionURL}, logger)
 	}
 	go broker.Run(ctx)
-	h := hub.New(st, logger)
+	h := hub.New(st, logger, cfg.ConnectorHTTPTimeout)
 	sched := scheduler.New(st, logger)
 
 	// Modules (CUEFLOW_MODULES). Each one brings its routes, workers, cron and agent tools; a module

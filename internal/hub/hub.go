@@ -21,8 +21,10 @@ type Hub struct {
 	http   *http.Client
 }
 
-func New(st *store.Store, logger *slog.Logger) *Hub {
-	return &Hub{store: st, logger: logger, http: &http.Client{Timeout: 90 * time.Second}}
+// New builds a hub whose connectors share one HTTP client; httpTimeout bounds each of its requests
+// (CUEFLOW_CONNECTOR_HTTP_TIMEOUT).
+func New(st *store.Store, logger *slog.Logger, httpTimeout time.Duration) *Hub {
+	return &Hub{store: st, logger: logger, http: &http.Client{Timeout: httpTimeout}}
 }
 
 // Instance builds a connector by ID. Inactive connectors are refused unless allowInactive is set

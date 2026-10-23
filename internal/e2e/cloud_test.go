@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/api"
+	"github.com/j75689/cueflow/internal/config"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/events"
@@ -178,7 +179,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger), Broker: events.NewBroker(),
+	srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), Broker: events.NewBroker(),
 		Scheduler: e.sched, Crew: e.crew, Logger: logger,
 		InternalAuth: auth,
 		Handlers: jobs.Handlers{jobs.KindCrew: func(context.Context, uuid.UUID) error {
@@ -230,7 +231,7 @@ func TestInternalWorkRoutes(t *testing.T) {
 	}
 
 	// Without the cloud settings the routes simply do not exist.
-	local := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger), Broker: events.NewBroker(),
+	local := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), Broker: events.NewBroker(),
 		Scheduler: e.sched, Crew: e.crew, Logger: logger}).Handler())
 	defer local.Close()
 	resp, err := http.Post(local.URL+jobs.TickPath, "application/json", strings.NewReader(""))
@@ -251,7 +252,7 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	b := crew.New(e.store, hub.New(e.store, logger), events.NewBroker(), logger, false)
+	b := crew.New(e.store, hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), events.NewBroker(), logger, false)
 	mux := http.NewServeMux()
 	mux.Handle(crew.MCPPathPrefix, b.MCPHandler(0))
 	instanceB := httptest.NewServer(mux)
