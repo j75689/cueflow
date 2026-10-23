@@ -41,7 +41,8 @@ type Crew struct {
 	ContextHandOffAt float64
 	Lease            time.Duration
 	Every            time.Duration
-	// DetachedWriteTimeout bounds each write a tool call makes whatever happens to its ctx (see detached).
+	// DetachedWriteTimeout bounds each thread write (say, system, taskOrg) and the other writes a tool call
+	// makes detached from its ctx (see detached); <= 0 means DefaultDetachedWriteTimeout.
 	DetachedWriteTimeout time.Duration
 	// ValidateSchedule checks cron expressions for agent-created schedules (set by main).
 	ValidateSchedule store.CronValidator
@@ -701,7 +702,11 @@ const DefaultDetachedWriteTimeout = 30 * time.Second
 // stopped or its request has ended), bounded by DetachedWriteTimeout instead, so a hung database or
 // blob store can't hold the run's tool turn, and the request serving it, for good.
 func (c *Crew) detached(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), c.DetachedWriteTimeout)
+	timeout := c.DetachedWriteTimeout
+	if timeout <= 0 {
+		timeout = DefaultDetachedWriteTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
 // claimCheckTimeout bounds holdsClaim, so a hung database doesn't hold up every turn, tool call and

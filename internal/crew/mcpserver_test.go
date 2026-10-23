@@ -150,3 +150,22 @@ func TestExternalTimeoutSeesTheRequestOverMCP(t *testing.T) {
 		t.Fatalf("capped, in range, tool ctx with a deadline: %q", text)
 	}
 }
+
+// A Crew not built with New (as in tests) has no DetachedWriteTimeout: detached falls back to the
+// default rather than failing every thread write at once. Its ctx outlives the caller's.
+func TestDetachedFallsBackToTheDefaultTimeout(t *testing.T) {
+	for _, set := range []time.Duration{0, -time.Second} {
+		parent, stop := context.WithCancel(context.Background())
+		stop()
+		ctx, cancel := (&Crew{DetachedWriteTimeout: set}).detached(parent)
+		at, ok := ctx.Deadline()
+		left, err := time.Until(at), ctx.Err()
+		cancel()
+		if !ok || left <= DefaultDetachedWriteTimeout-time.Second || left > DefaultDetachedWriteTimeout {
+			t.Fatalf("DetachedWriteTimeout %v: deadline in %v (%v), want about %v", set, left, ok, DefaultDetachedWriteTimeout)
+		}
+		if err != nil {
+			t.Fatalf("DetachedWriteTimeout %v: ctx ended with its parent", set)
+		}
+	}
+}
