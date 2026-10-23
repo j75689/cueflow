@@ -8,15 +8,26 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// StatelessCapabilities are what a stateless server advertises: tools, but no list-changed notifications.
+// StatelessCapabilities are what a stateless server advertises: tools, prompts and resources, but no list-changed
+// notifications.
 //
 // The SDK advertises tools.listChanged as soon as a server has a tool. A client on protocol 2026-07-28 then opens
 // subscriptions/listen, a POST the SDK holds open until the client goes away, as no other request can reach it to
 // end it. A stateless server never sends those notifications, and on Cloud Run the POST held a request slot for
 // 30 minutes; enough of them used up the instances. Without the capability the client opens no listen, and one it
 // opens anyway is answered at once.
+//
+// The SDK does the same for prompts and resources: any of the three left nil gets listChanged: true once one is
+// registered, so all three are pinned here. They are advertised even when the server has none; prompts/list and
+// resources/list then answer an empty list. A SubscribeHandler would turn on resources.subscribe and hold listens
+// the same way, so don't set one on a stateless server.
 func StatelessCapabilities() *mcp.ServerCapabilities {
-	return &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}, Tools: &mcp.ToolCapabilities{}}
+	return &mcp.ServerCapabilities{
+		Logging:   &mcp.LoggingCapabilities{},
+		Tools:     &mcp.ToolCapabilities{},
+		Prompts:   &mcp.PromptCapabilities{},
+		Resources: &mcp.ResourceCapabilities{},
+	}
 }
 
 // Stateless fronts a stateless Streamable HTTP handler: it refuses the GET stream (NoStandaloneStream) and

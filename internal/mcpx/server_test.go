@@ -50,12 +50,18 @@ func TestNoStandaloneStream(t *testing.T) {
 }
 
 // A client on protocol 2026-07-28 opens subscriptions/listen when the server advertises
-// tools.listChanged, and the SDK holds that POST open until the client goes away: on Cloud Run each
-// one took a request slot for 30 minutes. With StatelessCapabilities the client opens none.
+// tools/prompts/resources.listChanged, and the SDK holds that POST open until the client goes away: on
+// Cloud Run each one took a request slot for 30 minutes. With StatelessCapabilities the client opens none.
 func TestNoPOSTIsHeldOpen(t *testing.T) {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: StatelessCapabilities()})
 	mcp.AddTool(srv, &mcp.Tool{Name: "ping"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, struct{}{}, nil
+	})
+	srv.AddPrompt(&mcp.Prompt{Name: "hello"}, func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{}, nil
+	})
+	srv.AddResource(&mcp.Resource{URI: "cueflow://t", Name: "t"}, func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{}, nil
 	})
 	h := Stateless(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}), time.Minute)
 	var mu sync.Mutex
@@ -74,7 +80,9 @@ func TestNoPOSTIsHeldOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cl := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, &mcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {}, // what makes a client listen
+		ToolListChangedHandler:     func(context.Context, *mcp.ToolListChangedRequest) {}, // what makes a client listen
+		PromptListChangedHandler:   func(context.Context, *mcp.PromptListChangedRequest) {},
+		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {},
 	})
 	cs, err := cl.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: ts.URL, DisableStandaloneSSE: true}, nil)
 	if err != nil {
@@ -90,6 +98,14 @@ func TestNoPOSTIsHeldOpen(t *testing.T) {
 	defer mu.Unlock()
 	if len(slow) > 0 {
 		t.Fatalf("POSTs held open: %v", slow)
+	}
+}
+
+func TestStatelessCapabilitiesPinListChangedOff(t *testing.T) {
+	c := StatelessCapabilities()
+	if c.Tools == nil || c.Tools.ListChanged || c.Prompts == nil || c.Prompts.ListChanged ||
+		c.Resources == nil || c.Resources.ListChanged || c.Resources.Subscribe {
+		t.Fatalf("tools %+v prompts %+v resources %+v", c.Tools, c.Prompts, c.Resources)
 	}
 }
 
