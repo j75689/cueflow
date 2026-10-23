@@ -246,7 +246,10 @@ func TestKeepToolAnswersStillCutsListen(t *testing.T) {
 		start := time.Now()
 		h.ServeHTTP(w, r)
 		if r.Header.Get("Mcp-Method") == "subscriptions/listen" {
-			held <- time.Since(start)
+			select { // records the first listen; a later one must not block the handler (and ts.Close)
+			case held <- time.Since(start):
+			default:
+			}
 		}
 	}))
 	defer ts.Close()
