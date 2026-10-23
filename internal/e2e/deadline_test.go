@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,8 +51,9 @@ func lockTable(t *testing.T, e *env, table string, hold time.Duration) func() {
 	if _, err := tx.Exec(ctx, "LOCK TABLE "+table+" IN EXCLUSIVE MODE"); err != nil {
 		t.Fatal(err)
 	}
-	timer := time.AfterFunc(hold, func() { _ = tx.Rollback(ctx) })
-	release := func() { timer.Stop(); _ = tx.Rollback(ctx) }
+	var once sync.Once
+	release := func() { once.Do(func() { _ = tx.Rollback(ctx) }) }
+	time.AfterFunc(hold, release)
 	t.Cleanup(release)
 	return release
 }
