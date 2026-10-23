@@ -1,6 +1,7 @@
 # 設定
 
 CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；Cloud Run 見 [deploy/cloudrun/README.md](../../deploy/cloudrun/README.md)（英文）。
+會讓啟動失敗的值，也會讓 `cueflow migrate`、`rotate-key` 與 `media` 失敗；啟動時的警告只有 `cueflow serve` 會記錄。
 
 ## 基本
 
@@ -13,7 +14,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |
-| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | 單一 MCP 請求（`/mcp`、`/mcp/run/…`）最長可開著的時間（Go duration，至少 `30s`）。屆時仍在執行的 run 或 agent token 工具呼叫（`/mcp/run/…`、用 agent token 的 `/mcp`）會在當下被取消；操作者 `/mcp` 的工具不受影響。client 斷線不會取消工具呼叫。請小於 Cloud Run 的 30 分鐘請求逾時；設 30 分鐘以上會在啟動時警告。這類請求中呼叫的工具連接器（例如 `mcp_tools` 伺服器的工具）若自身逾時晚於請求，會在請求結束前 5 秒先停止，並告訴 agent 是哪個上限到了；程序內的執行仍照連接器自己的逾時 |
+| `CUEFLOW_MCP_REQUEST_TIMEOUT` | `10m` | 單一 MCP 請求（`/mcp`、`/mcp/run/…`）最長可開著的時間（Go duration，至少 `30s`；不是 duration 的值（`600`、`5min`）會讓啟動失敗並報錯）。屆時仍在執行的 run 或 agent token 工具呼叫（`/mcp/run/…`、用 agent token 的 `/mcp`）會在當下被取消；操作者 `/mcp` 的工具不受影響。client 斷線不會取消工具呼叫。請小於 Cloud Run 的 30 分鐘請求逾時；設 30 分鐘以上會在啟動時警告。這類請求中呼叫的工具連接器（例如 `mcp_tools` 伺服器的工具）若自身逾時晚於請求，會在請求結束前 5 秒先停止，並告訴 agent 是哪個上限到了；程序內的執行仍照連接器自己的逾時 |
 | `CUEFLOW_PUBLIC_URL` | `http://localhost:3000` | 通知信裡的連結 |
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
@@ -23,9 +24,9 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker 的輪詢間隔 |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | 對一件已核准 deliverable 的動作（發布貼文、執行 action connector）最長可以花多久，超過就視為 worker 當機 |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短 |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker 的輪詢間隔。須為 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | 對一件已核准 deliverable 的動作（發布貼文、執行 action connector）最長可以花多久，超過就視為 worker 當機。須為 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短。須為 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
 
 ## Agent
@@ -55,7 +56,7 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` 以 Cloud Tasks 派送背景工作（雲端模式，見 [`deploy/cloudrun`](../../deploy/cloudrun/README.md)） |
 | `CUEFLOW_EVENTS` | `postgres` | 後台即時更新如何送到每個實例：`postgres`（`LISTEN/NOTIFY`，每個實例一條 session 連線）或 `pubsub`（Google Pub/Sub，不占資料庫連線；見 [`deploy/cloudrun`](../../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)）。`PUBSUB_EMULATOR_HOST` 可指向模擬器 |
 | `CUEFLOW_PUBSUB_TOPIC` | 空 | `CUEFLOW_EVENTS=pubsub` 用的 topic，格式 `projects/PROJECT/topics/TOPIC` |
-| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | 關機時等待刪除本實例 Pub/Sub subscription 的時間（Go duration，須 > 0）。請小於 Cloud Run 收到 SIGTERM 後的 10 秒寬限；設 10 秒以上會在啟動時警告。刪除逾時只會記錄 log，subscription 一天後會自行過期 |
+| `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | 關機時等待刪除本實例 Pub/Sub subscription 的時間（Go duration，須 > 0；不是 duration 的值（`8`、`5sec`）會讓啟動失敗並報錯）。請小於 Cloud Run 收到 SIGTERM 後的 10 秒寬限；設 10 秒以上會在啟動時警告。刪除逾時只會記錄 log，subscription 一天後會自行過期 |
 | `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
 | `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |

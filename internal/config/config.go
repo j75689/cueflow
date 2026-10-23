@@ -116,15 +116,15 @@ func Load() (*Config, error) {
 		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
 		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),
-		DispatchEvery:         envDuration("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second),
-		DispatchLease:         envDuration("CUEFLOW_DISPATCH_LEASE", 10*time.Minute),
-		PublishTimeout:        envDuration("CUEFLOW_PUBLISH_TIMEOUT", 5*time.Minute),
 		DisableScheduler:      envBool("CUEFLOW_DISABLE_SCHEDULER"),
 		AgentConcurrency:      envInt("CUEFLOW_AGENT_CONCURRENCY", 3),
 		AgentAllowPrivateURLs: envBool("CUEFLOW_AGENT_ALLOW_PRIVATE_URLS"),
 	}
 	warn := func(msg string) { c.Warnings = append(c.Warnings, msg) }
 	c.ContextHandOffAt = envFraction("CUEFLOW_CONTEXT_HANDOFF", DefaultContextHandOffAt, warn)
+	c.DispatchEvery = envDurationOrWarn("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second, warn)
+	c.DispatchLease = envDurationOrWarn("CUEFLOW_DISPATCH_LEASE", 10*time.Minute, warn)
+	c.PublishTimeout = envDurationOrWarn("CUEFLOW_PUBLISH_TIMEOUT", 5*time.Minute, warn)
 	var err error
 	if c.Modules, err = parseModules(os.Getenv("CUEFLOW_MODULES")); err != nil {
 		return nil, err
@@ -143,11 +143,15 @@ func Load() (*Config, error) {
 	c.Queue = env("CUEFLOW_QUEUE", "local")
 	c.Events = env("CUEFLOW_EVENTS", "postgres")
 	c.PubSubTopic = os.Getenv("CUEFLOW_PUBSUB_TOPIC")
-	c.PubSubDeleteTimeout = envDuration("CUEFLOW_PUBSUB_DELETE_TIMEOUT", DefaultPubSubDeleteTimeout)
+	if c.PubSubDeleteTimeout, err = envDuration("CUEFLOW_PUBSUB_DELETE_TIMEOUT", DefaultPubSubDeleteTimeout); err != nil {
+		return nil, err
+	}
 	if c.PubSubDeleteTimeout <= 0 {
 		return nil, fmt.Errorf("CUEFLOW_PUBSUB_DELETE_TIMEOUT must be > 0, got %s", c.PubSubDeleteTimeout)
 	}
-	c.MCPRequestTimeout = envDuration("CUEFLOW_MCP_REQUEST_TIMEOUT", DefaultMCPRequestTimeout)
+	if c.MCPRequestTimeout, err = envDuration("CUEFLOW_MCP_REQUEST_TIMEOUT", DefaultMCPRequestTimeout); err != nil {
+		return nil, err
+	}
 	if c.MCPRequestTimeout < MinMCPRequestTimeout {
 		return nil, fmt.Errorf("CUEFLOW_MCP_REQUEST_TIMEOUT must be at least %s, got %s", MinMCPRequestTimeout, c.MCPRequestTimeout)
 	}
@@ -244,13 +248,29 @@ func env(k, def string) string {
 	return def
 }
 
-func envDuration(k string, def time.Duration) time.Duration {
-	if v := os.Getenv(k); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
+// envDuration reads k as a Go duration (30s, 10m, 1h30m); blank is def. A value that does not parse is an
+// error naming k, so "600" or "5min" cannot quietly become the default.
+func envDuration(k string, def time.Duration) (time.Duration, error) {
+	v := strings.TrimSpace(os.Getenv(k))
+	if v == "" {
+		return def, nil
 	}
-	return def
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a duration: give a number with a unit, e.g. 30s, 10m or 1h", k, v)
+	}
+	return d, nil
+}
+
+// envDurationOrWarn is envDuration for the settings that took a bad value silently before it was checked:
+// such a value keeps def and is passed to warn, so a deployment that boots today still boots.
+func envDurationOrWarn(k string, def time.Duration, warn func(string)) time.Duration {
+	d, err := envDuration(k, def)
+	if err != nil {
+		warn(fmt.Sprintf("%v; using %s", err, def))
+		return def
+	}
+	return d
 }
 
 func envBool(k string) bool {
