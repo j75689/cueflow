@@ -153,6 +153,7 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 		warn       bool
 		err        bool
 		unparsable bool // the error must also quote the value
+		overflow   bool // the error must say the value is out of range
 	}{
 		{v: "", want: 8 * time.Second},
 		{v: "5s", want: 5 * time.Second},
@@ -163,13 +164,15 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 		{v: "-2s", err: true},
 		{v: "8", err: true, unparsable: true},
 		{v: "5sec", err: true, unparsable: true},
+		{v: "99999999999h", err: true, overflow: true},
 	} {
 		base(t)
 		t.Setenv("CUEFLOW_PUBSUB_DELETE_TIMEOUT", tc.v)
 		c, err := Load()
 		if tc.err {
 			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_PUBSUB_DELETE_TIMEOUT") ||
-				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") {
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") ||
+				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is out of range") {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -190,6 +193,7 @@ func TestMCPRequestTimeout(t *testing.T) {
 		warn       bool
 		err        bool
 		unparsable bool // the error must also quote the value
+		overflow   bool // the error must say the value is out of range
 	}{
 		{v: "", want: 10 * time.Minute},
 		{v: "5m", want: 5 * time.Minute},
@@ -202,6 +206,7 @@ func TestMCPRequestTimeout(t *testing.T) {
 		{v: "-1m", err: true},
 		{v: "600", err: true, unparsable: true},
 		{v: "5min", err: true, unparsable: true},
+		{v: "99999999999h", err: true, overflow: true},
 		{v: " 5m ", want: 5 * time.Minute},
 	} {
 		base(t)
@@ -209,7 +214,8 @@ func TestMCPRequestTimeout(t *testing.T) {
 		c, err := Load()
 		if tc.err {
 			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MCP_REQUEST_TIMEOUT") ||
-				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") {
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") ||
+				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is out of range") {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -224,7 +230,8 @@ func TestMCPRequestTimeout(t *testing.T) {
 }
 
 // The duration settings from before CUEFLOW_PUBSUB_DELETE_TIMEOUT took a bad value silently, so they
-// keep their default and warn instead of failing: a deployment that booted still boots.
+// keep their default and warn instead of failing: a deployment that booted still boots. A value that is
+// not > 0 is bad too: an interval of 0 panicked the deliverables worker, and a lease or timeout of 0 means nothing.
 func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
 	for _, tc := range []struct {
 		k   string
@@ -248,6 +255,18 @@ func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
 		t.Setenv(tc.k, "7s")
 		if c, err = Load(); err != nil || tc.get(c) != 7*time.Second || len(c.Warnings) != 0 {
 			t.Errorf("%s=7s: %v %v", tc.k, c, err)
+		}
+		for v, msg := range map[string]string{"0": "must be > 0", "0s": "must be > 0", "-1s": "must be > 0",
+			"-5m": "must be > 0", "99999999999h": "is out of range"} {
+			t.Setenv(tc.k, v)
+			if c, err = Load(); err != nil {
+				t.Fatalf("%s=%s: %v", tc.k, v, err)
+			}
+			if got := tc.get(c); got != tc.def || len(c.Warnings) != 1 ||
+				!strings.Contains(c.Warnings[0], tc.k+"="+strconv.Quote(v)+" "+msg) ||
+				!strings.Contains(c.Warnings[0], "using "+tc.def.String()) {
+				t.Errorf("%s=%s: %v, warnings %v", tc.k, v, got, c.Warnings)
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -248,6 +249,10 @@ func env(k, def string) string {
 	return def
 }
 
+// durationSyntax is what time.ParseDuration accepts. It fails on a value that matches only when the value is
+// out of range, which it reports with the same text as a typo.
+var durationSyntax = regexp.MustCompile(`^[-+]?(([0-9]+(\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+$`)
+
 // envDuration reads k as a Go duration (30s, 10m, 1h30m); blank is def. A value that does not parse is an
 // error naming k, so "600" or "5min" cannot quietly become the default.
 func envDuration(k string, def time.Duration) (time.Duration, error) {
@@ -256,6 +261,9 @@ func envDuration(k string, def time.Duration) (time.Duration, error) {
 		return def, nil
 	}
 	d, err := time.ParseDuration(v)
+	if err != nil && durationSyntax.MatchString(v) {
+		return 0, fmt.Errorf("%s=%q is out of range: a duration can be at most about 2562047h", k, v)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("%s=%q is not a duration: give a number with a unit, e.g. 30s, 10m or 1h", k, v)
 	}
@@ -263,9 +271,13 @@ func envDuration(k string, def time.Duration) (time.Duration, error) {
 }
 
 // envDurationOrWarn is envDuration for the settings that took a bad value silently before it was checked:
-// such a value keeps def and is passed to warn, so a deployment that boots today still boots.
+// such a value, or one that is not > 0, keeps def and is passed to warn, so a deployment that boots today
+// still boots.
 func envDurationOrWarn(k string, def time.Duration, warn func(string)) time.Duration {
 	d, err := envDuration(k, def)
+	if err == nil && d <= 0 {
+		err = fmt.Errorf("%s=%q must be > 0", k, strings.TrimSpace(os.Getenv(k)))
+	}
 	if err != nil {
 		warn(fmt.Sprintf("%v; using %s", err, def))
 		return def
