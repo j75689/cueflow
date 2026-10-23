@@ -146,6 +146,12 @@ func TestContextHandOff(t *testing.T) {
 	}
 }
 
+// The reasons envDuration gives, as they follow the quoted value.
+const (
+	notADuration = " is not a duration: give a number with a unit, e.g. 30s, 10m or 1h"
+	outOfRange   = " is out of range: a duration must be between about -2562047h and 2562047h"
+)
+
 func TestPubSubDeleteTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		v          string
@@ -165,14 +171,21 @@ func TestPubSubDeleteTimeout(t *testing.T) {
 		{v: "8", err: true, unparsable: true},
 		{v: "5sec", err: true, unparsable: true},
 		{v: "99999999999h", err: true, overflow: true},
+		{v: "-99999999999h", err: true, overflow: true},
+		// Shaped like a duration but not one: they keep the typo hint, not the out-of-range one.
+		{v: "1hh", err: true, unparsable: true},
+		{v: ".s", err: true, unparsable: true},
+		{v: "+-1s", err: true, unparsable: true},
+		{v: "1e3s", err: true, unparsable: true},
+		{v: "1h-1m", err: true, unparsable: true},
 	} {
 		base(t)
 		t.Setenv("CUEFLOW_PUBSUB_DELETE_TIMEOUT", tc.v)
 		c, err := Load()
 		if tc.err {
 			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_PUBSUB_DELETE_TIMEOUT") ||
-				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") ||
-				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is out of range") {
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+notADuration) ||
+				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+outOfRange) {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -207,6 +220,13 @@ func TestMCPRequestTimeout(t *testing.T) {
 		{v: "600", err: true, unparsable: true},
 		{v: "5min", err: true, unparsable: true},
 		{v: "99999999999h", err: true, overflow: true},
+		{v: "-99999999999h", err: true, overflow: true},
+		// Shaped like a duration but not one: they keep the typo hint, not the out-of-range one.
+		{v: "1hh", err: true, unparsable: true},
+		{v: ".s", err: true, unparsable: true},
+		{v: "+-1s", err: true, unparsable: true},
+		{v: "1e3s", err: true, unparsable: true},
+		{v: "1h-1m", err: true, unparsable: true},
 		{v: " 5m ", want: 5 * time.Minute},
 	} {
 		base(t)
@@ -214,8 +234,8 @@ func TestMCPRequestTimeout(t *testing.T) {
 		c, err := Load()
 		if tc.err {
 			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MCP_REQUEST_TIMEOUT") ||
-				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is not a duration") ||
-				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+" is out of range") {
+				tc.unparsable && !strings.Contains(err.Error(), strconv.Quote(tc.v)+notADuration) ||
+				tc.overflow && !strings.Contains(err.Error(), strconv.Quote(tc.v)+outOfRange) {
 				t.Errorf("%q: want an error naming the setting, got %v", tc.v, err)
 			}
 			continue
@@ -256,14 +276,15 @@ func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
 		if c, err = Load(); err != nil || tc.get(c) != 7*time.Second || len(c.Warnings) != 0 {
 			t.Errorf("%s=7s: %v %v", tc.k, c, err)
 		}
-		for v, msg := range map[string]string{"0": "must be > 0", "0s": "must be > 0", "-1s": "must be > 0",
-			"-5m": "must be > 0", "99999999999h": "is out of range"} {
+		for v, msg := range map[string]string{"0": " must be > 0", "0s": " must be > 0", "-1s": " must be > 0",
+			"-5m": " must be > 0", "99999999999h": outOfRange, "-99999999999h": outOfRange,
+			"1hh": notADuration, ".s": notADuration, "+-1s": notADuration, "1e3s": notADuration, "1h-1m": notADuration} {
 			t.Setenv(tc.k, v)
 			if c, err = Load(); err != nil {
 				t.Fatalf("%s=%s: %v", tc.k, v, err)
 			}
 			if got := tc.get(c); got != tc.def || len(c.Warnings) != 1 ||
-				!strings.Contains(c.Warnings[0], tc.k+"="+strconv.Quote(v)+" "+msg) ||
+				!strings.Contains(c.Warnings[0], tc.k+"="+strconv.Quote(v)+msg) ||
 				!strings.Contains(c.Warnings[0], "using "+tc.def.String()) {
 				t.Errorf("%s=%s: %v, warnings %v", tc.k, v, got, c.Warnings)
 			}

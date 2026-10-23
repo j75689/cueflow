@@ -262,7 +262,7 @@ func envDuration(k string, def time.Duration) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil && durationSyntax.MatchString(v) {
-		return 0, fmt.Errorf("%s=%q is out of range: a duration can be at most about 2562047h", k, v)
+		return 0, fmt.Errorf("%s=%q is out of range: a duration must be between about -2562047h and 2562047h", k, v)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("%s=%q is not a duration: give a number with a unit, e.g. 30s, 10m or 1h", k, v)
