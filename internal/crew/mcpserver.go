@@ -83,6 +83,7 @@ type outcomeRecord struct {
 func (c *Crew) newMCPRun(ctx context.Context, env *runEnv, token string) *mcpRun {
 	run := &mcpRun{env: env, token: token, done: make(chan struct{}), born: time.Now()}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cueflow", Version: version.Version}, &mcp.ServerOptions{Capabilities: mcpx.StatelessCapabilities()})
+	mcpx.KeepToolAnswers(srv)
 	byName := map[string]tool{}
 	for _, t := range c.agentTools(ctx, env.agent) {
 		t := t
@@ -230,14 +231,14 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	ok := r.tryAcquire() || r.acquire(waitCtx)
 	cancel()
-	if ok && ended() { // the turn came as the request ended: run nothing for no one
+	if ok && ended() { // the turn came as the request's time ran out: don't start the tool
 		r.release()
 		ok = false
 	}
 	if !ok {
 		text := "Timed out waiting for this run's previous tool call to finish; try again."
 		if ended() {
-			text = "The request ended before this tool call could run; it was not run."
+			text = "This request's time ran out before this tool call could run; it was not run."
 		}
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 	}

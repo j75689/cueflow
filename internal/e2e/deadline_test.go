@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -78,8 +79,8 @@ func callAsync(cs *mcp.ClientSession, name string, args map[string]any) <-chan s
 }
 
 // A built-in tool served over MCP is not cut by its request's deadline: one held up past it (here by a
-// locked table) still makes all its writes, rather than stopping halfway through them. Its answer,
-// written after the deadline, does not reach the client, so the test does not look at it.
+// locked table) still makes all its writes, rather than stopping halfway through them. Its answer, written
+// after the deadline, still reaches the client.
 func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 	t.Run("agent token, claim_task", func(t *testing.T) {
 		e := setup(t)
@@ -111,7 +112,10 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		time.Sleep(1500 * time.Millisecond) // well past the deadline
 		release()
 		select {
-		case <-reply:
+		case r := <-reply:
+			if !strings.HasPrefix(r, "You are now working task #") {
+				t.Errorf("claim_task answered %q", r)
+			}
 		case <-time.After(10 * time.Second):
 			t.Fatal("claim_task did not end")
 		}
@@ -139,7 +143,10 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		time.Sleep(1500 * time.Millisecond)
 		release()
 		select {
-		case <-reply:
+		case r := <-reply:
+			if !strings.HasPrefix(r, "Subtask #") || !strings.Contains(r, "created and assigned to @writer") {
+				t.Errorf("create_subtask answered %q", r)
+			}
 		case <-time.After(10 * time.Second):
 			t.Fatal("create_subtask did not end")
 		}
@@ -149,6 +156,40 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		}
 		if thread := threadText(t, e, task.ID.String()); subs != 1 || !strings.Contains(thread, "tool_result:Subtask #") {
 			t.Fatalf("%d subtasks, thread:\n%s", subs, thread)
+		}
+	})
+
+	t.Run("operator, create_task", func(t *testing.T) {
+		e := setup(t)
+		ctx := context.Background()
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), Broker: events.NewBroker(),
+			Scheduler: e.sched, Crew: e.crew, Logger: logger, MCPToken: testMCPToken, MCPRequestTimeout: 500 * time.Millisecond}).Handler())
+		defer srv.Close()
+		cs, err := mcpx.Connect(ctx, mcpx.Options{Transport: mcpx.TransportStreamable, Endpoint: srv.URL + "/mcp",
+			HTTPClient: &http.Client{Transport: bearer{testMCPToken}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cs.Close()
+
+		release := lockTable(t, e, "tasks", 5*time.Second)
+		reply := callAsync(cs, "create_task", map[string]any{"title": "Late answer"})
+		time.Sleep(1500 * time.Millisecond)
+		release()
+		var r string
+		select {
+		case r = <-reply:
+		case <-time.After(10 * time.Second):
+			t.Fatal("create_task did not end")
+		}
+		var n int
+		var number int64
+		if err := e.pool.QueryRow(ctx, `SELECT count(*), max(number) FROM tasks WHERE title='Late answer'`).Scan(&n, &number); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 || !strings.Contains(r, fmt.Sprintf(`"number": %d,`, number)) {
+			t.Fatalf("%d tasks, create_task answered %q", n, r)
 		}
 	})
 }

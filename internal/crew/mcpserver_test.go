@@ -23,7 +23,7 @@ func TestQueuedToolCallGivesUpWithItsRequest(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	out := run.call(ctx, nil, nil, "list_tasks", nil)
-	if !out.IsError || !strings.Contains(out.Content[0].(*mcp.TextContent).Text, "request ended") || time.Since(start) > time.Second {
+	if !out.IsError || !strings.Contains(out.Content[0].(*mcp.TextContent).Text, "time ran out") || time.Since(start) > time.Second {
 		t.Fatalf("got %+v after %s", out.Content[0], time.Since(start))
 	}
 }

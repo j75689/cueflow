@@ -168,3 +168,66 @@ func TestDeadlineIsReadableInTheTool(t *testing.T) {
 		t.Errorf("the tool's ctx has a deadline (%v): it would cut the tool", s.ctxDeadline)
 	}
 }
+
+// A tool call still running at its request's deadline is not cut: the SDK would hold the request until the
+// tool returns anyway, and the client gets the answer rather than an empty response it would retry.
+func TestLateToolAnswerReachesTheClient(t *testing.T) {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, &mcp.ServerOptions{Capabilities: StatelessCapabilities()})
+	KeepToolAnswers(srv)
+	mcp.AddTool(srv, &mcp.Tool{Name: "slow"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		time.Sleep(time.Second)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, struct{}{}, nil
+	})
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	ts := httptest.NewServer(Stateless(h, 300*time.Millisecond))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: ts.URL, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cs.Close()
+	out, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "slow"})
+	if err != nil || out.Content[0].(*mcp.TextContent).Text != "done" {
+		t.Fatalf("call: %v %v", out, err)
+	}
+}
+
+// A tool call that would start after its request's deadline is not run; one that started before it keeps
+// its request.
+func TestToolCallAfterTheDeadlineIsNotRun(t *testing.T) {
+	type seen struct {
+		started bool
+		err     error
+	}
+	serve := func(h func(r *http.Request) seen) seen {
+		got := make(chan seen, 1)
+		ts := httptest.NewServer(withDeadline(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got <- h(r)
+		}), 100*time.Millisecond))
+		defer ts.Close()
+		res, err := http.Post(ts.URL, "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return <-got
+	}
+
+	if s := serve(func(r *http.Request) seen {
+		time.Sleep(300 * time.Millisecond)
+		return seen{startTool(r.Context()), r.Context().Err()}
+	}); s.started || s.err == nil {
+		t.Errorf("after the deadline: started %v, request %v", s.started, s.err)
+	}
+
+	if s := serve(func(r *http.Request) seen {
+		started := startTool(r.Context())
+		time.Sleep(300 * time.Millisecond)
+		return seen{started, r.Context().Err()}
+	}); !s.started || s.err != nil {
+		t.Errorf("before the deadline: started %v, request %v", s.started, s.err)
+	}
+}
