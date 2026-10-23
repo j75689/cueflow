@@ -253,8 +253,9 @@ func (r *mcpRun) call(ctx context.Context, c *Crew, byName map[string]tool, name
 	}
 	out, isErr := c.execTool(guard.WithAgent(ctx), r.env, byName, llm.ToolCall{ID: uuid.NewString(), Name: name, Arguments: args})
 	if r.env.outcome != nil {
-		_ = c.store.SetRunTokenOutcome(context.WithoutCancel(ctx), r.token,
-			outcomeRecord{Kind: r.env.outcome.kind, Text: r.env.outcome.text})
+		octx, cancel := c.detached(ctx)
+		_ = c.store.SetRunTokenOutcome(octx, r.token, outcomeRecord{Kind: r.env.outcome.kind, Text: r.env.outcome.text})
+		cancel()
 		r.once.Do(func() { close(r.done) })
 	}
 	return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: out}}}

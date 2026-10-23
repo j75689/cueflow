@@ -202,3 +202,39 @@ func TestConnectorCallIsCappedByItsMCPRequest(t *testing.T) {
 		t.Fatalf("thread:\n%s", thread)
 	}
 }
+
+// The writes a tool call makes detached from its ctx (its thread entries here) give up after
+// DetachedWriteTimeout, so a hung database doesn't hold the call, and the run's tool turn, for good.
+func TestToolCallWritesAreBounded(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Stalled thread", "assignee_agent_id": team["chief"].ID}, &task)
+	cl := claim(t, e, task)
+	token, err := e.store.CreateRunToken(ctx, task.ID, team["chief"].ID, &cl.RunID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcpx.Connect(ctx, mcpx.Options{Transport: mcpx.TransportStreamable,
+		Endpoint: e.api.URL + crew.MCPPathPrefix + token, HTTPClient: &http.Client{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+
+	release := lockTable(t, e, "task_messages", 5*time.Second)
+	start := time.Now()
+	select {
+	case text := <-callAsync(cs, "get_task", map[string]any{"number": task.Number}):
+		if d := time.Since(start); d > 2*time.Second || !strings.Contains(text, "Stalled thread") {
+			t.Fatalf("after %s: %q", d, text)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("get_task did not end")
+	}
+	release()
+	if text, isErr := callText(t, cs, "get_task", map[string]any{"number": task.Number}); isErr || !strings.Contains(text, "Stalled thread") {
+		t.Fatalf("the next call: %v %q", isErr, text)
+	}
+}
