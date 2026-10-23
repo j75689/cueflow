@@ -49,7 +49,8 @@ type Config struct {
 	// ContextHandOffAt is how full a run's context (prompt over the model's window) may get before the
 	// run hands off to a fresh one; the task page colours the size from here. Between 0 and 1.
 	ContextHandOffAt float64
-	// Warnings are settings that were invalid and replaced by their default, for main to log.
+	// Warnings are for main to log: settings that were invalid and replaced by their default, and
+	// settings that are kept but risky (such as a publish timeout not below the dispatch lease).
 	Warnings []string
 	// Modules are the feature modules to mount (CUEFLOW_MODULES, comma-separated). Default: all of
 	// them. A module that is not mounted has no routes, tools, workers or cron; its tables stay.
@@ -123,9 +124,13 @@ func Load() (*Config, error) {
 	}
 	warn := func(msg string) { c.Warnings = append(c.Warnings, msg) }
 	c.ContextHandOffAt = envFraction("CUEFLOW_CONTEXT_HANDOFF", DefaultContextHandOffAt, warn)
-	c.DispatchEvery = envDurationOrWarn("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second, warn)
-	c.DispatchLease = envDurationOrWarn("CUEFLOW_DISPATCH_LEASE", 10*time.Minute, warn)
-	c.PublishTimeout = envDurationOrWarn("CUEFLOW_PUBLISH_TIMEOUT", 5*time.Minute, warn)
+	c.DispatchEvery = envDurationOrWarn("CUEFLOW_DISPATCH_INTERVAL", 3*time.Second, MinDispatchEvery, warn)
+	c.DispatchLease = envDurationOrWarn("CUEFLOW_DISPATCH_LEASE", 10*time.Minute, MinDispatchLease, warn)
+	c.PublishTimeout = envDurationOrWarn("CUEFLOW_PUBLISH_TIMEOUT", 5*time.Minute, MinPublishTimeout, warn)
+	if c.PublishTimeout >= c.DispatchLease {
+		warn(fmt.Sprintf("CUEFLOW_PUBLISH_TIMEOUT=%s is not below CUEFLOW_DISPATCH_LEASE=%s: the lease can run out while a publish is still going, "+
+			"and the sweeper then marks it FAILED, so a retry may post it twice", c.PublishTimeout, c.DispatchLease))
+	}
 	var err error
 	if c.Modules, err = parseModules(os.Getenv("CUEFLOW_MODULES")); err != nil {
 		return nil, err
@@ -271,12 +276,14 @@ func envDuration(k string, def time.Duration) (time.Duration, error) {
 }
 
 // envDurationOrWarn is envDuration for the settings that took a bad value silently before it was checked:
-// such a value, or one that is not > 0, keeps def and is passed to warn, so a deployment that boots today
-// still boots.
-func envDurationOrWarn(k string, def time.Duration, warn func(string)) time.Duration {
+// such a value, or one that is not > 0 or is below floor, keeps def and is passed to warn, so a deployment
+// that boots today still boots.
+func envDurationOrWarn(k string, def, floor time.Duration, warn func(string)) time.Duration {
 	d, err := envDuration(k, def)
 	if err == nil && d <= 0 {
 		err = fmt.Errorf("%s=%q must be > 0", k, strings.TrimSpace(os.Getenv(k)))
+	} else if err == nil && d < floor {
+		err = fmt.Errorf("%s=%q must be >= %s", k, strings.TrimSpace(os.Getenv(k)), floor)
 	}
 	if err != nil {
 		warn(fmt.Sprintf("%v; using %s", err, def))
@@ -289,6 +296,17 @@ func envBool(k string) bool {
 	b, _ := strconv.ParseBool(os.Getenv(k))
 	return b
 }
+
+// MinDispatchEvery is the shortest CUEFLOW_DISPATCH_INTERVAL: below it the deliverables worker spins
+// on its ticker and burns a CPU.
+const MinDispatchEvery = 100 * time.Millisecond
+
+// MinDispatchLease is the shortest CUEFLOW_DISPATCH_LEASE: a shorter lease runs out under a publish
+// that is still going, the sweeper marks it FAILED ("may have happened") and a retry may post it twice.
+const MinDispatchLease = time.Second
+
+// MinPublishTimeout is the shortest CUEFLOW_PUBLISH_TIMEOUT: no publisher answers faster.
+const MinPublishTimeout = time.Second
 
 // DefaultPubSubDeleteTimeout is CUEFLOW_PUBSUB_DELETE_TIMEOUT's default. Pub/Sub can take a few
 // seconds to answer a delete it has already done, and the delete must fit in Cloud Run's 10 s after SIGTERM.

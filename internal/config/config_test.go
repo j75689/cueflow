@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -272,9 +273,9 @@ func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
 			!strings.Contains(c.Warnings[0], "using "+tc.def.String()) {
 			t.Errorf("%s=5min: %v, warnings %v", tc.k, got, c.Warnings)
 		}
-		t.Setenv(tc.k, "7s")
-		if c, err = Load(); err != nil || tc.get(c) != 7*time.Second || len(c.Warnings) != 0 {
-			t.Errorf("%s=7s: %v %v", tc.k, c, err)
+		t.Setenv(tc.k, "7m")
+		if c, err = Load(); err != nil || tc.get(c) != 7*time.Minute || len(c.Warnings) != 0 {
+			t.Errorf("%s=7m: %v %v", tc.k, c, err)
 		}
 		for v, msg := range map[string]string{"0": " must be > 0", "0s": " must be > 0", "-1s": " must be > 0",
 			"-5m": " must be > 0", "99999999999h": outOfRange, "-99999999999h": outOfRange,
@@ -289,5 +290,96 @@ func TestOlderDurationsWarnInsteadOfFailing(t *testing.T) {
 				t.Errorf("%s=%s: %v, warnings %v", tc.k, v, got, c.Warnings)
 			}
 		}
+	}
+}
+
+// A value that is > 0 but below the floor keeps the default too: an interval of 1ns busy-loops the
+// deliverables worker, and a lease of a few ms marks publishes that are still running FAILED.
+func TestOlderDurationsHaveAFloor(t *testing.T) {
+	for _, tc := range []struct {
+		k, v string
+		want time.Duration
+		warn string // "" means no warning
+	}{
+		{"CUEFLOW_DISPATCH_INTERVAL", "1ns", 3 * time.Second, `CUEFLOW_DISPATCH_INTERVAL="1ns" must be >= 100ms; using 3s`},
+		{"CUEFLOW_DISPATCH_INTERVAL", "99ms", 3 * time.Second, `CUEFLOW_DISPATCH_INTERVAL="99ms" must be >= 100ms; using 3s`},
+		{"CUEFLOW_DISPATCH_INTERVAL", "100ms", 100 * time.Millisecond, ""},
+		{"CUEFLOW_DISPATCH_LEASE", "500ms", 10 * time.Minute, `CUEFLOW_DISPATCH_LEASE="500ms" must be >= 1s; using 10m0s`},
+		{"CUEFLOW_DISPATCH_LEASE", "999ms", 10 * time.Minute, `CUEFLOW_DISPATCH_LEASE="999ms" must be >= 1s; using 10m0s`},
+		{"CUEFLOW_PUBLISH_TIMEOUT", "500ms", 5 * time.Minute, `CUEFLOW_PUBLISH_TIMEOUT="500ms" must be >= 1s; using 5m0s`},
+		{"CUEFLOW_PUBLISH_TIMEOUT", "999ms", 5 * time.Minute, `CUEFLOW_PUBLISH_TIMEOUT="999ms" must be >= 1s; using 5m0s`},
+		{"CUEFLOW_PUBLISH_TIMEOUT", "1s", time.Second, ""},
+	} {
+		base(t)
+		t.Setenv(tc.k, tc.v)
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("%s=%s: %v", tc.k, tc.v, err)
+		}
+		got := map[string]time.Duration{"CUEFLOW_DISPATCH_INTERVAL": c.DispatchEvery,
+			"CUEFLOW_DISPATCH_LEASE": c.DispatchLease, "CUEFLOW_PUBLISH_TIMEOUT": c.PublishTimeout}[tc.k]
+		var want []string
+		if tc.warn != "" {
+			want = []string{tc.warn}
+		}
+		if got != tc.want || strings.Join(c.Warnings, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s=%s: %v, warnings %q", tc.k, tc.v, got, c.Warnings)
+		}
+	}
+}
+
+// The publish timeout should stay below the lease, or the sweeper can fail a publish that is still
+// running. Both values are kept: only a warning says so. The check runs on the resolved values, so a
+// below-floor value that falls back to its default is checked too.
+func TestPublishTimeoutBelowLease(t *testing.T) {
+	slow := func(timeout, lease string) string {
+		return "CUEFLOW_PUBLISH_TIMEOUT=" + timeout + " is not below CUEFLOW_DISPATCH_LEASE=" + lease +
+			": the lease can run out while a publish is still going, and the sweeper then marks it FAILED, so a retry may post it twice"
+	}
+	for _, tc := range []struct {
+		lease, timeout string
+		wantL, wantT   time.Duration
+		warns          []string
+	}{
+		{"", "", 10 * time.Minute, 5 * time.Minute, nil},
+		{"2m", "", 2 * time.Minute, 5 * time.Minute, []string{slow("5m0s", "2m0s")}},
+		{"5m", "5m", 5 * time.Minute, 5 * time.Minute, []string{slow("5m0s", "5m0s")}},
+		{"1s", "1s", time.Second, time.Second, []string{slow("1s", "1s")}},
+		{"5m", "4m59s", 5 * time.Minute, 4*time.Minute + 59*time.Second, nil},
+		{"", "10m", 10 * time.Minute, 10 * time.Minute, []string{slow("10m0s", "10m0s")}},
+		{"2s", "1s", 2 * time.Second, time.Second, nil},
+		// A fallback can cause the warning: the timeout's default is above this lease ...
+		{"2m", "500ms", 2 * time.Minute, 5 * time.Minute,
+			[]string{`CUEFLOW_PUBLISH_TIMEOUT="500ms" must be >= 1s; using 5m0s`, slow("5m0s", "2m0s")}},
+		// ... and the lease's default is not above this timeout.
+		{"500ms", "10m", 10 * time.Minute, 10 * time.Minute,
+			[]string{`CUEFLOW_DISPATCH_LEASE="500ms" must be >= 1s; using 10m0s`, slow("10m0s", "10m0s")}},
+	} {
+		base(t)
+		t.Setenv("CUEFLOW_DISPATCH_LEASE", tc.lease)
+		t.Setenv("CUEFLOW_PUBLISH_TIMEOUT", tc.timeout)
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("lease %q timeout %q: %v", tc.lease, tc.timeout, err)
+		}
+		if c.DispatchLease != tc.wantL || c.PublishTimeout != tc.wantT {
+			t.Errorf("lease %q timeout %q: got %v, %v", tc.lease, tc.timeout, c.DispatchLease, c.PublishTimeout)
+		}
+		if !slices.Equal(c.Warnings, tc.warns) {
+			t.Errorf("lease %q timeout %q: warnings %q, want %q", tc.lease, tc.timeout, c.Warnings, tc.warns)
+		}
+	}
+}
+
+// Unset durations take their defaults without a word: only a bad value warns.
+func TestUnsetDurationsDoNotWarn(t *testing.T) {
+	base(t)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DispatchEvery != 3*time.Second || c.DispatchLease != 10*time.Minute || c.PublishTimeout != 5*time.Minute ||
+		len(c.Warnings) != 0 {
+		t.Errorf("defaults: %v %v %v, warnings %q", c.DispatchEvery, c.DispatchLease, c.PublishTimeout, c.Warnings)
 	}
 }
