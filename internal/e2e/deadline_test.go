@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -238,5 +239,43 @@ func TestToolCallWritesAreBounded(t *testing.T) {
 	release()
 	if text, isErr := callText(t, cs, "get_task", map[string]any{"number": task.Number}); isErr || !strings.Contains(text, "Stalled thread") {
 		t.Fatalf("the next call: %v %q", isErr, text)
+	}
+}
+
+// A run's token delete at its end is bounded by DetachedWriteTimeout too: a hung database doesn't hold
+// the run's teardown, and the task's slot, for good.
+func TestRunTokenDeleteIsBounded(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.crew.MCPBaseURL = e.api.URL
+	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
+	var rt store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Fake agent", "type": "acp_agent", "config": map[string]any{
+		"preset": "custom", "command": os.Args[0], "env": map[string]any{"CUEFLOW_FAKE_ACP": "1", "CUEFLOW_FAKE_ACP_DELAY": "1s"},
+		"timeout_minutes": 1}}, &rt)
+	var a store.Agent
+	e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"post_deliverables"},
+		"runtime_connector_id": rt.ID}, &a)
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": a.ID}, &task)
+	done := make(chan struct{})
+	go func() { e.crew.RunPending(ctx, 3); close(done) }()
+
+	// Once the run has its token, every write to run_tokens (its outcome, its delete) hangs.
+	for n := 0; n == 0; {
+		time.Sleep(50 * time.Millisecond)
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM run_tokens WHERE task_id=$1`, task.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lockTable(t, e, "run_tokens", 15*time.Second)
+	start := time.Now()
+	select {
+	case <-done:
+		if d := time.Since(start); d > 8*time.Second {
+			t.Fatalf("the run ended after %s", d)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the run did not end")
 	}
 }

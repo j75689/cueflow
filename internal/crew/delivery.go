@@ -173,7 +173,9 @@ func (c *Crew) rewatchRunner(ctx context.Context, task *store.Task, a *store.Age
 	defer func() {
 		c.mcp.remove(token)
 		if !handedOver {
-			_ = c.store.DeleteRunToken(context.WithoutCancel(ctx), token)
+			dctx, cancel := c.detached(ctx)
+			_ = c.store.DeleteRunToken(dctx, token)
+			cancel()
 		}
 		if mrun.env.searcher != nil {
 			hub.Close(mrun.env.searcher)
