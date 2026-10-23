@@ -116,7 +116,9 @@ func (c *Crew) registerMCPRun(ctx context.Context, env *runEnv) (string, *mcpRun
 	}
 	return token, run, func() {
 		c.mcp.remove(token)
-		_ = c.store.DeleteRunToken(context.WithoutCancel(ctx), token)
+		dctx, cancel := c.detached(ctx)
+		defer cancel()
+		_ = c.store.DeleteRunToken(dctx, token)
 	}
 }
 

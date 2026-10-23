@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -280,4 +281,96 @@ func TestToolCallWritesAreBounded(t *testing.T) {
 	if text, isErr := callText(t, cs, "get_task", map[string]any{"number": task.Number}); isErr || !strings.Contains(text, "Stalled thread") {
 		t.Fatalf("the next call: %v %q", isErr, text)
 	}
+}
+
+// A run's token delete at its end is bounded by DetachedWriteTimeout too: a stuck run_tokens table
+// doesn't hold the run's teardown, and the task's slot, for good. (The run's other teardown writes, in
+// finish, are not bounded: a database hung as a whole still holds it.)
+func TestRunTokenDeleteIsBounded(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.crew.MCPBaseURL = e.api.URL
+	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
+	var rt store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Fake agent", "type": "acp_agent", "config": map[string]any{
+		"preset": "custom", "command": os.Args[0], "env": map[string]any{"CUEFLOW_FAKE_ACP": "1", "CUEFLOW_FAKE_ACP_DELAY": "1s"},
+		"timeout_minutes": 1}}, &rt)
+	var a store.Agent
+	e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer", "capabilities": []string{"post_deliverables"},
+		"runtime_connector_id": rt.ID}, &a)
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": a.ID}, &task)
+	done := make(chan struct{})
+	go func() { e.crew.RunPending(ctx, 3); close(done) }()
+
+	// Once the run has its token, every write to run_tokens (its outcome, its delete) hangs.
+	for deadline := time.Now().Add(10 * time.Second); runTokens(t, e, task) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the run got no token")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	release := lockTable(t, e, "run_tokens", 15*time.Second)
+	start := time.Now()
+	select {
+	case <-done:
+		if d := time.Since(start); d > 8*time.Second {
+			t.Fatalf("the run ended after %s", d)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the run did not end")
+	}
+	release()
+	if n := runTokens(t, e, task); n != 1 {
+		t.Fatalf("token rows: %d, want the one the delete gave up on", n)
+	}
+}
+
+// So is the token delete of a runner run that lost its task's claim before it could hand over.
+func TestLostClaimTokenDeleteIsBounded(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
+	e.crew.Queue = &fakeQueue{}
+	agent, _ := runnerAgent(t, e)
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
+	e.crew.DeliveryLimit = 3 * time.Second // hands over at 2.8 s
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		if err := e.crew.HandleCrew(ctx); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	time.Sleep(time.Second)
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	release := lockTable(t, e, "run_tokens", 12*time.Second)
+	select {
+	case <-done:
+		if d := time.Since(start); d > 8*time.Second {
+			t.Fatalf("the run ended after %s", d)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the run did not end")
+	}
+	release()
+	if n := runTokens(t, e, task); n != 1 {
+		t.Fatalf("token rows: %d, want the one the delete gave up on", n)
+	}
+}
+
+// runTokens counts the task's run tokens.
+func runTokens(t *testing.T, e *env, task store.Task) int {
+	t.Helper()
+	var n int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM run_tokens WHERE task_id=$1`, task.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
