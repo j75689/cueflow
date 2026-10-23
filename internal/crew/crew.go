@@ -41,8 +41,8 @@ type Crew struct {
 	ContextHandOffAt float64
 	Lease            time.Duration
 	Every            time.Duration
-	// DetachedWriteTimeout bounds each write detached from its ctx (thread messages, a tool call's other
-	// writes, a run's token delete at its end) and taskOrg's lookup (see detached); <= 0 means the default.
+	// DetachedWriteTimeout bounds each write made through detached (thread messages, a tool call's other
+	// writes, a run's token delete at its end) and taskOrg's lookup; <= 0 means the default.
 	DetachedWriteTimeout time.Duration
 	// ValidateSchedule checks cron expressions for agent-created schedules (set by main).
 	ValidateSchedule store.CronValidator

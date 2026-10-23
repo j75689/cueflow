@@ -91,9 +91,11 @@ func (c *Crew) handOver(ctx context.Context, task *store.Task, run *store.AgentR
 		c.logger.Warn("hand over run: lease", "task", task.ID, "err", err)
 	} else if !ok {
 		c.stopRunnerJob(ctx, out.job, 5*time.Second)
-		if err := c.store.DeleteRunToken(ctx, out.token); err != nil {
+		dctx, cancel := c.detached(ctx)
+		if err := c.store.DeleteRunToken(dctx, out.token); err != nil {
 			c.logger.Warn("hand over run: revoke the run's token", "task", task.ID, "err", err)
 		}
+		cancel()
 		return false
 	}
 	if err := c.store.HandOverAgentRun(ctx, run.ID); err != nil {
