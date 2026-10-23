@@ -49,7 +49,8 @@ type Config struct {
 	// ContextHandOffAt is how full a run's context (prompt over the model's window) may get before the
 	// run hands off to a fresh one; the task page colours the size from here. Between 0 and 1.
 	ContextHandOffAt float64
-	// Warnings are settings that were invalid and replaced by their default, for main to log.
+	// Warnings are for main to log: settings that were invalid and replaced by their default, and
+	// settings that are kept but risky (such as a publish timeout not below the dispatch lease).
 	Warnings []string
 	// Modules are the feature modules to mount (CUEFLOW_MODULES, comma-separated). Default: all of
 	// them. A module that is not mounted has no routes, tools, workers or cron; its tables stay.
