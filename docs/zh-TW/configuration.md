@@ -1,6 +1,7 @@
 # 設定
 
 CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；Cloud Run 見 [deploy/cloudrun/README.md](../../deploy/cloudrun/README.md)（英文）。
+會讓啟動失敗的值，也會讓 `cueflow migrate`、`rotate-key` 與 `media` 失敗；啟動時的警告只有 `cueflow serve` 會記錄。
 
 ## 基本
 

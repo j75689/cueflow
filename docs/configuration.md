@@ -2,6 +2,8 @@
 
 CueFlow is configured with environment variables. The Docker defaults are in `deploy/.env.example`;
 for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
+A value that stops startup with an error also stops `cueflow migrate`, `rotate-key` and `media`;
+startup warnings are logged by `cueflow serve` only.
 
 ## Core
 
