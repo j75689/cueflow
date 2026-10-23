@@ -24,9 +24,9 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker 的輪詢間隔。須為大於 0 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | 對一件已核准 deliverable 的動作（發布貼文、執行 action connector）最長可以花多久，超過就視為 worker 當機。須為大於 0 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短。須為大於 0 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker 的輪詢間隔。須為至少 `100ms` 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | 對一件已核准 deliverable 的動作（發布貼文、執行 action connector）最長可以花多久，超過就視為 worker 當機。須為至少 `1s` 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | 單次發布呼叫的逾時（Instagram 可能要等幾分鐘）；要比 lease 短，否則啟動時會記一筆警告（兩個值仍照用）。須為至少 `1s` 的 Go duration，其他值會沿用預設值，並在啟動時記一筆警告 |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | 不啟用 cron，只跑 API 與 worker |
 
 ## Agent

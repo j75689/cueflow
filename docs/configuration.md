@@ -26,9 +26,9 @@ startup warnings are logged by `cueflow serve` only.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker poll interval. A positive Go duration; anything else keeps the default and logs a warning at startup |
-| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time acting on one approved deliverable (publishing a post, running an action connector) may take before the worker is considered crashed. A positive Go duration; anything else keeps the default and logs a warning at startup |
-| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease. A positive Go duration; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_DISPATCH_INTERVAL` | `3s` | Deliverables worker poll interval. A Go duration of at least `100ms`; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_DISPATCH_LEASE` | `10m` | Max time acting on one approved deliverable (publishing a post, running an action connector) may take before the worker is considered crashed. A Go duration of at least `1s`; anything else keeps the default and logs a warning at startup |
+| `CUEFLOW_PUBLISH_TIMEOUT` | `5m` | Timeout of one publish call (Instagram can take minutes); keep it below the lease, or startup logs a warning (both values are still used). A Go duration of at least `1s`; anything else keeps the default and logs a warning at startup |
 | `CUEFLOW_DISABLE_SCHEDULER` | `false` | Run API/worker without cron |
 
 ## Agents
