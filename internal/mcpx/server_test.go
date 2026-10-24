@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,13 +242,14 @@ func TestKeepToolAnswersStillCutsListen(t *testing.T) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, struct{}{}, nil
 	})
 	h := Stateless(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}), 300*time.Millisecond)
-	held := make(chan time.Duration, 1)
+	var seen, open atomic.Int32 // listens started, listens not yet ended
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		h.ServeHTTP(w, r)
 		if r.Header.Get("Mcp-Method") == "subscriptions/listen" {
-			held <- time.Since(start)
+			seen.Add(1)
+			open.Add(1)
+			defer open.Add(-1)
 		}
+		h.ServeHTTP(w, r)
 	}))
 	defer ts.Close()
 
@@ -259,13 +261,11 @@ func TestKeepToolAnswersStillCutsListen(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer cs.Close()
-	select {
-	case d := <-held:
-		if d > time.Second {
-			t.Fatalf("listen held %s", d)
+	// Waits until every listen has ended, so one that ends early cannot hide one still held.
+	for wait := time.Now().Add(1500 * time.Millisecond); seen.Load() == 0 || open.Load() > 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(wait) {
+			t.Fatalf("%d of %d listens still held after 1.5s", open.Load(), seen.Load())
 		}
-	case <-time.After(1500 * time.Millisecond):
-		t.Fatal("listen still held after 1.5s")
 	}
 }
 
