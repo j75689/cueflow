@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.0](https://github.com/j75689/cueflow/compare/v1.2.0...v1.3.0) (2026-10-24)
+
+
+### Features
+
+* page board list mode from the server with GET /tasks offset ([#87](https://github.com/j75689/cueflow/issues/87)) ([b962149](https://github.com/j75689/cueflow/commit/b962149de4e1e1a52776f2aced9749f286540daf))
+* **web:** board list mode with bulk move and delete ([#82](https://github.com/j75689/cueflow/issues/82)) ([61802e2](https://github.com/j75689/cueflow/commit/61802e2a56b3f9152a6ac0dbb8f4ce70fb2219c3))
+
+
+### Bug Fixes
+
+* **config:** floor dispatch durations to stop a busy-looping worker ([#90](https://github.com/j75689/cueflow/issues/90)) ([1058a9b](https://github.com/j75689/cueflow/commit/1058a9be0fc5eca5fd92b4d22d7a85fb8317ab33))
+* **config:** reject non-positive dispatch durations and fix the overflow hint ([#89](https://github.com/j75689/cueflow/issues/89)) ([a1566b5](https://github.com/j75689/cueflow/commit/a1566b55bc8e98ad607447fee2b2fa5593c5d2f6))
+* **crew:** bound run-teardown DeleteRunToken with the detached write timeout ([#94](https://github.com/j75689/cueflow/issues/94)) ([f046a48](https://github.com/j75689/cueflow/commit/f046a48a8944b884d0b4d4ba6b2e8cbe105ec0ef))
+* **crew:** narrow the MCP request deadline and bound detached writes ([#93](https://github.com/j75689/cueflow/issues/93)) ([1f7e4e5](https://github.com/j75689/cueflow/commit/1f7e4e503c239c84f25d41cbfa328efbcf8c48b4))
+* **events:** wait long enough to delete the Pub/Sub subscription on shutdown (8s, configurable) ([#80](https://github.com/j75689/cueflow/issues/80)) ([456ff32](https://github.com/j75689/cueflow/commit/456ff3212fda69a0a7c434217845d4bf6d4caf29))
+* **mcp:** pin listChanged off for prompts/resources and reject an unparsable request timeout ([#88](https://github.com/j75689/cueflow/issues/88)) ([d56f47f](https://github.com/j75689/cueflow/commit/d56f47f5231c93f7c3371e50069cbbe822248757))
+* **mcppublisher:** stop the hub's 90 s HTTP timeout cutting a publish ([#92](https://github.com/j75689/cueflow/issues/92)) ([75320f8](https://github.com/j75689/cueflow/commit/75320f8e0dfce2200d346d97ac7b9589c4e53a2d))
+* **mcp:** stop stateless MCP POSTs from holding Cloud Run slots for 30 minutes ([#83](https://github.com/j75689/cueflow/issues/83)) ([4ba13f8](https://github.com/j75689/cueflow/commit/4ba13f828de8375786c15bf6448678d9e3852674))
+* **mcpx:** deliver a tool call's answer after its request deadline ([#95](https://github.com/j75689/cueflow/issues/95)) ([fdfcaff](https://github.com/j75689/cueflow/commit/fdfcaffae56a7d8f0b416694366419fa19aae79a))
+* **web:** list mode counts nested subtasks and shows old finished cards ([#86](https://github.com/j75689/cueflow/issues/86)) ([8097247](https://github.com/j75689/cueflow/commit/8097247bf962289c0c0d8311e6bee14eee0479cc))
+
 ## [1.2.0](https://github.com/j75689/cueflow/compare/v1.1.0...v1.2.0) (2026-10-22)
 
 
