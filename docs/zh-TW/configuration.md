@@ -73,7 +73,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | 把存在 CueFlow 的圖片交給發布器時用的網址前綴，發布器必須連得到（compose 設為 `http://cueflow:3000`） |
 | `CUEFLOW_MEDIA_STORAGE` | | 新的圖片／影片與任務檔案存放位置：留空 = 資料庫、`file:///data/media` 或 `gcs://bucket/prefix`。既有媒體用 `cueflow media migrate --to file:///data/media` 搬移 |
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | 搭配 `CUEFLOW_TICK=external`：刪除超過這麼多天、且沒有未完成 deliverable 使用的媒體。留空或 0 為關閉。手動：`cueflow media prune --older-than 90d [--dry-run]` |
-| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔。需要 `CUEFLOW_TICK=external` 與 GCS 媒體 |
+| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | 允許呼叫 `POST /internal/media/register`（收編寫進 bucket `uploads/` 的檔案）的 Google 服務帳號，逗號分隔，任何模式都可用。需要 `CUEFLOW_MEDIA_STORAGE=gcs://...`，否則啟動失敗。呼叫端的 ID token 必須是發給 `CUEFLOW_INTERNAL_AUDIENCE` 其中之一 |
 
 媒體如何儲存、提供與刪除，見 [modules.md](modules.md#圖片與影片)。
 
@@ -87,7 +87,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 | `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | 關機時等待刪除本實例 Pub/Sub subscription 的時間（Go duration，須 > 0；不是 duration 的值（`8`、`5sec`）或超出範圍的值（`99999999999h`）會讓啟動失敗並報錯）。請小於 Cloud Run 收到 SIGTERM 後的 10 秒寬限；設 10 秒以上會在啟動時警告。刪除逾時只會記錄 log，subscription 一天後會自行過期 |
 | `CUEFLOW_TICK` | `internal` | `external` 由 Cloud Scheduler 透過 `/internal/tick` 驅動時鐘，程序內不輪詢；需搭配 `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks 佇列路徑、簽署派送的服務帳號，以及本服務自己的網址 |
-| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/*` 的服務帳號（逗號分隔 email）與 ID token 的 audience（預設為目標網址） |
+| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | 允許呼叫 `/internal/tick` 與 `/internal/work/*` 的服務帳號（逗號分隔 email），以及每個 `/internal/*` 路由接受的 ID token audience：逗號分隔，預設為 `CUEFLOW_TASKS_TARGET_URL` 與 `CUEFLOW_DIRECT_URL`（兩者預設都是 `CUEFLOW_PUBLIC_URL`；相同時只列一次）。呼叫端的 token 通常發給它呼叫的網址，所以 CueFlow 還有其他網址時，就設定這個變數全部列出（例如 `https://cueflow.example.com,http://10.0.0.2:3000`）。Cloud Tasks 派送用第一個簽署。單機模式下 media register 也用 `CUEFLOW_INTERNAL_AUDIENCE` |
 | `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | 以 Cloudflare Access（Zero Trust）登入儀表板：填 team domain 與應用程式的 AUD。兩者要一起設或都不設。帶有效 Access JWT 的請求等同 admin token，見 [`deploy/cloudrun`](../../deploy/cloudrun/README.md) |
 
 ## 更換加密金鑰

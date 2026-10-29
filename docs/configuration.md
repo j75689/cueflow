@@ -81,7 +81,7 @@ version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE
 | `CUEFLOW_MEDIA_BASE_URL` | `CUEFLOW_PUBLIC_URL` | Prefix for images stored in CueFlow when handing them to publishers; must be reachable from the publisher (compose sets `http://cueflow:3000`) |
 | `CUEFLOW_MEDIA_STORAGE` | | Where new images/videos and task files are kept: empty = the database, `file:///data/media`, or `gcs://bucket/prefix`. Move existing media with `cueflow media migrate --to file:///data/media` |
 | `CUEFLOW_MEDIA_RETENTION_DAYS` | | With `CUEFLOW_TICK=external`: delete media older than this many days that no unfinished deliverable uses. Off when empty or 0. Manual: `cueflow media prune --older-than 90d [--dry-run]` |
-| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`). Needs `CUEFLOW_TICK=external` and GCS media |
+| `CUEFLOW_MEDIA_REGISTER_ACCOUNTS` | | Comma-separated Google service accounts allowed to call `POST /internal/media/register` (adopt a file written to the bucket's `uploads/`), in any mode. Needs `CUEFLOW_MEDIA_STORAGE=gcs://...`: startup fails without it. The caller's ID token must be made out to one of `CUEFLOW_INTERNAL_AUDIENCE` |
 
 See [modules.md](modules.md#images-and-videos) for how media is stored, served and deleted.
 
@@ -95,7 +95,7 @@ See [modules.md](modules.md#images-and-videos) for how media is stored, served a
 | `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | How long shutdown waits for deleting this instance's Pub/Sub subscription (a Go duration, > 0; a value that is not a duration (`8`, `5sec`) or is out of range (`99999999999h`) stops startup with an error). Keep it under Cloud Run's 10 s grace after SIGTERM; 10 s or more logs a warning at startup. A delete that times out is only logged: the subscription expires on its own a day later |
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |
 | `CUEFLOW_TASKS_QUEUE` / `CUEFLOW_TASKS_SERVICE_ACCOUNT` / `CUEFLOW_TASKS_TARGET_URL` | | Cloud Tasks queue path, the service account that signs deliveries, and this service's own URL |
-| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/*` (comma-separated emails) and the ID-token audience (default: the target URL) |
+| `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` / `CUEFLOW_INTERNAL_AUDIENCE` | | Who may call `/internal/tick` and `/internal/work/*` (comma-separated emails), and the ID-token audiences every `/internal/*` route accepts: comma-separated, default `CUEFLOW_TASKS_TARGET_URL` and `CUEFLOW_DIRECT_URL` (both `CUEFLOW_PUBLIC_URL` by default; listed once if equal). A caller's token is usually made out to the URL it calls, so set it to list each URL CueFlow is reached under when there are others (e.g. `https://cueflow.example.com,http://10.0.0.2:3000`). Cloud Tasks deliveries are signed for the first. `CUEFLOW_INTERNAL_AUDIENCE` also applies to media register in single mode |
 | `CUEFLOW_CF_ACCESS_TEAM_DOMAIN` / `CUEFLOW_CF_ACCESS_AUD` | | Cloudflare Access (Zero Trust) login for the dashboard: your team domain and the application's AUD tag. Both or neither. Requests with a valid Access JWT are accepted like the admin token; see [`deploy/cloudrun`](../deploy/cloudrun/README.md) |
 
 ## Rotating the secret key

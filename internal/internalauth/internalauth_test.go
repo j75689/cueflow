@@ -62,16 +62,25 @@ func TestGoogleVerifier(t *testing.T) {
 		}
 	}
 	mk := func(fn func(context.Context, string, string) (*idtoken.Payload, error)) *googleVerifier {
-		v := NewGoogleVerifier("aud", []string{"Tasks@P.iam.gserviceaccount.com"}).(*googleVerifier)
-		v.validate = fn
-		return v
+		v, err := NewGoogleVerifier([]string{"aud", "", "https://second"}, []string{"Tasks@P.iam.gserviceaccount.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gv := v.(*googleVerifier)
+		gv.validate = fn
+		return gv
 	}
 	ok := map[string]any{"email": "tasks@p.iam.gserviceaccount.com", "email_verified": true}
 	if e, err := mk(payload("aud", ok)).Verify(context.Background(), "t"); err != nil || e != "tasks@p.iam.gserviceaccount.com" {
 		t.Fatalf("e=%q err=%v", e, err)
 	}
-	if _, err := mk(payload("other", ok)).Verify(context.Background(), "t"); err == nil || errors.Is(err, ErrForbidden) {
-		t.Fatalf("audience: %v", err)
+	if e, err := mk(payload("https://second", ok)).Verify(context.Background(), "t"); err != nil || e != "tasks@p.iam.gserviceaccount.com" {
+		t.Fatalf("every listed audience is accepted: e=%q err=%v", e, err)
+	}
+	for _, aud := range []string{"other", "", "aud,https://second"} {
+		if _, err := mk(payload(aud, ok)).Verify(context.Background(), "t"); err == nil || errors.Is(err, ErrForbidden) {
+			t.Fatalf("audience %q: %v", aud, err)
+		}
 	}
 	if _, err := mk(payload("aud", map[string]any{"email": "tasks@p.iam.gserviceaccount.com"})).Verify(context.Background(), "t"); err == nil {
 		t.Fatal("unverified email accepted")
@@ -82,5 +91,14 @@ func TestGoogleVerifier(t *testing.T) {
 	bad := func(context.Context, string, string) (*idtoken.Payload, error) { return nil, errors.New("sig") }
 	if _, err := mk(bad).Verify(context.Background(), "t"); err == nil || errors.Is(err, ErrForbidden) {
 		t.Fatalf("invalid token: %v", err)
+	}
+}
+
+// validate is called with no audience, so the list is the only audience check: it must not be empty or hold "".
+func TestGoogleVerifierNeedsAnAudience(t *testing.T) {
+	for _, auds := range [][]string{nil, {}, {""}, {" ", ""}} {
+		if _, err := NewGoogleVerifier(auds, []string{"a@b"}); err == nil {
+			t.Errorf("audiences %q accepted", auds)
+		}
 	}
 }

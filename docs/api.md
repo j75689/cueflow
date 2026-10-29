@@ -389,7 +389,7 @@ default; set `CUEFLOW_MEDIA_STORAGE=file:///data/media` to keep new media on dis
 
 Old media can be pruned: `cueflow media prune --older-than 90d [--dry-run]` deletes media older than that which no unfinished post uses. With `CUEFLOW_MEDIA_RETENTION_DAYS` set (and `CUEFLOW_TICK=external`) the same pruning runs on every tick.
 
-**Registering a file written straight to the bucket** (GCS storage only): a trusted service of yours (a video renderer, for example) writes `gs://<bucket>/uploads/<file>` itself and then calls `POST /internal/media/register` with `{"object":"uploads/<file>"}` and a Google ID token (audience = the CueFlow URL) of an account listed in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`. CueFlow checks the type and size from the first bytes, moves the object into the media store inside Google Storage (the bytes do not pass through CueFlow) and answers `201` like `POST /media`. `400` for a missing object, a name outside `uploads/`, or a file that is not a supported image or MP4; `401/403` for a bad token. Give the bucket a lifecycle rule that deletes `uploads/` after a day to clean up refused files.
+**Registering a file written straight to the bucket** (GCS storage only): a trusted service of yours (a video renderer, for example) writes `gs://<bucket>/uploads/<file>` itself and then calls `POST /internal/media/register` with `{"object":"uploads/<file>"}` and a Google ID token of an account listed in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`, made out to one of the audiences in `CUEFLOW_INTERNAL_AUDIENCE` (default: `CUEFLOW_TASKS_TARGET_URL` and `CUEFLOW_DIRECT_URL`, both the CueFlow URL unless set). It works in any mode, local or cloud, once those accounts are set; startup fails if they are set without GCS storage. CueFlow checks the type and size from the first bytes, moves the object into the media store inside Google Storage (the bytes do not pass through CueFlow) and answers `201` like `POST /media`. `400` for a missing object, a name outside `uploads/`, or a file that is not a supported image or MP4; `401/403` for a bad token. Give the bucket a lifecycle rule that deletes `uploads/` after a day to clean up refused files.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
@@ -484,12 +484,14 @@ Revoking the token cuts access immediately. An agent token cannot reach the oper
 
 ---
 
-## Internal endpoints (cloud mode only)
+## Internal endpoints
 
 With `CUEFLOW_TICK=external` (and `CUEFLOW_QUEUE=cloudtasks`) the server also serves two endpoints for Google
-Cloud. They require `Authorization: Bearer <Google ID token>` whose audience is `CUEFLOW_INTERNAL_AUDIENCE` and whose
-email is one of `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` (`401` invalid or missing, `403` not allowed). They are not served
-at all in the local deployment, and are not covered by `CUEFLOW_ADMIN_TOKEN`.
+Cloud. They require `Authorization: Bearer <Google ID token>` made out to one of the audiences in
+`CUEFLOW_INTERNAL_AUDIENCE` (comma-separated) and whose email is one of `CUEFLOW_INTERNAL_SERVICE_ACCOUNTS` (`401`
+invalid or missing, `403` not allowed). They are not served at all in the local deployment (`404`), and are not
+covered by `CUEFLOW_ADMIN_TOKEN`. `POST /internal/media/register` ([Media](#media)) uses the same check, with
+`CUEFLOW_MEDIA_REGISTER_ACCOUNTS` as the allowed emails, and is served in any mode once those are set.
 
 | Method | Path | Notes |
 |---|---|---|
