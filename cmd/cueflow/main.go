@@ -261,7 +261,7 @@ func serve() error {
 	}
 	if cfg.Queue == "cloudtasks" {
 		q, err := cloudtasks.New(cloudtasks.Config{Queue: cfg.TasksQueue, TargetURL: cfg.TasksTargetURL,
-			ServiceAccount: cfg.TasksServiceAccount, Audience: cfg.InternalAudience})
+			ServiceAccount: cfg.TasksServiceAccount, Audience: cfg.InternalAudiences[0]})
 		if err != nil {
 			return fmt.Errorf("cloud tasks: %w", err)
 		}
@@ -270,19 +270,19 @@ func serve() error {
 			*wq = q
 		}
 	}
+	apiSrv.InternalAuth, apiSrv.MediaRegisterAuth = internalGuards(cfg, internalauth.NewGoogleVerifier)
+	if apiSrv.MediaRegisterAuth != nil {
+		logger.Info("media register enabled: POST /internal/media/register", "accounts", cfg.MediaRegisterAccounts, "audiences", cfg.InternalAudiences)
+	}
 	if cfg.Tick == "external" {
 		// The clock and the queue live outside: Cloud Scheduler calls /internal/tick, Cloud Tasks
 		// calls /internal/work/*. Nothing is polled or scheduled in this process.
 		sched.External = true
-		apiSrv.InternalAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.InternalServiceAccounts))
 		handlers[jobs.KindCrew] = func(ctx context.Context, _ uuid.UUID) error { return team.HandleCrew(ctx) }
 		handlers[jobs.KindSchedule] = sched.HandleSchedule
 		handlers[jobs.KindApproval] = team.RunApproval
 		apiSrv.Handlers = handlers
 		sched.MediaRetention = time.Duration(cfg.MediaRetentionDays) * 24 * time.Hour
-		if len(cfg.MediaRegisterAccounts) > 0 {
-			apiSrv.MediaRegisterAuth = internalauth.Middleware(internalauth.NewGoogleVerifier(cfg.InternalAudience, cfg.MediaRegisterAccounts))
-		}
 		apiSrv.Tick = func(ctx context.Context) error {
 			errs := []error{sched.Tick(ctx), team.Sweep(ctx)}
 			for _, sweep := range sweeps {
@@ -529,4 +529,17 @@ func parseAge(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("--older-than is required, e.g. 90d or 36h (got %q)", s)
 	}
 	return d, nil
+}
+
+// internalGuards builds the auth of /internal/*; a nil guard leaves its routes out (404). The clock and
+// work deliveries (/internal/tick, /internal/work/*) exist only with an external clock. Media register
+// exists in any mode once its accounts are set (config.Load requires GCS media storage for it).
+func internalGuards(cfg *config.Config, verifier func(audiences, accounts []string) internalauth.Verifier) (internal, mediaRegister func(http.Handler) http.Handler) {
+	if cfg.Tick == "external" {
+		internal = internalauth.Middleware(verifier(cfg.InternalAudiences, cfg.InternalServiceAccounts))
+	}
+	if len(cfg.MediaRegisterAccounts) > 0 {
+		mediaRegister = internalauth.Middleware(verifier(cfg.InternalAudiences, cfg.MediaRegisterAccounts))
+	}
+	return internal, mediaRegister
 }

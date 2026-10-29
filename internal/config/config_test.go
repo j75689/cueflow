@@ -16,7 +16,8 @@ func base(t *testing.T) {
 		"CUEFLOW_TASKS_SERVICE_ACCOUNT", "CUEFLOW_INTERNAL_AUDIENCE", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS",
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
 		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT",
-		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT", "CUEFLOW_CONNECTOR_HTTP_TIMEOUT"} {
+		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT", "CUEFLOW_CONNECTOR_HTTP_TIMEOUT",
+		"CUEFLOW_MEDIA_STORAGE", "CUEFLOW_MEDIA_REGISTER_ACCOUNTS"} {
 		t.Setenv(k, "")
 	}
 	for _, k := range SecretVars {
@@ -60,7 +61,7 @@ func TestCloudSettingsAreValidatedTogether(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a complete cloud configuration must load: %v", err)
 	}
-	if !c.Cloud() || c.TasksTargetURL != "https://cueflow-abc.a.run.app" || c.InternalAudience != c.TasksTargetURL ||
+	if !c.Cloud() || c.TasksTargetURL != "https://cueflow-abc.a.run.app" || len(c.InternalAudiences) != 1 || c.InternalAudiences[0] != c.TasksTargetURL ||
 		len(c.InternalServiceAccounts) != 2 {
 		t.Fatalf("cloud config: %+v", c)
 	}
@@ -427,5 +428,56 @@ func TestUnsetDurationsDoNotWarn(t *testing.T) {
 	if c.DispatchEvery != 3*time.Second || c.DispatchLease != 10*time.Minute || c.PublishTimeout != 5*time.Minute ||
 		c.ConnectorHTTPTimeout != 90*time.Second || len(c.Warnings) != 0 {
 		t.Errorf("defaults: %v %v %v %v, warnings %q", c.DispatchEvery, c.DispatchLease, c.PublishTimeout, c.ConnectorHTTPTimeout, c.Warnings)
+	}
+}
+
+// Media register works in any mode, but only over GCS media storage: it adopts files written to the bucket.
+func TestMediaRegisterNeedsGCS(t *testing.T) {
+	for _, tick := range []string{"", "external"} {
+		base(t)
+		t.Setenv("CUEFLOW_TICK", tick)
+		t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com, lessons@p.iam.gserviceaccount.com")
+		for _, storage := range []string{"", "file:///data/media"} {
+			t.Setenv("CUEFLOW_MEDIA_STORAGE", storage)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MEDIA_REGISTER_ACCOUNTS") || !strings.Contains(err.Error(), "CUEFLOW_MEDIA_STORAGE") {
+				t.Errorf("tick %q, storage %q: %v", tick, storage, err)
+			}
+		}
+	}
+	base(t)
+	t.Setenv("CUEFLOW_MEDIA_STORAGE", "gcs://bucket/media")
+	t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com, lessons@p.iam.gserviceaccount.com")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("single mode with GCS media: %v", err)
+	}
+	if c.Cloud() || len(c.MediaRegisterAccounts) != 2 {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestInternalAudiences(t *testing.T) {
+	base(t)
+	t.Setenv("CUEFLOW_PUBLIC_URL", "https://cueflow.example.com")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow.example.com"}) {
+		t.Fatalf("default: %v", c.InternalAudiences)
+	}
+	t.Setenv("CUEFLOW_INTERNAL_AUDIENCE", " https://cueflow.example.com , http://10.0.0.2:3000,")
+	if c, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow.example.com", "http://10.0.0.2:3000"}) {
+		t.Fatalf("list: %v", c.InternalAudiences)
+	}
+	t.Setenv("CUEFLOW_INTERNAL_AUDIENCE", ",")
+	t.Setenv("CUEFLOW_MEDIA_STORAGE", "gcs://bucket")
+	t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CUEFLOW_INTERNAL_AUDIENCE") {
+		t.Fatalf("an audience list with no entry: %v", err)
 	}
 }

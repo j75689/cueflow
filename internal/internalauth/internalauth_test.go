@@ -62,7 +62,7 @@ func TestGoogleVerifier(t *testing.T) {
 		}
 	}
 	mk := func(fn func(context.Context, string, string) (*idtoken.Payload, error)) *googleVerifier {
-		v := NewGoogleVerifier("aud", []string{"Tasks@P.iam.gserviceaccount.com"}).(*googleVerifier)
+		v := NewGoogleVerifier([]string{"aud", "https://second"}, []string{"Tasks@P.iam.gserviceaccount.com"}).(*googleVerifier)
 		v.validate = fn
 		return v
 	}
@@ -70,8 +70,13 @@ func TestGoogleVerifier(t *testing.T) {
 	if e, err := mk(payload("aud", ok)).Verify(context.Background(), "t"); err != nil || e != "tasks@p.iam.gserviceaccount.com" {
 		t.Fatalf("e=%q err=%v", e, err)
 	}
-	if _, err := mk(payload("other", ok)).Verify(context.Background(), "t"); err == nil || errors.Is(err, ErrForbidden) {
-		t.Fatalf("audience: %v", err)
+	if e, err := mk(payload("https://second", ok)).Verify(context.Background(), "t"); err != nil || e != "tasks@p.iam.gserviceaccount.com" {
+		t.Fatalf("every listed audience is accepted: e=%q err=%v", e, err)
+	}
+	for _, aud := range []string{"other", "", "aud,https://second"} {
+		if _, err := mk(payload(aud, ok)).Verify(context.Background(), "t"); err == nil || errors.Is(err, ErrForbidden) {
+			t.Fatalf("audience %q: %v", aud, err)
+		}
 	}
 	if _, err := mk(payload("aud", map[string]any{"email": "tasks@p.iam.gserviceaccount.com"})).Verify(context.Background(), "t"); err == nil {
 		t.Fatal("unverified email accepted")

@@ -87,9 +87,10 @@ type Config struct {
 	TasksTargetURL string
 	// TasksServiceAccount signs the OIDC token of each Cloud Tasks delivery.
 	TasksServiceAccount string
-	// InternalAudience is the audience /internal/* requires in the Google ID token (default
-	// TasksTargetURL).
-	InternalAudience string
+	// InternalAudiences are the audiences /internal/* accepts in the Google ID token (default
+	// TasksTargetURL). A caller's token is usually made out to the URL it calls, so a server reached under
+	// several URLs lists each. Cloud Tasks deliveries are signed for the first.
+	InternalAudiences []string
 	// InternalServiceAccounts are the service account emails allowed to call /internal/*
 	// (Cloud Tasks and Cloud Scheduler identities).
 	InternalServiceAccounts []string
@@ -104,7 +105,7 @@ type Config struct {
 	// post uses (checked by the external clock; locally use `cueflow media prune`).
 	MediaRetentionDays int
 	// MediaRegisterAccounts may call /internal/media/register (the service accounts of media producers
-	// such as a video renderer that writes to the bucket itself).
+	// such as a video renderer that writes to the bucket itself), in any mode; it needs GCS media storage.
 	MediaRegisterAccounts []string
 	// DBMaxConns caps this process's connection pool (0 = driver default). Set it low (e.g. 5) in
 	// the cloud so several instances stay under a small database's connection limit.
@@ -178,7 +179,11 @@ func Load() (*Config, error) {
 	c.TasksQueue = os.Getenv("CUEFLOW_TASKS_QUEUE")
 	c.TasksTargetURL = strings.TrimRight(env("CUEFLOW_TASKS_TARGET_URL", c.PublicURL), "/")
 	c.TasksServiceAccount = os.Getenv("CUEFLOW_TASKS_SERVICE_ACCOUNT")
-	c.InternalAudience = env("CUEFLOW_INTERNAL_AUDIENCE", c.TasksTargetURL)
+	for _, a := range strings.Split(env("CUEFLOW_INTERNAL_AUDIENCE", c.TasksTargetURL), ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			c.InternalAudiences = append(c.InternalAudiences, a)
+		}
+	}
 	for _, e := range strings.Split(os.Getenv("CUEFLOW_INTERNAL_SERVICE_ACCOUNTS"), ",") {
 		if e = strings.TrimSpace(e); e != "" {
 			c.InternalServiceAccounts = append(c.InternalServiceAccounts, e)
@@ -191,8 +196,11 @@ func Load() (*Config, error) {
 			c.MediaRegisterAccounts = append(c.MediaRegisterAccounts, e)
 		}
 	}
-	if len(c.MediaRegisterAccounts) > 0 && c.Tick != "external" {
-		return nil, errors.New("CUEFLOW_MEDIA_REGISTER_ACCOUNTS only applies in cloud mode (CUEFLOW_TICK=external)")
+	if len(c.MediaRegisterAccounts) > 0 && !strings.HasPrefix(c.MediaStorage, "gcs://") {
+		return nil, fmt.Errorf("CUEFLOW_MEDIA_REGISTER_ACCOUNTS needs CUEFLOW_MEDIA_STORAGE=gcs://<bucket>[/<prefix>]: it registers files written to that bucket (CUEFLOW_MEDIA_STORAGE is %q)", c.MediaStorage)
+	}
+	if len(c.InternalAudiences) == 0 && (c.Tick == "external" || c.Queue == "cloudtasks" || len(c.MediaRegisterAccounts) > 0) {
+		return nil, errors.New("CUEFLOW_INTERNAL_AUDIENCE lists no audience")
 	}
 	if c.Queue != "local" && c.Queue != "cloudtasks" {
 		return nil, fmt.Errorf("CUEFLOW_QUEUE must be local or cloudtasks, got %q", c.Queue)

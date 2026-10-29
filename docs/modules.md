@@ -99,5 +99,7 @@ When handing a post to a publisher, CueFlow turns `/media/{id}` into an absolute
 A service of yours that produces big files (a video renderer, for example) should not push them through
 CueFlow. With GCS storage it can write straight into the bucket's `uploads/` area with its own Google identity
 and have CueFlow adopt the file with `POST /internal/media/register`; the bytes never pass through CueFlow.
-The account must be listed in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`. Details: [api.md](api.md#media) and
+The account must be listed in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`, and its ID token made out to one of
+`CUEFLOW_INTERNAL_AUDIENCE` (by default the CueFlow URL; list each URL the service may call it under). This works in
+a single-server deployment as well as in the cloud, as long as media is stored in GCS. Details: [api.md](api.md#media) and
 [deploy/cloudrun/README.md](../deploy/cloudrun/README.md#services-that-write-media-to-the-bucket).

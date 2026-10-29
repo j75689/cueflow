@@ -21,29 +21,34 @@ type Verifier interface {
 var ErrForbidden = errors.New("internalauth: caller not allowed")
 
 type googleVerifier struct {
-	audience string
-	allowed  map[string]bool
-	validate func(ctx context.Context, token, audience string) (*idtoken.Payload, error)
+	audiences map[string]bool
+	allowed   map[string]bool
+	validate  func(ctx context.Context, token, audience string) (*idtoken.Payload, error)
 }
 
-// NewGoogleVerifier accepts Google ID tokens for audience whose email is verified and in
+// NewGoogleVerifier accepts Google ID tokens made out to any of audiences whose email is verified and in
 // allowedEmails (case-insensitive).
-func NewGoogleVerifier(audience string, allowedEmails []string) Verifier {
+func NewGoogleVerifier(audiences, allowedEmails []string) Verifier {
+	auds := make(map[string]bool, len(audiences))
+	for _, a := range audiences {
+		auds[a] = true
+	}
 	allowed := make(map[string]bool, len(allowedEmails))
 	for _, e := range allowedEmails {
 		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
 			allowed[e] = true
 		}
 	}
-	return &googleVerifier{audience: audience, allowed: allowed, validate: idtoken.Validate}
+	return &googleVerifier{audiences: auds, allowed: allowed, validate: idtoken.Validate}
 }
 
 func (g *googleVerifier) Verify(ctx context.Context, bearer string) (string, error) {
-	p, err := g.validate(ctx, bearer, g.audience)
+	// "" checks the signature and expiry only; the audience is checked against the list below.
+	p, err := g.validate(ctx, bearer, "")
 	if err != nil {
 		return "", err
 	}
-	if p.Audience != g.audience {
+	if !g.audiences[p.Audience] {
 		return "", errors.New("internalauth: audience mismatch")
 	}
 	verified, _ := p.Claims["email_verified"].(bool)

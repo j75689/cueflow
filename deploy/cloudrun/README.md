@@ -297,6 +297,6 @@ g storage buckets add-iam-policy-binding "gs://$BUCKET" \
 ```
 
 Let it write `uploads/<uuid>.mp4`, then have it call `POST /internal/media/register` with a Google ID token
-(audience = the CueFlow service URL). Put that account in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`, and add a
+(audience = the CueFlow service URL, or any URL listed in `CUEFLOW_INTERNAL_AUDIENCE`). Put that account in `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`, and add a
 bucket lifecycle rule that deletes `uploads/` objects after one day (they are only there until registered).
 Set `CUEFLOW_MEDIA_RETENTION_DAYS` to have old, unused media pruned on every tick. See `docs/api.md`.
