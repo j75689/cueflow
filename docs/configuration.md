@@ -29,10 +29,12 @@ Setting both `<NAME>` and `<NAME>_FILE` (both not empty) stops startup with an e
 `CUEFLOW_SECRET_KEY_PREVIOUS` the whole value is read first, then split at commas and newlines, so a
 file can hold one key per line. A reference that can't be read (a malformed reference, a missing
 secret or version, permission denied, an unreachable API, no answer within 10 s, a missing or
-unreadable file) stops startup with an error naming the variable and the reference, never the value;
+unreadable file, or a secret or file that is empty once its trailing newline is gone) stops startup with an error naming the variable and the reference, never the value;
 it never falls back to an empty value. The other settings are checked first, so a typo elsewhere is
 reported without waiting for Secret Manager. There is no refresh: to rotate a secret, add a new
-version and restart.
+version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE_URL` comes from
+`CUEFLOW_DB_URL` (default: the bundled database), never from a `DATABASE_URL` in `.env`; to use
+`DATABASE_URL_FILE` there, set `CUEFLOW_DB_URL=` (empty).
 
 ## Core
 

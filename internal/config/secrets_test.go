@@ -337,3 +337,25 @@ func TestSecretManagerREST(t *testing.T) {
 		t.Fatalf("regional endpoint: %s", got)
 	}
 }
+
+// TestSecretEmptyIsAnError: an empty mount or payload must not quietly turn off the admin token or
+// pick the default database.
+func TestSecretEmptyIsAnError(t *testing.T) {
+	for _, content := range []string{"", "\n", "\r\n"} {
+		t.Run(fmt.Sprintf("file %q", content), func(t *testing.T) {
+			base(t)
+			t.Setenv("CUEFLOW_ADMIN_TOKEN_FILE", writeSecretFile(t, content))
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CUEFLOW_ADMIN_TOKEN_FILE") || !strings.Contains(err.Error(), "empty") {
+				t.Fatalf("want an empty-file error naming the variable, got %v", err)
+			}
+		})
+		t.Run(fmt.Sprintf("gcpsm %q", content), func(t *testing.T) {
+			base(t)
+			useSM(t, &fakeSM{values: map[string]string{"projects/p/secrets/db/versions/latest": content}})
+			t.Setenv("DATABASE_URL", "gcpsm://projects/p/secrets/db")
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "empty") {
+				t.Fatalf("want an empty-secret error naming the variable, got %v", err)
+			}
+		})
+	}
+}

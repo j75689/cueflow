@@ -23,9 +23,11 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 `echo ... | gcloud secrets create --data-file=-` 與 `echo ... > file` 都會多一個；其餘內容保留。
 `<NAME>` 與 `<NAME>_FILE` 同時設定（都不為空）會讓啟動失敗並報錯。`CUEFLOW_SECRET_KEY_PREVIOUS` 會先讀出
 整個值，再以逗號與換行切開，所以檔案可以一行一把金鑰。讀不到的參照（格式錯誤、secret 或版本不存在、
-權限不足、API 連不上、10 秒內沒有回應、檔案不存在或無法讀取）會讓啟動失敗，錯誤訊息指出變數與參照，
+權限不足、API 連不上、10 秒內沒有回應、檔案不存在或無法讀取，或去掉結尾換行後為空的 secret 或檔案）會讓啟動失敗，錯誤訊息指出變數與參照，
 但不會印出值；不會退回空值。其他設定會先檢查，所以別處的打字錯誤不必等 Secret Manager 就會回報。
-不會自動更新：要輪替機密，請新增版本後重新啟動。
+不會自動更新：要輪替機密，請新增版本後重新啟動。使用 `deploy/docker-compose.yml` 時，container 的
+`DATABASE_URL` 來自 `CUEFLOW_DB_URL`（預設為內建的資料庫），不會取用 `.env` 裡的 `DATABASE_URL`；要在那裡改用
+`DATABASE_URL_FILE`，請設 `CUEFLOW_DB_URL=`（空值）。
 
 ## 基本
 

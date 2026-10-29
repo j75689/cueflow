@@ -99,7 +99,9 @@ func (s secrets) env(name, def string) string {
 //  2. <NAME>_FILE set: that file;
 //  3. neither: "".
 //
-// Setting both is an error. A Secret Manager value and a file lose one trailing newline. The references
+// Setting both is an error. A Secret Manager value and a file lose one trailing newline; one that is
+// then empty is an error, so an empty mount can't quietly turn off the admin token or pick the default
+// database. The references
 // are fetched in parallel within secretFetchTimeout. A reference that can't be read is an error naming
 // the variable and the reference, never the value.
 func loadSecrets(ctx context.Context, names []string) (secrets, error) {
@@ -124,7 +126,9 @@ func loadSecrets(ctx context.Context, names []string) (secrets, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%s_FILE: %w", name, err) // the error names the path, not the content
 			}
-			out[name] = trimNewline(string(b))
+			if out[name] = trimNewline(string(b)); out[name] == "" {
+				return nil, fmt.Errorf("%s_FILE: %s is empty", name, file)
+			}
 		default:
 			out[name] = ""
 		}
@@ -164,6 +168,9 @@ func loadSecrets(ctx context.Context, names []string) (secrets, error) {
 		case r := <-answers[i]:
 			if r.err != nil {
 				return nil, fmt.Errorf("%s: reading Secret Manager secret %s: %w", f.name, f.ref, r.err)
+			}
+			if r.v == "" {
+				return nil, fmt.Errorf("%s: Secret Manager secret %s is empty", f.name, f.ref)
 			}
 			out[f.name] = r.v
 		case <-ctx.Done():

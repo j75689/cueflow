@@ -34,9 +34,13 @@ services:
     environment:
       # Each credential can instead come from a file (<NAME>_FILE, e.g. a secret mounted at /run/secrets)
       # or from Secret Manager (gcpsm://...); see docs/configuration.md. Setting both <NAME> and
-      # <NAME>_FILE stops startup, so for DATABASE_URL_FILE also set DATABASE_URL= (empty) in .env.
-      DATABASE_URL: ${DATABASE_URL-postgres://cueflow:${CUEFLOW_DB_PASSWORD:-cueflow}@cueflow-db:5432/cueflow?sslmode=disable}
+      # <NAME>_FILE stops startup. The database URL is set from CUEFLOW_DB_URL, not DATABASE_URL, so a
+      # DATABASE_URL in .env for `make dev` doesn't reach the container; for DATABASE_URL_FILE set
+      # CUEFLOW_DB_URL= (empty) in .env.
+      DATABASE_URL: ${CUEFLOW_DB_URL-postgres://cueflow:${CUEFLOW_DB_PASSWORD:-cueflow}@cueflow-db:5432/cueflow?sslmode=disable}
       DATABASE_URL_FILE: ${DATABASE_URL_FILE:-}
+      DATABASE_SESSION_URL: ${DATABASE_SESSION_URL:-}
+      DATABASE_SESSION_URL_FILE: ${DATABASE_SESSION_URL_FILE:-}
       CUEFLOW_SECRET_KEY: ${CUEFLOW_SECRET_KEY:-}
       CUEFLOW_SECRET_KEY_FILE: ${CUEFLOW_SECRET_KEY_FILE:-}
       CUEFLOW_SECRET_KEY_PREVIOUS: ${CUEFLOW_SECRET_KEY_PREVIOUS:-}
