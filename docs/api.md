@@ -357,7 +357,7 @@ the dashboard stops it at once.
 Cloudflare Access, give the runner the headers to send. `headers` in `runner.json` are added to every request it
 makes to CueFlow: registration, claims, events, completion and `runner status`. `register --header 'Name: value'`
 (repeatable) sends them with the registration and saves them in `runner.json`. `CUEFLOW_RUNNER_HEADERS`, one
-`Name: value` per line, adds headers from the environment for container setups and wins over `runner.json` for a
+`Name: value` per line (`#` starts a comment line), adds headers from the environment for container setups and wins over `runner.json` for a
 name set in both. With a Cloudflare Access service token:
 
 ```bash
@@ -367,13 +367,17 @@ cueflow runner register --url https://cueflow.example.com --token cfreg_... \
 
 or `"headers": {"CF-Access-Client-Id": "<id>.access", "CF-Access-Client-Secret": "<secret>"}` in `runner.json`.
 The runner owns `Authorization`, `Content-Type` and `Host`, so a header with one of those names is refused at
-startup, as are an invalid name and an empty value or one with a line break. Header values are never logged, and
+startup, as are an invalid name, an empty value or one with a control character, and a name given twice in one
+place (names are case-insensitive). Header values are never logged, and
 `runner status` shows only the names. Agents are not given them: an agent's tool server URL points to a proxy that
 the runner listens on at `127.0.0.1`. That proxy forwards only the tool servers of the jobs it is running and adds
-the headers itself. `CUEFLOW_RUNNER_HEADERS`, like every `CUEFLOW_*` variable, is left out of the agents'
+the headers itself, and `127.0.0.1` is added to the agent's `NO_PROXY` so a machine-wide `HTTP_PROXY` is not asked
+for it. `CUEFLOW_RUNNER_HEADERS`, like every `CUEFLOW_*` variable, is left out of the agents'
 environment. Filtering is not isolation, though: an agent running as the same OS user can still read `runner.json`
 and the runner's environment, so on a shared machine run it in a container ([deploy/runner](../deploy/runner/README.md)).
-A request the proxy turns away with a redirect to its login page fails with an error naming that page.
+The runner follows a redirect only on the same host (to `https`, say). A redirect to another host, which is how the
+proxy turns away a request with its login page, is not followed, so the headers never go there: the request fails
+naming the page, and `runner run` stops as it does for a revoked token.
 
 ---
 

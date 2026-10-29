@@ -2,13 +2,18 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/j75689/cueflow/internal/runnerapi"
 )
@@ -16,7 +21,7 @@ import (
 const secret = "s3cret-value"
 
 func TestHeadersFromFileAndEnvironment(t *testing.T) {
-	t.Setenv("CUEFLOW_RUNNER_HEADERS", "cf-access-client-secret: from-env\r\n\nX-Extra:  two  \n")
+	t.Setenv("CUEFLOW_RUNNER_HEADERS", "# Cloudflare Access\ncf-access-client-secret: from-env\r\n\nX-Extra:  two  \n")
 	cfg, err := LoadConfig(writeConfig(t, `{"url":"https://x","token":"t","headers":{"CF-Access-Client-Id":"id","CF-Access-Client-Secret":"from-file"}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +44,10 @@ func TestHeadersRefused(t *testing.T) {
 		"Host":          `{"Host":"` + secret + `"}`,
 		"bad name":      `{"Bad Name":"` + secret + `"}`,
 		"line break":    `{"X-A":"` + secret + `\nX-B: 1"}`,
+		"control byte":  `{"X-A":"` + secret + `\u0007"}`,
+		"DEL":           `{"X-A":"` + secret + `\u007f"}`,
 		"empty value":   `{"X-A":""}`,
+		"case twice":    `{"x-a":"` + secret + `","X-A":"` + secret + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("CUEFLOW_RUNNER_HEADERS", "")
@@ -50,12 +58,22 @@ func TestHeadersRefused(t *testing.T) {
 			if strings.Contains(err.Error(), secret) {
 				t.Fatalf("the error shows the value: %v", err)
 			}
+			if !strings.Contains(err.Error(), "runner.json") {
+				t.Fatalf("the error must name the file: %v", err)
+			}
 		})
 	}
-	t.Setenv("CUEFLOW_RUNNER_HEADERS", "no colon "+secret)
-	_, err := LoadConfig(writeConfig(t, `{"url":"https://x","token":"t"}`))
-	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "line 1") {
-		t.Fatalf("malformed CUEFLOW_RUNNER_HEADERS: %v", err)
+	for name, env := range map[string]string{
+		"malformed":  "# ok\nno colon " + secret,
+		"owned":      "Host: " + secret,
+		"case twice": "x-a: " + secret + "\nX-A: " + secret,
+		"control":    "X-A: " + secret + "\x01",
+	} {
+		t.Setenv("CUEFLOW_RUNNER_HEADERS", env)
+		_, err := LoadConfig(writeConfig(t, `{"url":"https://x","token":"t"}`))
+		if err == nil || strings.Contains(err.Error(), secret) || !strings.HasPrefix(err.Error(), "CUEFLOW_RUNNER_HEADERS") {
+			t.Errorf("%s CUEFLOW_RUNNER_HEADERS: %v", name, err)
+		}
 	}
 }
 
@@ -153,6 +171,10 @@ func TestRegisterAndStatusSendHeaders(t *testing.T) {
 	if err := Main([]string{"register", "--url", ts.URL, "--token", "cfreg", "--config", path, "--header", "Authorization: Bearer x"}, "test"); err == nil {
 		t.Fatal("--header must not override Authorization")
 	}
+	err := Main([]string{"register", "--url", ts.URL, "--token", "cfreg", "--config", path, "--header", "x-a: " + secret, "--header", "X-A: " + secret}, "test")
+	if err == nil || !strings.HasPrefix(err.Error(), "--header") || strings.Contains(err.Error(), secret) {
+		t.Fatalf("--header twice with different case: %v", err)
+	}
 	stderr := captureStderr(t, func() {
 		err := Main([]string{"register", "--url", ts.URL, "--token", "cfreg", "--config", path, "--header", "X-A: 1", "--header", secret}, "test")
 		if err == nil || !strings.Contains(err.Error(), "#2") || strings.Contains(err.Error(), secret) {
@@ -171,7 +193,7 @@ func TestMCPProxy(t *testing.T) {
 		_, _ = io.WriteString(w, "tools at "+r.URL.Path)
 	})))
 	defer ts.Close()
-	p, err := startMCPProxy(&Config{URL: ts.URL, Headers: map[string]string{"Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": secret}})
+	p, err := startMCPProxy(&Config{URL: ts.URL, Headers: map[string]string{"Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": secret}}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,11 +214,86 @@ func TestMCPProxy(t *testing.T) {
 	if code, body := get(u); code != 200 || body != "tools at /mcp/run/tok1" {
 		t.Fatalf("job's tool server: %d %q", code, body)
 	}
+	if code, body := get(u + "/"); code != 200 || body != "tools at /mcp/run/tok1/" {
+		t.Fatalf("the job's path with a trailing slash, which the server takes too: %d %q", code, body)
+	}
+	for _, other := range []string{"/api/v1/tasks", "/mcp/run/tok10", "/mcp/run/"} {
+		if code, _ := get(p.base + other); code != http.StatusNotFound {
+			t.Fatalf("%s must not be forwarded: %d", other, code)
+		}
+	}
 	if code, _ := get(p.base + "/api/v1/tasks"); code != http.StatusNotFound {
 		t.Fatalf("the rest of CueFlow must not be forwarded: %d", code)
 	}
 	p.release("/mcp/run/tok1")
 	if code, _ := get(u); code != http.StatusNotFound {
 		t.Fatalf("a finished job's tool server must not be forwarded: %d", code)
+	}
+}
+
+// A redirect on the same host (http to https, say) is followed with the headers; one to another host, the
+// access proxy's login page, is not: the headers must not travel there.
+func TestRedirects(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+		if r.Header.Get("Cf-Access-Client-Secret") != "" {
+			t.Error("the headers went to another host")
+		}
+	}))
+	defer other.Close()
+	var hits atomic.Int32
+	ts := httptest.NewServer(gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		switch r.URL.Path {
+		case runnerapi.BasePath + "/old/jobs/claim":
+			http.Redirect(w, r, runnerapi.BasePath+"/jobs/claim", http.StatusPermanentRedirect)
+		case runnerapi.BasePath + "/jobs/claim":
+			w.WriteHeader(http.StatusNoContent)
+		case runnerapi.BasePath + "/away/jobs/claim":
+			http.Redirect(w, r, other.URL+"/login", http.StatusFound)
+		}
+	})))
+	defer ts.Close()
+	cfg := &Config{URL: ts.URL, Token: "t", Headers: map[string]string{"Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": secret}}
+	if err := cfg.post(context.Background(), "/old/jobs/claim", runnerapi.ClaimRequest{}, nil, true); !errors.Is(err, errNoContent) || hits.Load() != 2 {
+		t.Fatalf("same-host 308: %v after %d requests", err, hits.Load())
+	}
+	err := cfg.post(context.Background(), "/away/jobs/claim", runnerapi.ClaimRequest{}, nil, true)
+	var fatal *fatalError
+	if !errors.As(err, &fatal) || !strings.Contains(err.Error(), other.URL+"/login") || elsewhere.Load() != 0 {
+		t.Fatalf("cross-host 302: %v (other host asked %d times)", err, elsewhere.Load())
+	}
+}
+
+// A runner whose access proxy credentials stop working stops, as for a revoked token, instead of
+// claiming in vain forever.
+func TestLoopStopsWhenTheAccessProxyRefuses(t *testing.T) {
+	ts := httptest.NewServer(gate(http.NotFoundHandler()))
+	defer ts.Close()
+	every := 1
+	cfg := &Config{URL: ts.URL, Token: "t", Concurrency: 1, PollInterval: &every,
+		Headers: map[string]string{"Cf-Access-Client-Id": "id", "Cf-Access-Client-Secret": "expired"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := New(cfg, slog.New(slog.DiscardHandler)).Loop(ctx)
+	var fatal *fatalError
+	if !errors.As(err, &fatal) || ctx.Err() != nil {
+		t.Fatalf("Loop = %v, want a fatal error before the deadline", err)
+	}
+}
+
+func TestAgentEnvBypassesProxiesForLoopback(t *testing.T) {
+	t.Setenv("NO_PROXY", "corp.internal")
+	t.Setenv("no_proxy", "")
+	env := agentEnv(map[string]string{"A": "1"}, true)
+	if env["A"] != "1" || env["NO_PROXY"] != "corp.internal,127.0.0.1" || env["no_proxy"] != "127.0.0.1" {
+		t.Fatalf("proxied: %v", env)
+	}
+	if env := agentEnv(map[string]string{"no_proxy": "x, 127.0.0.1"}, true); env["no_proxy"] != "x, 127.0.0.1" {
+		t.Fatalf("already there: %v", env)
+	}
+	if env := agentEnv(map[string]string{"A": "1"}, false); len(env) != 1 {
+		t.Fatalf("without the proxy nothing is added: %v", env)
 	}
 }

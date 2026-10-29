@@ -29,9 +29,12 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/net/http/httpguts"
+
 	"github.com/j75689/cueflow/internal/acpdrive"
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/acpagent"
+	"github.com/j75689/cueflow/internal/headerlines"
 	"github.com/j75689/cueflow/internal/runnerapi"
 )
 
@@ -129,87 +132,61 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		c.PollInterval = &n
 	}
+	file := make([]headerlines.Header, 0, len(c.Headers))
+	for name, value := range c.Headers {
+		file = append(file, headerlines.Header{Name: name, Value: value})
+	}
+	if c.Headers, err = checkHeaders(path, file); err != nil {
+		return nil, err
+	}
 	env, err := envHeaders()
 	if err != nil {
 		return nil, err
 	}
-	if c.Headers, err = mergeHeaders(c.Headers, env); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+	maps.Copy(c.Headers, env) // the environment wins for a name in both
 	return &c, nil
 }
 
-// envHeaders reads CUEFLOW_RUNNER_HEADERS: one "Name: value" per line.
+// envHeaders reads CUEFLOW_RUNNER_HEADERS: one "Name: value" per line, "#" starting a comment line.
 func envHeaders() (map[string]string, error) {
-	h := map[string]string{}
-	for i, line := range strings.Split(os.Getenv("CUEFLOW_RUNNER_HEADERS"), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		name, value, err := parseHeader(line)
-		if err != nil {
-			return nil, fmt.Errorf("CUEFLOW_RUNNER_HEADERS line %d: %w", i+1, err)
-		}
-		h[name] = value
+	hs, err := headerlines.Parse(os.Getenv("CUEFLOW_RUNNER_HEADERS"))
+	if err != nil {
+		return nil, fmt.Errorf("CUEFLOW_RUNNER_HEADERS %w", err)
 	}
-	return h, nil
-}
-
-// parseHeader splits "Name: value". Errors never quote the line: the value is a secret.
-func parseHeader(s string) (name, value string, err error) {
-	name, value, ok := strings.Cut(s, ":")
-	if !ok {
-		return "", "", errors.New(`want "Name: value"`)
-	}
-	return strings.TrimSpace(name), strings.TrimSpace(value), nil
+	return checkHeaders("CUEFLOW_RUNNER_HEADERS", hs)
 }
 
 // ownedHeaders are set by the runner itself on every request.
 var ownedHeaders = []string{"Authorization", "Content-Type", "Host"}
 
-// mergeHeaders checks every header and returns base with over added, over winning for a name set in
-// both (names compare case-insensitively). Errors name the header, never its value.
-func mergeHeaders(base, over map[string]string) (map[string]string, error) {
+// checkHeaders validates the headers of one source (named by src in errors) and returns them by canonical
+// name. A name set twice in one source (names are case-insensitive) is refused: which one won would depend on
+// map order. Errors name the header, never its value.
+func checkHeaders(src string, hs []headerlines.Header) (map[string]string, error) {
 	out := map[string]string{}
-	for _, h := range []map[string]string{base, over} {
-		for name, value := range h {
-			canon := http.CanonicalHeaderKey(name)
-			if !validHeaderName(name) {
-				return nil, fmt.Errorf("header %q: not a valid header name", name)
-			}
-			if slices.Contains(ownedHeaders, canon) {
-				return nil, fmt.Errorf("header %q: the runner sets it itself and it cannot be overridden", canon)
-			}
-			if value == "" || strings.ContainsAny(value, "\r\n\x00") {
-				return nil, fmt.Errorf("header %q: the value is empty or contains a line break", canon)
-			}
-			out[canon] = value
+	for _, h := range hs {
+		if !httpguts.ValidHeaderFieldName(h.Name) {
+			return nil, fmt.Errorf("%s: header %q: not a valid header name", src, h.Name)
 		}
-	}
-	if len(out) == 0 {
-		return nil, nil
+		canon := http.CanonicalHeaderKey(h.Name)
+		if slices.Contains(ownedHeaders, canon) {
+			return nil, fmt.Errorf("%s: header %q: the runner sets it itself and it cannot be overridden", src, canon)
+		}
+		if h.Value == "" || !httpguts.ValidHeaderFieldValue(h.Value) {
+			return nil, fmt.Errorf("%s: header %q: the value is empty or contains a control character", src, canon)
+		}
+		if _, dup := out[canon]; dup {
+			return nil, fmt.Errorf("%s: header %q is set more than once (names are case-insensitive)", src, canon)
+		}
+		out[canon] = h.Value
 	}
 	return out, nil
-}
-
-// validHeaderName reports whether s is an HTTP token (RFC 9110).
-func validHeaderName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r > 0x7e || r <= ' ' || strings.ContainsRune(`"(),/:;<=>?@[\]{}`, r) {
-			return false
-		}
-	}
-	return true
 }
 
 // headerFlag collects repeated --header "Name: value" flags. A malformed one is reported after parsing, by
 // position: an error from Set would be printed by the flag package with the value in it.
 type headerFlag struct {
-	h   map[string]string
+	hs  []headerlines.Header
 	n   int
 	bad int // 1-based position of the first malformed flag
 }
@@ -218,12 +195,12 @@ func (f *headerFlag) String() string { return "" }
 
 func (f *headerFlag) Set(s string) error {
 	f.n++
-	name, value, err := parseHeader(s)
+	h, err := headerlines.ParseLine(s)
 	if err != nil {
 		f.bad = cmp.Or(f.bad, f.n)
 		return nil
 	}
-	f.h[name] = value
+	f.hs = append(f.hs, h)
 	return nil
 }
 
@@ -262,7 +239,7 @@ func register(args []string, version string) error {
 	denyWeb := fs.Bool("deny-web", false, "never let agents use web fetch/search on this machine")
 	allowShell := fs.Bool("allow-shell", false, "let agents run shell commands and edit files here (coding agents); use a dedicated, isolated runner")
 	cfgPath := fs.String("config", DefaultConfigPath(), "where to save the runner credentials")
-	headers := &headerFlag{h: map[string]string{}}
+	headers := &headerFlag{}
 	fs.Var(headers, "header", `"Name: value" to send on every request to CueFlow, e.g. a Cloudflare Access service token (repeatable; saved to the config)`)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -271,9 +248,9 @@ func register(args []string, version string) error {
 		return errors.New("--url and --token are required")
 	}
 	if headers.bad > 0 {
-		return fmt.Errorf("--header #%d: want \"Name: value\"", headers.bad)
+		return fmt.Errorf("--header #%d: %w", headers.bad, headerlines.ErrMalformed)
 	}
-	saved, err := mergeHeaders(headers.h, nil)
+	saved, err := checkHeaders("--header", headers.hs)
 	if err != nil {
 		return err
 	}
@@ -281,10 +258,8 @@ func register(args []string, version string) error {
 	if err != nil {
 		return err
 	}
-	sent, err := mergeHeaders(saved, env)
-	if err != nil {
-		return err
-	}
+	sent := maps.Clone(saved)
+	maps.Copy(sent, env)
 	if *name == "" {
 		*name, _ = os.Hostname()
 	}
@@ -342,7 +317,7 @@ func status(args []string) error {
 	}
 	resp.Body.Close()
 	if loc := resp.Header.Get("Location"); loc != "" {
-		fmt.Printf("server  redirects to %s (a login page? see headers in runner.json)\n", loc)
+		fmt.Printf("server  HTTP %d, redirects to %s (a login page? see headers in runner.json)\n", resp.StatusCode, loc)
 		return nil
 	}
 	fmt.Printf("server  reachable (HTTP %d)\n", resp.StatusCode)
@@ -389,13 +364,22 @@ func (e *fatalError) Error() string { return e.msg }
 
 var errNoContent = errors.New("no content")
 
-// do sends req to CueFlow with the configured headers. Redirects are not followed: an access proxy answers
-// a request without its credentials with one to its login page, and the caller reports that.
+// do sends req to CueFlow with the configured headers. A redirect is followed only on the same host (e.g. to
+// https): one to another host is returned as is, so the headers never reach it. That is how an access proxy
+// answers a request without valid credentials, with its login page, and the caller reports it.
 func (c *Config) do(req *http.Request, timeout time.Duration) (*http.Response, error) {
 	for name, value := range c.Headers {
 		req.Header.Set(name, value)
 	}
-	hc := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Host != via[0].URL.Host {
+			return http.ErrUseLastResponse
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}}
 	return hc.Do(req)
 }
 
@@ -443,7 +427,10 @@ func (c *Config) post(ctx context.Context, path string, in, out any, auth bool) 
 		msg = strings.TrimSpace(string(data))
 	}
 	err = fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, msg)
-	if (resp.StatusCode == http.StatusUnauthorized && auth) || resp.StatusCode == http.StatusUpgradeRequired {
+	// A redirect left unfollowed went to another host: an access proxy refusing the runner's headers, which
+	// like a refused token will not get better by retrying.
+	refused := resp.StatusCode == http.StatusUnauthorized || resp.Header.Get("Location") != ""
+	if (refused && auth) || resp.StatusCode == http.StatusUpgradeRequired {
 		return &fatalError{err.Error()}
 	}
 	return err
@@ -463,7 +450,7 @@ func New(cfg *Config, log *slog.Logger) *Runner { return &Runner{cfg: cfg, log: 
 // Loop claims and runs jobs until ctx ends, then waits for running jobs to wind down.
 func (r *Runner) Loop(ctx context.Context) error {
 	if len(r.cfg.Headers) > 0 {
-		p, err := startMCPProxy(r.cfg)
+		p, err := startMCPProxy(r.cfg, r.log)
 		if err != nil {
 			return err
 		}
@@ -606,11 +593,7 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 	if m := r.cfg.AuthMethods[job.Preset]; m != "" {
 		cc["auth_method"] = m
 	}
-	if len(r.cfg.Env) > 0 {
-		env := map[string]any{}
-		for k, v := range r.cfg.Env {
-			env[k] = v
-		}
+	if env := agentEnv(r.cfg.Env, r.proxy != nil); len(env) > 0 {
 		cc["env"] = env
 	}
 	inst, err := connector.Build("acp_agent", cc, connector.Env{})
@@ -650,6 +633,28 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 		MCPURL: mcpURL, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
 		Model: cmp.Or(r.cfg.Models[job.Preset], job.Model),
 	})
+}
+
+// agentEnv is what is added to an agent's environment: the runner's env and, when the agent reaches its tool
+// server through the loopback proxy, 127.0.0.1 in NO_PROXY, so an HTTP proxy set for the machine's egress
+// (HTTP_PROXY, which some agents' clients apply even to loopback) is not asked for it.
+func agentEnv(cfgEnv map[string]string, proxied bool) map[string]any {
+	env := map[string]any{}
+	for k, v := range cfgEnv {
+		env[k] = v
+	}
+	if proxied {
+		for _, k := range []string{"NO_PROXY", "no_proxy"} {
+			v, ok := cfgEnv[k]
+			if !ok {
+				v = os.Getenv(k)
+			}
+			if !slices.ContainsFunc(strings.Split(v, ","), func(e string) bool { return strings.TrimSpace(e) == "127.0.0.1" }) {
+				env[k] = strings.TrimPrefix(v+",127.0.0.1", ",")
+			}
+		}
+	}
+	return env
 }
 
 // report ships buffered events every few seconds (which also keeps the job's lease alive) and
@@ -702,7 +707,7 @@ type mcpProxy struct {
 	jobs map[string]int // MCP path -> running jobs using it
 }
 
-func startMCPProxy(c *Config) (*mcpProxy, error) {
+func startMCPProxy(c *Config, log *slog.Logger) (*mcpProxy, error) {
 	target, err := url.Parse(c.URL)
 	if err != nil {
 		return nil, fmt.Errorf("server URL: %w", err)
@@ -720,6 +725,7 @@ func startMCPProxy(c *Config) (*mcpProxy, error) {
 			}
 		},
 		FlushInterval: -1, // stream server-sent events as they come
+		ErrorLog:      slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 	p.srv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if !p.serving(req.URL.Path) {
@@ -748,10 +754,17 @@ func (p *mcpProxy) release(path string) {
 	}
 }
 
+// serving reports whether path belongs to a running job's tool server: its path, or below it (the server
+// takes "<path>/" too).
 func (p *mcpProxy) serving(path string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.jobs[path] > 0
+	for jp := range p.jobs {
+		if path == jp || strings.HasPrefix(path, jp+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *mcpProxy) close() { _ = p.srv.Close() }
