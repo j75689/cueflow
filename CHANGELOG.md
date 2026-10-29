@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0](https://github.com/j75689/cueflow/compare/v1.3.0...v1.4.0) (2026-10-29)
+
+
+### Features
+
+* **config:** read secrets from Google Secret Manager (gcpsm://) and from &lt;NAME&gt;_FILE ([#100](https://github.com/j75689/cueflow/issues/100)) ([6be2d2a](https://github.com/j75689/cueflow/commit/6be2d2ae5c42173950881bfd1f49cb1abb1ec1a3))
+* **media:** allow POST /internal/media/register in single mode with GCS storage ([#104](https://github.com/j75689/cueflow/issues/104)) ([e5d6da2](https://github.com/j75689/cueflow/commit/e5d6da2fb4b91e7367f2afa160f2dec3c867ea7c))
+* **runner:** send configured headers on every request to CueFlow ([#103](https://github.com/j75689/cueflow/issues/103)) ([d8694dc](https://github.com/j75689/cueflow/commit/d8694dcb85e94d96a4695434a7b35e3654dfe6aa))
+
+
+### Bug Fixes
+
+* **deps:** bump golang.org/x/net to v0.62.0 (GO-2026-6866, GO-2026-6860) ([#101](https://github.com/j75689/cueflow/issues/101)) ([9b823af](https://github.com/j75689/cueflow/commit/9b823af6b00ab458d127368cbc1e39873fccff63))
+
 ## [1.3.0](https://github.com/j75689/cueflow/compare/v1.2.0...v1.3.0) (2026-10-24)
 
 
