@@ -89,7 +89,7 @@ type Config struct {
 	// TasksServiceAccount signs the OIDC token of each Cloud Tasks delivery.
 	TasksServiceAccount string
 	// InternalAudiences are the audiences /internal/* accepts in the Google ID token (default
-	// TasksTargetURL). A caller's token is usually made out to the URL it calls, so a server reached under
+	// TasksTargetURL and DirectURL). A caller's token is usually made out to the URL it calls, so a server reached under
 	// several URLs lists each. Cloud Tasks deliveries are signed for the first.
 	InternalAudiences []string
 	// InternalServiceAccounts are the service account emails allowed to call /internal/*
@@ -180,8 +180,10 @@ func Load() (*Config, error) {
 	c.TasksQueue = os.Getenv("CUEFLOW_TASKS_QUEUE")
 	c.TasksTargetURL = strings.TrimRight(env("CUEFLOW_TASKS_TARGET_URL", c.PublicURL), "/")
 	c.TasksServiceAccount = os.Getenv("CUEFLOW_TASKS_SERVICE_ACCOUNT")
-	for _, a := range strings.Split(env("CUEFLOW_INTERNAL_AUDIENCE", c.TasksTargetURL), ",") {
-		if a = strings.TrimSpace(a); a != "" {
+	// By default both URLs CueFlow knows itself by: Cloud Tasks' target, and the one machines call (a media
+	// producer in single mode calls DirectURL).
+	for _, a := range strings.Split(env("CUEFLOW_INTERNAL_AUDIENCE", c.TasksTargetURL+","+c.DirectURL), ",") {
+		if a = strings.TrimSpace(a); a != "" && !slices.Contains(c.InternalAudiences, a) {
 			c.InternalAudiences = append(c.InternalAudiences, a)
 		}
 	}

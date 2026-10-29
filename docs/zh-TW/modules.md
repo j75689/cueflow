@@ -60,4 +60,4 @@ Deliverable 是 agent 寫進審核佇列的型別化項目（內建 `document`�
 
 #### 受信任的服務傳大檔
 
-你自己的服務若會產生大檔（例如影片渲染器），不該把檔案推過 CueFlow。使用 GCS 儲存時，它可以用自己的 Google 身分直接寫進 bucket 的 `uploads/`，再呼叫 `POST /internal/media/register` 讓 CueFlow 收編，位元組不經過 CueFlow。該帳號必須列在 `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`，ID token 必須發給 `CUEFLOW_INTERNAL_AUDIENCE` 其中之一（預設為 CueFlow 網址；服務會用哪些網址呼叫，就全部列出）。只要媒體存在 GCS，單機部署和雲端都能用。細節見 [api.md](../api.md#media) 與 [deploy/cloudrun/README.md](../../deploy/cloudrun/README.md#services-that-write-media-to-the-bucket)（英文）。
+你自己的服務若會產生大檔（例如影片渲染器），不該把檔案推過 CueFlow。使用 GCS 儲存時，它可以用自己的 Google 身分直接寫進 bucket 的 `uploads/`，再呼叫 `POST /internal/media/register` 讓 CueFlow 收編，位元組不經過 CueFlow。該帳號必須列在 `CUEFLOW_MEDIA_REGISTER_ACCOUNTS`，ID token 必須發給 `CUEFLOW_INTERNAL_AUDIENCE` 其中之一（預設為 `CUEFLOW_TASKS_TARGET_URL` 與 `CUEFLOW_DIRECT_URL`；服務會用哪些網址呼叫，就全部列出）。只要媒體存在 GCS，單機部署和雲端都能用。細節見 [api.md](../api.md#media) 與 [deploy/cloudrun/README.md](../../deploy/cloudrun/README.md#services-that-write-media-to-the-bucket)（英文）。

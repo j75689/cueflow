@@ -61,7 +61,7 @@ func TestCloudSettingsAreValidatedTogether(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a complete cloud configuration must load: %v", err)
 	}
-	if !c.Cloud() || c.TasksTargetURL != "https://cueflow-abc.a.run.app" || len(c.InternalAudiences) != 1 || c.InternalAudiences[0] != c.TasksTargetURL ||
+	if !c.Cloud() || c.TasksTargetURL != "https://cueflow-abc.a.run.app" || !slices.Equal(c.InternalAudiences, []string{c.TasksTargetURL, c.DirectURL}) ||
 		len(c.InternalServiceAccounts) != 2 {
 		t.Fatalf("cloud config: %+v", c)
 	}
@@ -467,13 +467,23 @@ func TestInternalAudiences(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow.example.com"}) {
-		t.Fatalf("default: %v", c.InternalAudiences)
+		t.Fatalf("default, one URL: %v", c.InternalAudiences)
 	}
+	t.Setenv("CUEFLOW_DIRECT_URL", "https://direct.example.com/")
+	t.Setenv("CUEFLOW_TASKS_TARGET_URL", "https://cueflow-abc.a.run.app")
+	if c, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow-abc.a.run.app", "https://direct.example.com"}) {
+		t.Fatalf("default: the tasks target first, then the direct URL: %v", c.InternalAudiences)
+	}
+	t.Setenv("CUEFLOW_DIRECT_URL", "")
+	t.Setenv("CUEFLOW_TASKS_TARGET_URL", "")
 	t.Setenv("CUEFLOW_INTERNAL_AUDIENCE", " https://cueflow.example.com , http://10.0.0.2:3000,")
 	if c, err = Load(); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow.example.com", "http://10.0.0.2:3000"}) {
+	if !slices.Equal(c.InternalAudiences, []string{"https://cueflow.example.com", "http://10.0.0.2:3000"}) || slices.Contains(c.InternalAudiences, "https://direct.example.com") {
 		t.Fatalf("list: %v", c.InternalAudiences)
 	}
 	t.Setenv("CUEFLOW_INTERNAL_AUDIENCE", ",")
