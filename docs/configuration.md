@@ -12,20 +12,27 @@ The variables that hold a credential, `DATABASE_URL`, `DATABASE_SESSION_URL`, `C
 other ways. Each `<NAME>` is read in this order:
 
 1. **`<NAME>` set and not empty.** A value that starts with `gcpsm://` is a Google Secret Manager
-   reference, `gcpsm://projects/<project>/secrets/<secret>` (the latest version) or
-   `gcpsm://projects/<project>/secrets/<secret>/versions/<version>`. CueFlow reads it once at startup
-   with Application Default Credentials (on GCE and Cloud Run, the service account from the metadata
-   server), within 10 s, and uses the payload exactly as stored. The service account needs
-   `roles/secretmanager.secretAccessor` on each secret. Any other value is used as is.
+   reference: `gcpsm://projects/<project>/secrets/<secret>` (the latest version),
+   `gcpsm://projects/<project>/secrets/<secret>/versions/<version>`, or the same with
+   `/locations/<location>` after the project for a regional secret (read from that region's endpoint).
+   CueFlow reads every reference once at startup, all at the same time, with Application Default
+   Credentials (on GCE and Cloud Run, the service account from the metadata server); together they
+   must answer within 10 s. The service account needs `roles/secretmanager.secretAccessor` on each
+   secret. Any other value is used as is.
 2. **`<NAME>_FILE` set** (as in the `postgres` and `cloudflared` images, e.g. a Docker or Kubernetes
-   secret at `/run/secrets/<NAME>`): the file's content, less one trailing newline.
+   secret at `/run/secrets/<NAME>`): the file's content.
 3. Neither: unset.
 
-`<NAME>` wins over `<NAME>_FILE` when both are set. For `CUEFLOW_SECRET_KEY_PREVIOUS` the whole value
-is read first, then split at the commas. A reference that can't be read (a malformed reference, a
-missing secret or version, permission denied, an unreachable API, a missing or unreadable file) stops
-startup with an error naming the variable and the reference, never the value; it never falls back to
-an empty value. There is no refresh: to rotate a secret, add a new version and restart.
+A Secret Manager payload and a file both lose one trailing newline (`\n` or `\r\n`), since
+`echo ... | gcloud secrets create --data-file=-` and `echo ... > file` add one; anything else is kept.
+Setting both `<NAME>` and `<NAME>_FILE` (both not empty) stops startup with an error. For
+`CUEFLOW_SECRET_KEY_PREVIOUS` the whole value is read first, then split at commas and newlines, so a
+file can hold one key per line. A reference that can't be read (a malformed reference, a missing
+secret or version, permission denied, an unreachable API, no answer within 10 s, a missing or
+unreadable file) stops startup with an error naming the variable and the reference, never the value;
+it never falls back to an empty value. The other settings are checked first, so a typo elsewhere is
+reported without waiting for Secret Manager. There is no refresh: to rotate a secret, add a new
+version and restart.
 
 ## Core
 

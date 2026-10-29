@@ -13,106 +13,189 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/oauth2/google"
 )
 
-// SecretVars are the variables that hold a credential. Each one can also be given as a Secret Manager
-// reference (gcpsm://...) or through <NAME>_FILE; see resolveSecret.
+// SecretVars are the variables that hold a credential. Load reads each one with secrets.env, which also
+// takes a Secret Manager reference (gcpsm://...) or <NAME>_FILE; see loadSecrets. A new credential
+// variable belongs here, read the same way: env would silently skip both forms.
 var SecretVars = []string{
 	"DATABASE_URL", "DATABASE_SESSION_URL",
 	"CUEFLOW_SECRET_KEY", "CUEFLOW_SECRET_KEY_PREVIOUS",
 	"CUEFLOW_ADMIN_TOKEN", "CUEFLOW_MCP_TOKEN",
 }
 
-// SecretManager reads one secret version. name is "projects/P/secrets/S/versions/V".
+// SecretManager reads one secret version. name is "projects/P/secrets/S/versions/V", or
+// "projects/P/locations/L/secrets/S/versions/V" for a regional secret.
 type SecretManager interface {
 	Access(ctx context.Context, name string) ([]byte, error)
 }
 
 // newSecretManager builds the Secret Manager client the first time a gcpsm:// reference is met, so a
 // deployment that uses none needs no Google credentials. Tests replace it.
-var newSecretManager = func() (SecretManager, error) {
-	c, err := google.DefaultClient(context.Background(), "https://www.googleapis.com/auth/cloud-platform")
+var newSecretManager = func(ctx context.Context) (SecretManager, error) {
+	c, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return nil, fmt.Errorf("default credentials: %w", err)
 	}
 	cc := *c
-	cc.Timeout = SecretFetchTimeout // also bounds the token fetch, which does not see the request's ctx
-	return &gcpSecretManager{client: &cc, endpoint: "https://secretmanager.googleapis.com/v1/"}, nil
+	cc.Timeout = secretFetchTimeout
+	return &gcpSecretManager{client: &cc, endpoint: secretManagerEndpoint}, nil
 }
 
-// SecretFetchTimeout bounds reading one Secret Manager reference at startup.
-const SecretFetchTimeout = 10 * time.Second
+// secretFetchTimeout bounds reading all of Load's Secret Manager references, which are fetched together.
+// A var so tests can shorten it.
+var secretFetchTimeout = 10 * time.Second
 
 const secretRefPrefix = "gcpsm://"
 
-// secretRef is a Secret Manager reference: gcpsm://projects/<project>/secrets/<secret>[/versions/<version>].
-var secretRef = regexp.MustCompile(`^gcpsm://projects/([A-Za-z0-9._:-]+)/secrets/([A-Za-z0-9_-]+)(?:/versions/([A-Za-z0-9_-]+))?$`)
+// secretRef is a Secret Manager reference:
+// gcpsm://projects/<project>[/locations/<location>]/secrets/<secret>[/versions/<version>].
+var secretRef = regexp.MustCompile(`^gcpsm://projects/([A-Za-z0-9._:-]+)/(locations/[a-z0-9-]+/)?secrets/([A-Za-z0-9_-]+)(?:/versions/([A-Za-z0-9_-]+))?$`)
 
-// secrets resolves SecretVars for one Load, making one Secret Manager client at most.
-type secrets struct {
-	once sync.Once
-	sm   SecretManager
-	err  error
+// parseSecretRef turns a reference into the version name Secret Manager reads.
+func parseSecretRef(v string) (string, error) {
+	m := secretRef.FindStringSubmatch(v)
+	if m == nil {
+		return "", fmt.Errorf("malformed Secret Manager reference %q: want gcpsm://projects/<project>[/locations/<location>]/secrets/<secret>[/versions/<version>]", v)
+	}
+	version := m[4]
+	if version == "" {
+		version = "latest"
+	}
+	return "projects/" + m[1] + "/" + m[2] + "secrets/" + m[3] + "/versions/" + version, nil
 }
 
-// resolve returns the value of the secret variable name, in this order:
+// trimNewline drops one trailing newline ("\n" or "\r\n"): echo and most editors add one, to a file
+// and to `gcloud secrets create --data-file=-` alike.
+func trimNewline(s string) string {
+	if t, ok := strings.CutSuffix(s, "\r\n"); ok {
+		return t
+	}
+	return strings.TrimSuffix(s, "\n")
+}
+
+// secrets holds the resolved value of every name loadSecrets was given ("" for unset).
+type secrets map[string]string
+
+// env is env for a secret variable: its resolved value, or def when that is empty.
+func (s secrets) env(name, def string) string {
+	v, ok := s[name]
+	if !ok {
+		panic("config: " + name + " is read as a secret but is not in SecretVars")
+	}
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+// loadSecrets resolves each of names:
 //
-//  1. name set and non-empty: a value starting with gcpsm:// is read from Secret Manager, anything
+//  1. <NAME> set and non-empty: a value starting with gcpsm:// is read from Secret Manager, anything
 //     else is used as is;
-//  2. name_FILE set: that file, less one trailing newline;
+//  2. <NAME>_FILE set: that file;
 //  3. neither: "".
 //
-// A reference that can't be read is an error naming the variable and the reference, never the value.
-func (s *secrets) resolve(name string) (string, error) {
-	if v := os.Getenv(name); v != "" {
-		if !strings.HasPrefix(v, secretRefPrefix) {
-			return v, nil
+// Setting both is an error. A Secret Manager value and a file lose one trailing newline. The references
+// are fetched in parallel within secretFetchTimeout. A reference that can't be read is an error naming
+// the variable and the reference, never the value.
+func loadSecrets(ctx context.Context, names []string) (secrets, error) {
+	out := secrets{}
+	type fetch struct{ name, ref string }
+	var fetches []fetch
+	for _, name := range names {
+		v, file := os.Getenv(name), os.Getenv(name+"_FILE")
+		switch {
+		case v != "" && file != "":
+			return nil, fmt.Errorf("%s and %s_FILE are both set: set only one of them", name, name)
+		case strings.HasPrefix(v, secretRefPrefix):
+			ref, err := parseSecretRef(v)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			fetches = append(fetches, fetch{name, ref})
+		case v != "":
+			out[name] = v
+		case file != "":
+			b, err := os.ReadFile(file)
+			if err != nil {
+				return nil, fmt.Errorf("%s_FILE: %w", name, err) // the error names the path, not the content
+			}
+			out[name] = trimNewline(string(b))
+		default:
+			out[name] = ""
 		}
-		m := secretRef.FindStringSubmatch(v)
-		if m == nil {
-			// The value itself is not printed: a malformed reference might be a mistyped secret.
-			return "", fmt.Errorf("%s: malformed Secret Manager reference: want gcpsm://projects/<project>/secrets/<secret>[/versions/<version>]", name)
-		}
-		version := m[3]
-		if version == "" {
-			version = "latest"
-		}
-		ref := "projects/" + m[1] + "/secrets/" + m[2] + "/versions/" + version
-		s.once.Do(func() { s.sm, s.err = newSecretManager() })
-		if s.err != nil {
-			return "", fmt.Errorf("%s: reading Secret Manager secret %s: %w", name, ref, s.err)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), SecretFetchTimeout)
-		defer cancel()
-		b, err := s.sm.Access(ctx, ref)
-		if err != nil {
-			return "", fmt.Errorf("%s: reading Secret Manager secret %s: %w", name, ref, err)
-		}
-		return string(b), nil
 	}
-	if path := os.Getenv(name + "_FILE"); path != "" {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("%s_FILE: %w", name, err) // the error names the path, not the content
-		}
-		v := strings.TrimSuffix(string(b), "\n") // echo adds one
-		return strings.TrimSuffix(v, "\r"), nil
+	if len(fetches) == 0 {
+		return out, nil
 	}
-	return "", nil
+
+	// The wait below, not the client, enforces the timeout: the OAuth token fetch inside the client's
+	// RoundTrip sees neither the request's ctx nor Client.Timeout.
+	ctx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
+	defer cancel()
+	type result struct {
+		v   string
+		err error
+	}
+	answers := make([]chan result, len(fetches))
+	for i := range answers {
+		answers[i] = make(chan result, 1)
+	}
+	newSM := newSecretManager // read once: a stuck goroutine may outlive this call
+	go func() {
+		sm, err := newSM(ctx)
+		for i, f := range fetches {
+			if err != nil {
+				answers[i] <- result{err: err}
+				continue
+			}
+			go func() {
+				b, err := sm.Access(ctx, f.ref)
+				answers[i] <- result{trimNewline(string(b)), err}
+			}()
+		}
+	}()
+	for i, f := range fetches {
+		select {
+		case r := <-answers[i]:
+			if r.err != nil {
+				return nil, fmt.Errorf("%s: reading Secret Manager secret %s: %w", f.name, f.ref, r.err)
+			}
+			out[f.name] = r.v
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%s: reading Secret Manager secret %s: no answer within %s", f.name, f.ref, secretFetchTimeout)
+		}
+	}
+	return out, nil
+}
+
+var locationOf = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/`)
+
+// secretManagerEndpoint is the API base for a location: global secrets use the global endpoint,
+// regional ones their region's.
+func secretManagerEndpoint(location string) string {
+	if location == "" {
+		return "https://secretmanager.googleapis.com/v1/"
+	}
+	return "https://secretmanager." + location + ".rep.googleapis.com/v1/"
 }
 
 // gcpSecretManager is Secret Manager's REST API: GET v1/{name}:access.
 type gcpSecretManager struct {
 	client   *http.Client
-	endpoint string
+	endpoint func(location string) string
 }
 
 func (g *gcpSecretManager) Access(ctx context.Context, name string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.endpoint+name+":access", nil)
+	var location string
+	if m := locationOf.FindStringSubmatch(name); m != nil {
+		location = m[1]
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.endpoint(location)+name+":access", nil)
 	if err != nil {
 		return nil, err
 	}
