@@ -10,7 +10,6 @@
 package mcpaction
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/headerlines"
 	"github.com/j75689/cueflow/internal/mcpx"
 )
 
@@ -67,17 +67,12 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	for k, v := range cfg.KV("headers") {
 		opts.Headers[k] = v
 	}
-	sc := bufio.NewScanner(strings.NewReader(cfg.String("secret_headers")))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(k) == "" {
-			return nil, fmt.Errorf("mcp action: secret header line %q is not Header-Name: value", line)
-		}
-		opts.Headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	secret, err := headerlines.Parse(cfg.String("secret_headers"))
+	if err != nil {
+		return nil, fmt.Errorf("mcp action: secret headers: %w", err)
+	}
+	for _, h := range secret {
+		opts.Headers[h.Name] = h.Value
 	}
 	if t := cfg.String("auth_token"); t != "" {
 		opts.Headers["Authorization"] = "Bearer " + t

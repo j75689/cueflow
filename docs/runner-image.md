@@ -98,6 +98,8 @@ The mapping lives in `runner.json` in the `config` volume, next to the credentia
 - `auth_methods` names the ACP `authenticate` method, for agents that require one.
 - `models` pins a model. It wins over the model the server asks for.
 - `allow_presets` refuses jobs for any other agent.
+- `headers` are sent on every request to CueFlow, for a CueFlow behind Cloudflare Access: see
+  [deploy/runner](../deploy/runner/README.md#behind-cloudflare-access). Agents are never given them.
 
 The image has no editor, and the file belongs to `nonroot` with mode 0600. Edit it with the image's own Node.js:
 
@@ -115,7 +117,7 @@ Credentials go in `.env`, like the Claude token:
 - OpenCode: the provider's key, for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 - Goose: the provider's key, plus `GOOSE_PROVIDER` and `GOOSE_MODEL`.
 
-Each agent process inherits the container's environment, plus `env` from `runner.json`. Finally, give the pool's
+Each agent process inherits the container's environment, except the `CUEFLOW_*` variables, plus `env` from `runner.json`. Finally, give the pool's
 connector the matching `preset` and labels.
 
 ## Credentials and work directories

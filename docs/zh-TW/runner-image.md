@@ -95,6 +95,7 @@ agent 需要的東西要在 build 時裝好。執行時根檔案系統是唯讀�
 - `auth_methods`：指定 ACP `authenticate` 的方法，給需要登入的 agent 用。
 - `models`：釘住模型，優先於伺服器要求的模型。
 - `allow_presets`：拒絕其他 agent 的任務。
+- `headers`：每個送往 CueFlow 的請求都會帶上，給放在 Cloudflare Access 後面的 CueFlow 用，見 [deploy/runner](../../deploy/runner/README.md#behind-cloudflare-access)（英文）。agent 拿不到這些 header。
 
 映像裡沒有編輯器，檔案屬於 `nonroot`、權限 0600。可以用映像自帶的 Node.js 修改：
 
@@ -112,7 +113,7 @@ docker compose up -d --force-recreate
 - OpenCode：對應 provider 的金鑰，例如 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`。
 - Goose：對應 provider 的金鑰，加上 `GOOSE_PROVIDER` 和 `GOOSE_MODEL`。
 
-每個 agent 程序都會繼承容器的環境變數，再加上 `runner.json` 裡的 `env`。最後，在 pool 的 connector 設定對應的 `preset` 與標籤。
+每個 agent 程序都會繼承容器的環境變數（`CUEFLOW_*` 除外），再加上 `runner.json` 裡的 `env`。最後，在 pool 的 connector 設定對應的 `preset` 與標籤。
 
 ## 憑證與工作目錄
 
