@@ -141,43 +141,59 @@ func loadSecrets(ctx context.Context, names []string) (secrets, error) {
 	// RoundTrip sees neither the request's ctx nor Client.Timeout.
 	ctx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
 	defer cancel()
-	type result struct {
-		v   string
-		err error
-	}
-	answers := make([]chan result, len(fetches))
+	answers := make([]chan secretAnswer, len(fetches))
 	for i := range answers {
-		answers[i] = make(chan result, 1)
+		answers[i] = make(chan secretAnswer, 1)
 	}
 	newSM := newSecretManager // read once: a stuck goroutine may outlive this call
 	go func() {
 		sm, err := newSM(ctx)
 		for i, f := range fetches {
 			if err != nil {
-				answers[i] <- result{err: err}
+				answers[i] <- secretAnswer{err: err}
 				continue
 			}
 			go func() {
 				b, err := sm.Access(ctx, f.ref)
-				answers[i] <- result{trimNewline(string(b)), err}
+				answers[i] <- secretAnswer{trimNewline(string(b)), err}
 			}()
 		}
 	}()
 	for i, f := range fetches {
-		select {
-		case r := <-answers[i]:
-			if r.err != nil {
-				return nil, fmt.Errorf("%s: reading Secret Manager secret %s: %w", f.name, f.ref, r.err)
-			}
-			if r.v == "" {
-				return nil, fmt.Errorf("%s: Secret Manager secret %s is empty", f.name, f.ref)
-			}
-			out[f.name] = r.v
-		case <-ctx.Done():
+		r, ok := awaitAnswer(ctx, answers[i])
+		switch {
+		case !ok:
 			return nil, fmt.Errorf("%s: reading Secret Manager secret %s: no answer within %s", f.name, f.ref, secretFetchTimeout)
+		case r.err != nil:
+			return nil, fmt.Errorf("%s: reading Secret Manager secret %s: %w", f.name, f.ref, r.err)
+		case r.v == "":
+			return nil, fmt.Errorf("%s: Secret Manager secret %s is empty", f.name, f.ref)
 		}
+		out[f.name] = r.v
 	}
 	return out, nil
+}
+
+// secretAnswer is one fetch's outcome.
+type secretAnswer struct {
+	v   string
+	err error
+}
+
+// awaitAnswer waits for ch until ctx ends; false means no answer came. An answer already in ch wins
+// over an ended ctx: select picks at random among ready cases, so it is checked again before giving up.
+func awaitAnswer(ctx context.Context, ch <-chan secretAnswer) (secretAnswer, bool) {
+	select {
+	case r := <-ch:
+		return r, true
+	case <-ctx.Done():
+		select {
+		case r := <-ch:
+			return r, true
+		default:
+			return secretAnswer{}, false
+		}
+	}
 }
 
 var locationOf = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/`)

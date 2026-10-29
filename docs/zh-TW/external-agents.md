@@ -9,10 +9,15 @@ agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行�
 Docker 要用 `agents` 映像（[docker.md](docker.md#映像版本)）；Cloud Run 上沒有 agent CLI，請改用 Runner。
 
 **環境變數。** 外部 agent 與 stdio MCP 伺服器（`mcp_server` connector），不論在 CueFlow 主機或 Runner 上，
-拿到的都是主機的環境變數扣掉 CueFlow 自己的設定：所有 `CUEFLOW_*` 與 `DATABASE_*` 變數都不會傳入，包括金鑰、
+繼承的都是主機的環境變數扣掉 CueFlow 自己的設定：所有 `CUEFLOW_*` 與 `DATABASE_*` 變數都不會傳入，包括金鑰、
 資料庫網址、admin 與 MCP token 以及它們的 `_FILE` 路徑。其他變數照常傳入，例如 `PATH`、`HOME` 與模型供應商的憑證
 （`ANTHROPIC_*`、`AWS_*`、`GOOGLE_*`）。要刻意交給 agent 或伺服器某個值，請寫在 connector 的環境變數裡；
 那些不論名稱一律傳入。
+
+這只是過濾子程序繼承的環境變數，並不是隔離。以同一個 OS 使用者執行的子程序，仍可讀取伺服器的環境變數
+（Linux 上的 `/proc/<pid>/environ`）與任何 `<NAME>_FILE` 路徑，也能用主機的雲端身分（metadata server、
+Application Default Credentials）自己讀取 `gcpsm://` secret。在 CueFlow 主機上執行的 ACP agent 或 stdio MCP 伺服器
+與伺服器共用 OS 使用者與雲端身分，請只在可信任的情況下使用；正式環境請在 [Runner](#在自己的機器上跑-agentrunner) 上跑 agent。
 
 ## 讓其他 agent 操作 CueFlow（MCP）
 

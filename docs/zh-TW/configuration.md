@@ -22,9 +22,10 @@ CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；C
 Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\r\n`），因為
 `echo ... | gcloud secrets create --data-file=-` 與 `echo ... > file` 都會多一個；其餘內容保留。
 `<NAME>` 與 `<NAME>_FILE` 同時設定（都不為空）會讓啟動失敗並報錯。`CUEFLOW_SECRET_KEY_PREVIOUS` 會先讀出
-整個值，再以逗號與換行切開，所以檔案可以一行一把金鑰。讀不到的參照（格式錯誤、secret 或版本不存在、
+整個值，再以逗號與換行切開，所以檔案可以一行一把金鑰。它只接受一個值：用 `gcpsm://` 時，是一個存放所有舊金鑰
+（以換行或逗號分隔）的 secret；不支援以逗號列出多個 `gcpsm://` 參照。讀不到的參照（格式錯誤、secret 或版本不存在、
 權限不足、API 連不上、10 秒內沒有回應、檔案不存在或無法讀取，或去掉結尾換行後為空的 secret 或檔案）會讓啟動失敗，錯誤訊息指出變數與參照，
-但不會印出值；不會退回空值。其他設定會先檢查，所以別處的打字錯誤不必等 Secret Manager 就會回報。CueFlow 啟動的 agent 與 stdio MCP 伺服器看不到這些變數，也看不到其他 `CUEFLOW_*` 或 `DATABASE_*` 變數（見 [external-agents.md](external-agents.md#外部-agentacp)）。
+但不會印出值；不會退回空值。其他設定會先檢查，所以別處的打字錯誤不必等 Secret Manager 就會回報。CueFlow 啟動的 agent 與 stdio MCP 伺服器不會繼承這些變數，也不會繼承其他 `CUEFLOW_*` 或 `DATABASE_*` 變數；這只是過濾它們的環境變數，並不是隔離（見 [external-agents.md](external-agents.md#外部-agentacp)）。
 不會自動更新：要輪替機密，請新增版本後重新啟動。使用 `deploy/docker-compose.yml` 時，container 的
 `DATABASE_URL` 來自 `CUEFLOW_DB_URL`（預設為內建的資料庫），不會取用 `.env` 裡的 `DATABASE_URL`；要在那裡改用
 `DATABASE_URL_FILE`，請設 `CUEFLOW_DB_URL=`（空值）。
@@ -36,7 +37,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
 | `DATABASE_SESSION_URL` | 空 | 給 `LISTEN` 與 migration 鎖用的 session 模式連線。當 `DATABASE_URL` 是 transaction 模式的 pooler（Supabase 的 6543、PgBouncer `pool_mode=transaction`）時設定；主連線池就不使用具名 prepared statement。留空：全部走 `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex），請備份 |
-| `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號分隔 |
+| `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號或換行分隔 |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | 監聽位址 |
 | `CUEFLOW_ADMIN_TOKEN` | | 設定後 API 與 UI 需要 `Authorization: Bearer <token>` |
 | `CUEFLOW_MCP_TOKEN` | | 啟用給外部 agent 用的 MCP 端點 `/mcp`（Bearer token） |

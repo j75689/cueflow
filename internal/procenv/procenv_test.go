@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/j75689/cueflow/internal/config"
 )
 
 // setCueFlowEnv sets CueFlow's own settings and a provider credential, as on a real server.
@@ -53,6 +55,16 @@ func TestChildDoesNotInheritCueFlowSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertChildEnv(t, string(out))
+}
+
+// TestEverySecretIsWithheld: a credential added to config.SecretVars under another prefix must fail
+// here rather than reach agents.
+func TestEverySecretIsWithheld(t *testing.T) {
+	for _, k := range config.SecretVars {
+		if !Withheld(k) || !Withheld(k+"_FILE") {
+			t.Errorf("%s (or %s_FILE) reaches child processes: give it a CUEFLOW_ name or extend Withheld", k, k)
+		}
+	}
 }
 
 func TestWithheld(t *testing.T) {

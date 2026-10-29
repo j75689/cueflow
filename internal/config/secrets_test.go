@@ -359,3 +359,20 @@ func TestSecretEmptyIsAnError(t *testing.T) {
 		})
 	}
 }
+
+// TestAnswerWinsOverAnEndedDeadline: an answer that arrived before the deadline is used even when the
+// deadline has also passed by the time it is read.
+func TestAnswerWinsOverAnEndedDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 1000 {
+		ch := make(chan secretAnswer, 1)
+		ch <- secretAnswer{v: "value"}
+		if r, ok := awaitAnswer(ctx, ch); !ok || r.v != "value" {
+			t.Fatalf("an answer already there must win over an ended ctx: %+v, %v", r, ok)
+		}
+	}
+	if _, ok := awaitAnswer(ctx, make(chan secretAnswer, 1)); ok {
+		t.Fatal("no answer and an ended ctx is a timeout")
+	}
+}

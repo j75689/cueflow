@@ -27,11 +27,13 @@ A Secret Manager payload and a file both lose one trailing newline (`\n` or `\r\
 `echo ... | gcloud secrets create --data-file=-` and `echo ... > file` add one; anything else is kept.
 Setting both `<NAME>` and `<NAME>_FILE` (both not empty) stops startup with an error. For
 `CUEFLOW_SECRET_KEY_PREVIOUS` the whole value is read first, then split at commas and newlines, so a
-file can hold one key per line. A reference that can't be read (a malformed reference, a missing
+file can hold one key per line. It takes one value: with `gcpsm://`, that is one secret holding the old
+keys, separated by newlines or commas; a comma-separated list of several `gcpsm://` references is not
+supported. A reference that can't be read (a malformed reference, a missing
 secret or version, permission denied, an unreachable API, no answer within 10 s, a missing or
 unreadable file, or a secret or file that is empty once its trailing newline is gone) stops startup with an error naming the variable and the reference, never the value;
 it never falls back to an empty value. The other settings are checked first, so a typo elsewhere is
-reported without waiting for Secret Manager. Agents and stdio MCP servers that CueFlow starts never see these variables, nor any other `CUEFLOW_*` or `DATABASE_*` one (see [external-agents.md](external-agents.md#external-agents-acp)). There is no refresh: to rotate a secret, add a new
+reported without waiting for Secret Manager. Agents and stdio MCP servers that CueFlow starts don't inherit these variables, nor any other `CUEFLOW_*` or `DATABASE_*` one; that filters their environment and does not isolate them (see [external-agents.md](external-agents.md#external-agents-acp)). There is no refresh: to rotate a secret, add a new
 version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE_URL` comes from
 `CUEFLOW_DB_URL` (default: the bundled database), never from a `DATABASE_URL` in `.env`; to use
 `DATABASE_URL_FILE` there, set `CUEFLOW_DB_URL=` (empty).
@@ -43,7 +45,7 @@ version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
 | `DATABASE_SESSION_URL` | empty | A session-mode connection for `LISTEN` and the migration lock. Set it when `DATABASE_URL` is a transaction-mode pooler (Supabase port 6543, PgBouncer `pool_mode=transaction`); the main pool then runs without named prepared statements. Empty: everything uses `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
-| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
+| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), separated by commas or newlines, still accepted for reading during a rotation |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |
