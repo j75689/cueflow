@@ -3,6 +3,24 @@
 CueFlow 以環境變數設定。Docker 的預設值在 `deploy/.env.example`；Cloud Run 見 [deploy/cloudrun/README.md](../../deploy/cloudrun/README.md)（英文）。
 會讓啟動失敗的值，也會讓 `cueflow migrate`、`rotate-key` 與 `media` 失敗；啟動時的警告只有 `cueflow serve` 會記錄。
 
+## 從檔案與 Secret Manager 讀取機密
+
+存放憑證的變數 `DATABASE_URL`、`DATABASE_SESSION_URL`、`CUEFLOW_SECRET_KEY`、`CUEFLOW_SECRET_KEY_PREVIOUS`、
+`CUEFLOW_ADMIN_TOKEN` 與 `CUEFLOW_MCP_TOKEN` 還有兩種給法。每個 `<NAME>` 依下列順序讀取：
+
+1. **`<NAME>` 有設且不為空。** 以 `gcpsm://` 開頭的值是 Google Secret Manager 參照：
+   `gcpsm://projects/<project>/secrets/<secret>`（最新版本）或
+   `gcpsm://projects/<project>/secrets/<secret>/versions/<version>`。CueFlow 在啟動時用 Application Default
+   Credentials（在 GCE 與 Cloud Run 上就是 metadata server 提供的 service account）讀取一次，限時 10 秒，
+   內容原樣使用。該 service account 需要每個 secret 的 `roles/secretmanager.secretAccessor`。其他值照原樣使用。
+2. **`<NAME>_FILE` 有設**（與 `postgres`、`cloudflared` image 的慣例相同，例如掛在 `/run/secrets/<NAME>`
+   的 Docker 或 Kubernetes secret）：使用該檔案內容，去掉結尾的一個換行。
+3. 都沒設：視為未設定。
+
+兩者都設時以 `<NAME>` 為準。`CUEFLOW_SECRET_KEY_PREVIOUS` 會先讀出整個值，再以逗號切開。讀不到的參照
+（格式錯誤、secret 或版本不存在、權限不足、API 連不上、檔案不存在或無法讀取）會讓啟動失敗，錯誤訊息
+指出變數與參照，但不會印出值；不會退回空值。不會自動更新：要輪替機密，請新增版本後重新啟動。
+
 ## 基本
 
 | 環境變數 | 預設值 | 用途 |

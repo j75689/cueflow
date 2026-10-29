@@ -5,6 +5,28 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 A value that stops startup with an error also stops `cueflow migrate`, `rotate-key` and `media`;
 startup warnings are logged by `cueflow serve` only.
 
+## Secrets from files and Secret Manager
+
+The variables that hold a credential, `DATABASE_URL`, `DATABASE_SESSION_URL`, `CUEFLOW_SECRET_KEY`,
+`CUEFLOW_SECRET_KEY_PREVIOUS`, `CUEFLOW_ADMIN_TOKEN` and `CUEFLOW_MCP_TOKEN`, can also be given in two
+other ways. Each `<NAME>` is read in this order:
+
+1. **`<NAME>` set and not empty.** A value that starts with `gcpsm://` is a Google Secret Manager
+   reference, `gcpsm://projects/<project>/secrets/<secret>` (the latest version) or
+   `gcpsm://projects/<project>/secrets/<secret>/versions/<version>`. CueFlow reads it once at startup
+   with Application Default Credentials (on GCE and Cloud Run, the service account from the metadata
+   server), within 10 s, and uses the payload exactly as stored. The service account needs
+   `roles/secretmanager.secretAccessor` on each secret. Any other value is used as is.
+2. **`<NAME>_FILE` set** (as in the `postgres` and `cloudflared` images, e.g. a Docker or Kubernetes
+   secret at `/run/secrets/<NAME>`): the file's content, less one trailing newline.
+3. Neither: unset.
+
+`<NAME>` wins over `<NAME>_FILE` when both are set. For `CUEFLOW_SECRET_KEY_PREVIOUS` the whole value
+is read first, then split at the commas. A reference that can't be read (a malformed reference, a
+missing secret or version, permission denied, an unreachable API, a missing or unreadable file) stops
+startup with an error naming the variable and the reference, never the value; it never falls back to
+an empty value. There is no refresh: to rotate a secret, add a new version and restart.
+
 ## Core
 
 | Variable | Default | Purpose |

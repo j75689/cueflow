@@ -2,6 +2,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -114,12 +115,21 @@ type Config struct {
 func (c *Config) Cloud() bool { return c.Queue == "cloudtasks" || c.Tick == "external" }
 
 func Load() (*Config, error) {
+	sec := map[string]string{}
+	var src secrets
+	for _, name := range SecretVars {
+		v, err := src.resolve(name)
+		if err != nil {
+			return nil, err
+		}
+		sec[name] = v
+	}
 	c := &Config{
 		Addr:                  env("CUEFLOW_ADDR", "127.0.0.1:3000"),
-		DatabaseURL:           env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
-		DatabaseSessionURL:    os.Getenv("DATABASE_SESSION_URL"),
-		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
-		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
+		DatabaseURL:           cmp.Or(sec["DATABASE_URL"], "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
+		DatabaseSessionURL:    sec["DATABASE_SESSION_URL"],
+		AdminToken:            sec["CUEFLOW_ADMIN_TOKEN"],
+		MCPToken:              sec["CUEFLOW_MCP_TOKEN"],
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
 		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),
 		DisableScheduler:      envBool("CUEFLOW_DISABLE_SCHEDULER"),
@@ -221,12 +231,12 @@ func Load() (*Config, error) {
 	if c.Cloud() && len(c.InternalServiceAccounts) == 0 {
 		return nil, errors.New("cloud mode needs CUEFLOW_INTERNAL_SERVICE_ACCOUNTS (who may call /internal/*)")
 	}
-	key, err := ParseSecretKey(os.Getenv("CUEFLOW_SECRET_KEY"))
+	key, err := ParseSecretKey(sec["CUEFLOW_SECRET_KEY"])
 	if err != nil {
 		return nil, err
 	}
 	c.SecretKey = key
-	for _, raw := range strings.Split(os.Getenv("CUEFLOW_SECRET_KEY_PREVIOUS"), ",") {
+	for _, raw := range strings.Split(sec["CUEFLOW_SECRET_KEY_PREVIOUS"], ",") {
 		if raw = strings.TrimSpace(raw); raw == "" {
 			continue
 		}
