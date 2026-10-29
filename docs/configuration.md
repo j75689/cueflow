@@ -31,7 +31,7 @@ file can hold one key per line. A reference that can't be read (a malformed refe
 secret or version, permission denied, an unreachable API, no answer within 10 s, a missing or
 unreadable file, or a secret or file that is empty once its trailing newline is gone) stops startup with an error naming the variable and the reference, never the value;
 it never falls back to an empty value. The other settings are checked first, so a typo elsewhere is
-reported without waiting for Secret Manager. There is no refresh: to rotate a secret, add a new
+reported without waiting for Secret Manager. Agents and stdio MCP servers that CueFlow starts never see these variables, nor any other `CUEFLOW_*` or `DATABASE_*` one (see [external-agents.md](external-agents.md#external-agents-acp)). There is no refresh: to rotate a secret, add a new
 version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE_URL` comes from
 `CUEFLOW_DB_URL` (default: the bundled database), never from a `DATABASE_URL` in `.env`; to use
 `DATABASE_URL_FILE` there, set `CUEFLOW_DB_URL=` (empty).

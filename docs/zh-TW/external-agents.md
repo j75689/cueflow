@@ -8,6 +8,12 @@ agent 可以改由 Claude Code、Codex、Gemini CLI、OpenCode 或 Goose 執行�
 
 Docker 要用 `agents` 映像（[docker.md](docker.md#映像版本)）；Cloud Run 上沒有 agent CLI，請改用 Runner。
 
+**環境變數。** 外部 agent 與 stdio MCP 伺服器（`mcp_server` connector），不論在 CueFlow 主機或 Runner 上，
+拿到的都是主機的環境變數扣掉 CueFlow 自己的設定：所有 `CUEFLOW_*` 與 `DATABASE_*` 變數都不會傳入，包括金鑰、
+資料庫網址、admin 與 MCP token 以及它們的 `_FILE` 路徑。其他變數照常傳入，例如 `PATH`、`HOME` 與模型供應商的憑證
+（`ANTHROPIC_*`、`AWS_*`、`GOOGLE_*`）。要刻意交給 agent 或伺服器某個值，請寫在 connector 的環境變數裡；
+那些不論名稱一律傳入。
+
 ## 讓其他 agent 操作 CueFlow（MCP）
 
 CueFlow 在 `/mcp` 提供 MCP 端點，讓外部 agent（Claude Code、Codex、Cursor⋯）幫你操作看板：查看 agent 與任務、建立並指派任務、留言（也就是回覆正在等你的 agent）、移動、啟動或停止任務，以及查看待審核的草稿。它不能核准或發布貼文，這一步仍然只在後台進行。

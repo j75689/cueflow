@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/j75689/cueflow/internal/procenv"
 	"github.com/j75689/cueflow/internal/version"
 )
 
@@ -36,6 +36,16 @@ type Options struct {
 
 var impl = &mcp.Implementation{Name: "cueflow", Version: version.Version}
 
+// stdioCommand is a stdio server's process. Its environment is procenv's: CueFlow's own settings and
+// credentials are left out, o.Env is added.
+func stdioCommand(o Options) *exec.Cmd {
+	extra := make([]string, 0, len(o.Env))
+	for k, v := range o.Env {
+		extra = append(extra, k+"="+v)
+	}
+	return procenv.Command(o.Command, o.Args, extra...)
+}
+
 // Connect opens an MCP client session. Callers must Close it.
 func Connect(ctx context.Context, o Options) (*mcp.ClientSession, error) {
 	var t mcp.Transport
@@ -44,12 +54,7 @@ func Connect(ctx context.Context, o Options) (*mcp.ClientSession, error) {
 		if o.Command == "" {
 			return nil, errors.New("mcp: stdio transport needs a command")
 		}
-		cmd := exec.Command(o.Command, o.Args...)
-		cmd.Env = os.Environ()
-		for k, v := range o.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-		t = &mcp.CommandTransport{Command: cmd}
+		t = &mcp.CommandTransport{Command: stdioCommand(o)}
 	case TransportSSE:
 		t = &mcp.SSEClientTransport{Endpoint: o.Endpoint, HTTPClient: withHeaders(o.HTTPClient, o.Headers)}
 	case TransportStreamable, "":

@@ -15,6 +15,13 @@ server; shell and file access are refused unless the owner of the machine allows
 On Docker this needs the `agents` image ([docker.md](docker.md#image-variants)); on Cloud Run there is no agent
 CLI, so use a runner instead.
 
+**Environment.** An external agent, and a stdio MCP server (`mcp_server` connector), on the CueFlow host or on a
+runner, gets the host's environment without CueFlow's own settings: every `CUEFLOW_*` and `DATABASE_*`
+variable is left out, which covers the secret key, the database URLs, the admin and MCP tokens and their
+`_FILE` paths. Everything else is passed, such as `PATH`, `HOME` and provider credentials (`ANTHROPIC_*`,
+`AWS_*`, `GOOGLE_*`). To give the agent or server something on purpose, put it in the connector's
+environment variables; those are always passed, whatever their names.
+
 ## Control CueFlow from other agents (MCP)
 
 CueFlow serves an MCP endpoint at `/mcp` so an external agent (Claude Code, Codex, Cursor...) can run
