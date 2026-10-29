@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/procenv"
 	"github.com/j75689/cueflow/internal/version"
 )
 
@@ -29,16 +29,22 @@ type Process struct {
 	exited chan struct{}
 }
 
+// command is the agent's process, in its own process group. Its environment is procenv's: CueFlow's own
+// settings and credentials are left out, launch.Env is added.
+func command(launch connector.RuntimeLaunch, cwd string) *exec.Cmd {
+	cmd := procenv.Command(launch.Command, launch.Args, launch.Env...)
+	cmd.Dir = cwd
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
 // Start launches the agent described by launch with client handling agent->client requests.
 // The process gets its own process group so Close can stop everything it spawned.
 func Start(launch connector.RuntimeLaunch, cwd string, client acp.Client) (*Process, error) {
 	if strings.TrimSpace(launch.Command) == "" {
 		return nil, errors.New("acp: no command configured")
 	}
-	cmd := exec.Command(launch.Command, launch.Args...)
-	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), launch.Env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd := command(launch, cwd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

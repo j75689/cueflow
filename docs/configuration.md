@@ -5,6 +5,39 @@ for Cloud Run see [deploy/cloudrun/README.md](../deploy/cloudrun/README.md).
 A value that stops startup with an error also stops `cueflow migrate`, `rotate-key` and `media`;
 startup warnings are logged by `cueflow serve` only.
 
+## Secrets from files and Secret Manager
+
+The variables that hold a credential, `DATABASE_URL`, `DATABASE_SESSION_URL`, `CUEFLOW_SECRET_KEY`,
+`CUEFLOW_SECRET_KEY_PREVIOUS`, `CUEFLOW_ADMIN_TOKEN` and `CUEFLOW_MCP_TOKEN`, can also be given in two
+other ways. Each `<NAME>` is read in this order:
+
+1. **`<NAME>` set and not empty.** A value that starts with `gcpsm://` is a Google Secret Manager
+   reference: `gcpsm://projects/<project>/secrets/<secret>` (the latest version),
+   `gcpsm://projects/<project>/secrets/<secret>/versions/<version>`, or the same with
+   `/locations/<location>` after the project for a regional secret (read from that region's endpoint).
+   CueFlow reads every reference once at startup, all at the same time, with Application Default
+   Credentials (on GCE and Cloud Run, the service account from the metadata server); together they
+   must answer within 10 s. The service account needs `roles/secretmanager.secretAccessor` on each
+   secret. Any other value is used as is.
+2. **`<NAME>_FILE` set** (as in the `postgres` and `cloudflared` images, e.g. a Docker or Kubernetes
+   secret at `/run/secrets/<NAME>`): the file's content.
+3. Neither: unset.
+
+A Secret Manager payload and a file both lose one trailing newline (`\n` or `\r\n`), since
+`echo ... | gcloud secrets create --data-file=-` and `echo ... > file` add one; anything else is kept.
+Setting both `<NAME>` and `<NAME>_FILE` (both not empty) stops startup with an error. For
+`CUEFLOW_SECRET_KEY_PREVIOUS` the whole value is read first, then split at commas and newlines, so a
+file can hold one key per line. It takes one value: with `gcpsm://`, that is one secret holding the old
+keys, separated by newlines or commas; a comma-separated list of several `gcpsm://` references is not
+supported. A reference that can't be read (a malformed reference, a missing
+secret or version, permission denied, an unreachable API, no answer within 10 s, a missing or
+unreadable file, or a secret or file that is empty once its trailing newline is gone) stops startup with an error naming the variable and the reference, never the value;
+it never falls back to an empty value. The other settings are checked first, so a typo elsewhere is
+reported without waiting for Secret Manager. Agents and stdio MCP servers that CueFlow starts don't inherit these variables, nor any other `CUEFLOW_*` or `DATABASE_*` one; that filters their environment and does not isolate them (see [external-agents.md](external-agents.md#external-agents-acp)). There is no refresh: to rotate a secret, add a new
+version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE_URL` comes from
+`CUEFLOW_DB_URL` (default: the bundled database), never from a `DATABASE_URL` in `.env`; to use
+`DATABASE_URL_FILE` there, set `CUEFLOW_DB_URL=` (empty).
+
 ## Core
 
 | Variable | Default | Purpose |
@@ -12,7 +45,7 @@ startup warnings are logged by `cueflow serve` only.
 | `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
 | `DATABASE_SESSION_URL` | empty | A session-mode connection for `LISTEN` and the migration lock. Set it when `DATABASE_URL` is a transaction-mode pooler (Supabase port 6543, PgBouncer `pool_mode=transaction`); the main pool then runs without named prepared statements. Empty: everything uses `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
-| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), comma-separated, still accepted for reading during a rotation |
+| `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), separated by commas or newlines, still accepted for reading during a rotation |
 | `CUEFLOW_ADDR` | `127.0.0.1:3000` | Listen address |
 | `CUEFLOW_ADMIN_TOKEN` | | Require `Authorization: Bearer <token>` for the API/UI |
 | `CUEFLOW_MCP_TOKEN` | | Enables the operator MCP endpoint `/mcp` for external agents (Bearer token) |

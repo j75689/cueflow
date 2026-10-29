@@ -19,6 +19,12 @@ func base(t *testing.T) {
 		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT", "CUEFLOW_CONNECTOR_HTTP_TIMEOUT"} {
 		t.Setenv(k, "")
 	}
+	for _, k := range SecretVars {
+		if k != "CUEFLOW_SECRET_KEY" {
+			t.Setenv(k, "")
+		}
+		t.Setenv(k+"_FILE", "")
+	}
 }
 
 func TestLocalIsTheDefault(t *testing.T) {

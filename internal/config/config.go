@@ -2,6 +2,7 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -116,10 +117,6 @@ func (c *Config) Cloud() bool { return c.Queue == "cloudtasks" || c.Tick == "ext
 func Load() (*Config, error) {
 	c := &Config{
 		Addr:                  env("CUEFLOW_ADDR", "127.0.0.1:3000"),
-		DatabaseURL:           env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable"),
-		DatabaseSessionURL:    os.Getenv("DATABASE_SESSION_URL"),
-		AdminToken:            os.Getenv("CUEFLOW_ADMIN_TOKEN"),
-		MCPToken:              os.Getenv("CUEFLOW_MCP_TOKEN"),
 		PublicURL:             env("CUEFLOW_PUBLIC_URL", "http://localhost:3000"),
 		LogLevel:              env("CUEFLOW_LOG_LEVEL", "info"),
 		DisableScheduler:      envBool("CUEFLOW_DISABLE_SCHEDULER"),
@@ -221,12 +218,22 @@ func Load() (*Config, error) {
 	if c.Cloud() && len(c.InternalServiceAccounts) == 0 {
 		return nil, errors.New("cloud mode needs CUEFLOW_INTERNAL_SERVICE_ACCOUNTS (who may call /internal/*)")
 	}
-	key, err := ParseSecretKey(os.Getenv("CUEFLOW_SECRET_KEY"))
+	// Secrets last, so a typo in a cheap setting is reported without waiting for Secret Manager.
+	sec, err := loadSecrets(context.Background(), SecretVars)
+	if err != nil {
+		return nil, err
+	}
+	c.DatabaseURL = sec.env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable")
+	c.DatabaseSessionURL = sec.env("DATABASE_SESSION_URL", "")
+	c.AdminToken = sec.env("CUEFLOW_ADMIN_TOKEN", "")
+	c.MCPToken = sec.env("CUEFLOW_MCP_TOKEN", "")
+	key, err := ParseSecretKey(sec.env("CUEFLOW_SECRET_KEY", ""))
 	if err != nil {
 		return nil, err
 	}
 	c.SecretKey = key
-	for _, raw := range strings.Split(os.Getenv("CUEFLOW_SECRET_KEY_PREVIOUS"), ",") {
+	// Commas or newlines, so a file can hold one key per line.
+	for _, raw := range strings.FieldsFunc(sec.env("CUEFLOW_SECRET_KEY_PREVIOUS", ""), func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
 		if raw = strings.TrimSpace(raw); raw == "" {
 			continue
 		}
@@ -242,7 +249,7 @@ func Load() (*Config, error) {
 // ParseSecretKey accepts a 32-byte key encoded as base64 (std or url) or hex.
 func ParseSecretKey(s string) ([]byte, error) {
 	if s == "" {
-		return nil, errors.New("CUEFLOW_SECRET_KEY is required (32 bytes, base64 or hex); generate one with `openssl rand -base64 32`")
+		return nil, errors.New("CUEFLOW_SECRET_KEY (or CUEFLOW_SECRET_KEY_FILE) is required (32 bytes, base64 or hex); generate one with `openssl rand -base64 32`")
 	}
 	for _, dec := range []func(string) ([]byte, error){
 		base64.StdEncoding.DecodeString,
