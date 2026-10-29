@@ -375,7 +375,7 @@ the headers itself, and `127.0.0.1` is added to the agent's `NO_PROXY` so a mach
 for it. `CUEFLOW_RUNNER_HEADERS`, like every `CUEFLOW_*` variable, is left out of the agents'
 environment. Filtering is not isolation, though: an agent running as the same OS user can still read `runner.json`
 and the runner's environment, so on a shared machine run it in a container ([deploy/runner](../deploy/runner/README.md)).
-The runner follows a redirect only on the same host (to `https`, say). A redirect to another host, which is how the
+The runner follows a redirect only on the same host, and never from `https` to `http` (from `http` to `https` is fine). A redirect to another host, which is how the
 proxy turns away a request with its login page, is not followed, so the headers never go there: the request fails
 naming the page, and `runner run` stops as it does for a revoked token.
 

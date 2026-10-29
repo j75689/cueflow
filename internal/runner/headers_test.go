@@ -217,7 +217,8 @@ func TestMCPProxy(t *testing.T) {
 	if code, body := get(u + "/"); code != 200 || body != "tools at /mcp/run/tok1/" {
 		t.Fatalf("the job's path with a trailing slash, which the server takes too: %d %q", code, body)
 	}
-	for _, other := range []string{"/api/v1/tasks", "/mcp/run/tok10", "/mcp/run/"} {
+	for _, other := range []string{"/api/v1/tasks", "/mcp/run/tok10", "/mcp/run/",
+		"/mcp/run/tok1/../../api/v1/tasks", "/mcp/run/tok1/%2e%2e/%2e%2e/api/v1/tasks", "/mcp/run/tok1//x", "/mcp/run/tok1/./"} {
 		if code, _ := get(p.base + other); code != http.StatusNotFound {
 			t.Fatalf("%s must not be forwarded: %d", other, code)
 		}
@@ -295,5 +296,31 @@ func TestAgentEnvBypassesProxiesForLoopback(t *testing.T) {
 	}
 	if env := agentEnv(map[string]string{"A": "1"}, false); len(env) != 1 {
 		t.Fatalf("without the proxy nothing is added: %v", env)
+	}
+}
+
+// https to http on the same host would resend the headers in cleartext: not followed. http to https is.
+func TestRedirectPolicy(t *testing.T) {
+	req := func(u string) *http.Request {
+		r, _ := http.NewRequest(http.MethodPost, u, nil)
+		return r
+	}
+	for _, c := range []struct {
+		from, to string
+		follow   bool
+	}{
+		{"https://cf.example.com/a", "https://cf.example.com/b", true},
+		{"http://cf.example.com/a", "https://cf.example.com/a", true},
+		{"https://cf.example.com/a", "http://cf.example.com/a", false},
+		{"https://cf.example.com/a", "https://team.cloudflareaccess.com/login", false},
+	} {
+		err := followRedirect(req(c.to), []*http.Request{req(c.from)})
+		if (err == nil) != c.follow {
+			t.Errorf("%s -> %s: %v, want follow=%v", c.from, c.to, err, c.follow)
+		}
+	}
+	// A downgrade later in the chain counts too.
+	if followRedirect(req("http://cf.example.com/c"), []*http.Request{req("http://cf.example.com/a"), req("https://cf.example.com/b")}) == nil {
+		t.Error("https to http after an upgrade was followed")
 	}
 }

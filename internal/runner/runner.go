@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -364,23 +365,27 @@ func (e *fatalError) Error() string { return e.msg }
 
 var errNoContent = errors.New("no content")
 
-// do sends req to CueFlow with the configured headers. A redirect is followed only on the same host (e.g. to
-// https): one to another host is returned as is, so the headers never reach it. That is how an access proxy
+// do sends req to CueFlow with the configured headers. A redirect is followed only on the same host and never
+// from https to http (http to https is fine): any other is returned as is, so the headers never reach it. That is how an access proxy
 // answers a request without valid credentials, with its login page, and the caller reports it.
 func (c *Config) do(req *http.Request, timeout time.Duration) (*http.Response, error) {
 	for name, value := range c.Headers {
 		req.Header.Set(name, value)
 	}
-	hc := &http.Client{Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if req.URL.Host != via[0].URL.Host {
-			return http.ErrUseLastResponse
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
-	}}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: followRedirect}
 	return hc.Do(req)
+}
+
+// followRedirect is do's redirect policy.
+func followRedirect(req *http.Request, via []*http.Request) error {
+	from := via[len(via)-1].URL
+	if req.URL.Host != via[0].URL.Host || (from.Scheme == "https" && req.URL.Scheme != "https") {
+		return http.ErrUseLastResponse // another host, or https to cleartext
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // post sends a JSON request. A 204 leaves out untouched and returns errNoContent.
@@ -754,13 +759,18 @@ func (p *mcpProxy) release(path string) {
 	}
 }
 
-// serving reports whether path belongs to a running job's tool server: its path, or below it (the server
-// takes "<path>/" too).
-func (p *mcpProxy) serving(path string) bool {
+// serving reports whether p belongs to a running job's tool server: its path, or below it (the server
+// takes "<path>/" too). A path that is not clean is refused: "<path>/../.." would otherwise pass the prefix
+// test and reach the rest of CueFlow once an access proxy in front resolves the dots.
+func (p *mcpProxy) serving(reqPath string) bool {
+	clean := path.Clean(reqPath)
+	if reqPath != clean && reqPath != clean+"/" {
+		return false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for jp := range p.jobs {
-		if path == jp || strings.HasPrefix(path, jp+"/") {
+		if clean == jp || strings.HasPrefix(clean, jp+"/") {
 			return true
 		}
 	}
