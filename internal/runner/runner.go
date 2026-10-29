@@ -20,7 +20,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -649,11 +648,21 @@ func agentEnv(cfgEnv map[string]string, proxied bool) map[string]any {
 		env[k] = v
 	}
 	if proxied {
-		for _, k := range []string{"NO_PROXY", "no_proxy"} {
-			v, ok := cfgEnv[k]
-			if !ok {
-				v = os.Getenv(k)
+		get := func(k string) (string, bool) {
+			if v, ok := cfgEnv[k]; ok {
+				return v, true
 			}
+			return os.LookupEnv(k)
+		}
+		upper, hasUpper := get("NO_PROXY")
+		lower, hasLower := get("no_proxy")
+		// Tools read one or the other: one set alone stands for both.
+		if hasUpper && !hasLower {
+			lower = upper
+		} else if hasLower && !hasUpper {
+			upper = lower
+		}
+		for k, v := range map[string]string{"NO_PROXY": upper, "no_proxy": lower} {
 			if !slices.ContainsFunc(strings.Split(v, ","), func(e string) bool { return strings.TrimSpace(e) == "127.0.0.1" }) {
 				env[k] = strings.TrimPrefix(v+",127.0.0.1", ",")
 			}
@@ -729,6 +738,12 @@ func startMCPProxy(c *Config, log *slog.Logger) (*mcpProxy, error) {
 				pr.Out.Header.Set(name, value)
 			}
 		},
+		// An access proxy answers a request with valid service-token headers with a session cookie too
+		// (Cloudflare Access: CF_Authorization). Passed on, it would let the agent through on its own.
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Del("Set-Cookie")
+			return nil
+		},
 		FlushInterval: -1, // stream server-sent events as they come
 		ErrorLog:      slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
@@ -759,22 +774,14 @@ func (p *mcpProxy) release(path string) {
 	}
 }
 
-// serving reports whether p belongs to a running job's tool server: its path, or below it (the server
-// takes "<path>/" too). A path that is not clean is refused: "<path>/../.." would otherwise pass the prefix
-// test and reach the rest of CueFlow once an access proxy in front resolves the dots.
+// serving reports whether p is a running job's tool server path, as is or with one trailing slash (the
+// server takes both). Nothing else matches: no prefix, no dot segments, no backslashes, which an access proxy
+// in front may turn into "/.." and so into the rest of CueFlow. A run token never contains "/".
 func (p *mcpProxy) serving(reqPath string) bool {
-	clean := path.Clean(reqPath)
-	if reqPath != clean && reqPath != clean+"/" {
-		return false
-	}
+	jp := strings.TrimSuffix(reqPath, "/")
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for jp := range p.jobs {
-		if clean == jp || strings.HasPrefix(clean, jp+"/") {
-			return true
-		}
-	}
-	return false
+	return p.jobs[jp] > 0
 }
 
 func (p *mcpProxy) close() { _ = p.srv.Close() }

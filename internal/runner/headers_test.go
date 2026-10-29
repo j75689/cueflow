@@ -190,6 +190,7 @@ func TestRegisterAndStatusSendHeaders(t *testing.T) {
 // is forwarded, and the agent's URL carries no header value.
 func TestMCPProxy(t *testing.T) {
 	ts := httptest.NewServer(gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "CF_Authorization", Value: "session"})
 		_, _ = io.WriteString(w, "tools at "+r.URL.Path)
 	})))
 	defer ts.Close()
@@ -204,6 +205,9 @@ func TestMCPProxy(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
+		if c := resp.Header.Values("Set-Cookie"); len(c) > 0 {
+			t.Errorf("%s: the agent was handed a cookie: %v", u, c)
+		}
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
@@ -217,8 +221,9 @@ func TestMCPProxy(t *testing.T) {
 	if code, body := get(u + "/"); code != 200 || body != "tools at /mcp/run/tok1/" {
 		t.Fatalf("the job's path with a trailing slash, which the server takes too: %d %q", code, body)
 	}
-	for _, other := range []string{"/api/v1/tasks", "/mcp/run/tok10", "/mcp/run/",
-		"/mcp/run/tok1/../../api/v1/tasks", "/mcp/run/tok1/%2e%2e/%2e%2e/api/v1/tasks", "/mcp/run/tok1//x", "/mcp/run/tok1/./"} {
+	for _, other := range []string{"/api/v1/tasks", "/mcp/run/tok10", "/mcp/run/", "/mcp/run/tok1/x", "/mcp/run/tok1//",
+		"/mcp/run/tok1/../../api/v1/tasks", "/mcp/run/tok1/%2e%2e/%2e%2e/api/v1/tasks", "/mcp/run/tok1//x", "/mcp/run/tok1/./",
+		`/mcp/run/tok1/..\..\api/v1/tasks`, "/mcp/run/tok1/..%5C..%5Capi/v1/tasks", "/mcp/run/tok1%2F..%2F..%2Fapi"} {
 		if code, _ := get(p.base + other); code != http.StatusNotFound {
 			t.Fatalf("%s must not be forwarded: %d", other, code)
 		}
@@ -293,6 +298,10 @@ func TestAgentEnvBypassesProxiesForLoopback(t *testing.T) {
 	}
 	if env := agentEnv(map[string]string{"no_proxy": "x, 127.0.0.1"}, true); env["no_proxy"] != "x, 127.0.0.1" {
 		t.Fatalf("already there: %v", env)
+	}
+	os.Unsetenv("no_proxy")
+	if env := agentEnv(nil, true); env["no_proxy"] != "corp.internal,127.0.0.1" {
+		t.Fatalf("no_proxy unset, NO_PROXY set: %v", env)
 	}
 	if env := agentEnv(map[string]string{"A": "1"}, false); len(env) != 1 {
 		t.Fatalf("without the proxy nothing is added: %v", env)

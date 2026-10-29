@@ -370,8 +370,8 @@ The runner owns `Authorization`, `Content-Type` and `Host`, so a header with one
 startup, as are an invalid name, an empty value or one with a control character, and a name given twice in one
 place (names are case-insensitive). Header values are never logged, and
 `runner status` shows only the names. Agents are not given them: an agent's tool server URL points to a proxy that
-the runner listens on at `127.0.0.1`. That proxy forwards only the tool servers of the jobs it is running and adds
-the headers itself, and `127.0.0.1` is added to the agent's `NO_PROXY` so a machine-wide `HTTP_PROXY` is not asked
+the runner listens on at `127.0.0.1`. That proxy forwards only the tool servers of the jobs it is running, adds
+the headers itself and drops the cookies the access proxy sets in reply (a session that would let the agent through), and `127.0.0.1` is added to the agent's `NO_PROXY` so a machine-wide `HTTP_PROXY` is not asked
 for it. `CUEFLOW_RUNNER_HEADERS`, like every `CUEFLOW_*` variable, is left out of the agents'
 environment. Filtering is not isolation, though: an agent running as the same OS user can still read `runner.json`
 and the runner's environment, so on a shared machine run it in a container ([deploy/runner](../deploy/runner/README.md)).
