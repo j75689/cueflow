@@ -13,7 +13,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -63,6 +67,11 @@ type Config struct {
 	// in between. 0 long-polls instead: work is picked up the moment it appears, but the server is kept
 	// busy (and, on Cloud Run, billed) the whole time. CUEFLOW_RUNNER_POLL_INTERVAL overrides it.
 	PollInterval *int `json:"poll_interval,omitempty"`
+	// Headers are sent on every request to CueFlow, for a server behind an access proxy (e.g. a Cloudflare
+	// Access service token: CF-Access-Client-Id and CF-Access-Client-Secret). CUEFLOW_RUNNER_HEADERS adds to
+	// them and wins for a name set in both. The values are secrets: never logged or shown, and never given to
+	// agents, whose tool server calls go through a loopback proxy that adds them (see mcpProxy).
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // pollEvery is the wait between empty claims; 0 means long polling.
@@ -120,7 +129,102 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		c.PollInterval = &n
 	}
+	env, err := envHeaders()
+	if err != nil {
+		return nil, err
+	}
+	if c.Headers, err = mergeHeaders(c.Headers, env); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &c, nil
+}
+
+// envHeaders reads CUEFLOW_RUNNER_HEADERS: one "Name: value" per line.
+func envHeaders() (map[string]string, error) {
+	h := map[string]string{}
+	for i, line := range strings.Split(os.Getenv("CUEFLOW_RUNNER_HEADERS"), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		name, value, err := parseHeader(line)
+		if err != nil {
+			return nil, fmt.Errorf("CUEFLOW_RUNNER_HEADERS line %d: %w", i+1, err)
+		}
+		h[name] = value
+	}
+	return h, nil
+}
+
+// parseHeader splits "Name: value". Errors never quote the line: the value is a secret.
+func parseHeader(s string) (name, value string, err error) {
+	name, value, ok := strings.Cut(s, ":")
+	if !ok {
+		return "", "", errors.New(`want "Name: value"`)
+	}
+	return strings.TrimSpace(name), strings.TrimSpace(value), nil
+}
+
+// ownedHeaders are set by the runner itself on every request.
+var ownedHeaders = []string{"Authorization", "Content-Type", "Host"}
+
+// mergeHeaders checks every header and returns base with over added, over winning for a name set in
+// both (names compare case-insensitively). Errors name the header, never its value.
+func mergeHeaders(base, over map[string]string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, h := range []map[string]string{base, over} {
+		for name, value := range h {
+			canon := http.CanonicalHeaderKey(name)
+			if !validHeaderName(name) {
+				return nil, fmt.Errorf("header %q: not a valid header name", name)
+			}
+			if slices.Contains(ownedHeaders, canon) {
+				return nil, fmt.Errorf("header %q: the runner sets it itself and it cannot be overridden", canon)
+			}
+			if value == "" || strings.ContainsAny(value, "\r\n\x00") {
+				return nil, fmt.Errorf("header %q: the value is empty or contains a line break", canon)
+			}
+			out[canon] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// validHeaderName reports whether s is an HTTP token (RFC 9110).
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r > 0x7e || r <= ' ' || strings.ContainsRune(`"(),/:;<=>?@[\]{}`, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// headerFlag collects repeated --header "Name: value" flags. A malformed one is reported after parsing, by
+// position: an error from Set would be printed by the flag package with the value in it.
+type headerFlag struct {
+	h   map[string]string
+	n   int
+	bad int // 1-based position of the first malformed flag
+}
+
+func (f *headerFlag) String() string { return "" }
+
+func (f *headerFlag) Set(s string) error {
+	f.n++
+	name, value, err := parseHeader(s)
+	if err != nil {
+		f.bad = cmp.Or(f.bad, f.n)
+		return nil
+	}
+	f.h[name] = value
+	return nil
 }
 
 func (c *Config) Save(path string) error {
@@ -158,11 +262,28 @@ func register(args []string, version string) error {
 	denyWeb := fs.Bool("deny-web", false, "never let agents use web fetch/search on this machine")
 	allowShell := fs.Bool("allow-shell", false, "let agents run shell commands and edit files here (coding agents); use a dedicated, isolated runner")
 	cfgPath := fs.String("config", DefaultConfigPath(), "where to save the runner credentials")
+	headers := &headerFlag{h: map[string]string{}}
+	fs.Var(headers, "header", `"Name: value" to send on every request to CueFlow, e.g. a Cloudflare Access service token (repeatable; saved to the config)`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *url == "" || *token == "" {
 		return errors.New("--url and --token are required")
+	}
+	if headers.bad > 0 {
+		return fmt.Errorf("--header #%d: want \"Name: value\"", headers.bad)
+	}
+	saved, err := mergeHeaders(headers.h, nil)
+	if err != nil {
+		return err
+	}
+	env, err := envHeaders()
+	if err != nil {
+		return err
+	}
+	sent, err := mergeHeaders(saved, env)
+	if err != nil {
+		return err
 	}
 	if *name == "" {
 		*name, _ = os.Hostname()
@@ -170,10 +291,11 @@ func register(args []string, version string) error {
 	req := runnerapi.RegisterRequest{Token: *token, Name: *name, Version: version, Protocol: runnerapi.ProtocolVersion,
 		Platform: runtime.GOOS + "/" + runtime.GOARCH, Labels: splitList(*labels), Concurrency: *conc}
 	var resp runnerapi.RegisterResponse
-	c := &Config{URL: strings.TrimRight(*url, "/")}
+	c := &Config{URL: strings.TrimRight(*url, "/"), Headers: sent}
 	if err := c.post(context.Background(), "/register", req, &resp, false); err != nil {
 		return err
 	}
+	c.Headers = saved // CUEFLOW_RUNNER_HEADERS stays in the environment, where it was set
 	c.Token, c.RunnerID, c.Name, c.Concurrency = resp.Token, resp.RunnerID, resp.Name, max(*conc, 1)
 	c.AllowPresets, c.DenyWeb, c.AllowShell = splitList(*presets), *denyWeb, *allowShell
 	if err := c.Save(*cfgPath); err != nil {
@@ -206,13 +328,23 @@ func status(args []string) error {
 	} else {
 		fmt.Println("long polling (the server is kept busy while it waits)")
 	}
-	hc := &http.Client{Timeout: 5 * time.Second}
-	resp, err := hc.Get(c.URL + "/api/v1/health")
+	if len(c.Headers) > 0 {
+		fmt.Printf("headers: %s (values hidden)\n", strings.Join(slices.Sorted(maps.Keys(c.Headers)), ", "))
+	}
+	req, err := http.NewRequest(http.MethodGet, c.URL+"/api/v1/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(req, 5*time.Second)
 	if err != nil {
 		fmt.Printf("server  unreachable: %v\n", err)
 		return nil
 	}
 	resp.Body.Close()
+	if loc := resp.Header.Get("Location"); loc != "" {
+		fmt.Printf("server  redirects to %s (a login page? see headers in runner.json)\n", loc)
+		return nil
+	}
 	fmt.Printf("server  reachable (HTTP %d)\n", resp.StatusCode)
 	return nil
 }
@@ -257,6 +389,16 @@ func (e *fatalError) Error() string { return e.msg }
 
 var errNoContent = errors.New("no content")
 
+// do sends req to CueFlow with the configured headers. Redirects are not followed: an access proxy answers
+// a request without its credentials with one to its login page, and the caller reports that.
+func (c *Config) do(req *http.Request, timeout time.Duration) (*http.Response, error) {
+	for name, value := range c.Headers {
+		req.Header.Set(name, value)
+	}
+	hc := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return hc.Do(req)
+}
+
 // post sends a JSON request. A 204 leaves out untouched and returns errNoContent.
 func (c *Config) post(ctx context.Context, path string, in, out any, auth bool) error {
 	var body io.Reader
@@ -272,7 +414,7 @@ func (c *Config) post(ctx context.Context, path string, in, out any, auth bool) 
 	if auth {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	resp, err := (&http.Client{Timeout: (runnerapi.ClaimWait + 15) * time.Second}).Do(req)
+	resp, err := c.do(req, (runnerapi.ClaimWait+15)*time.Second)
 	if err != nil {
 		return err
 	}
@@ -294,6 +436,9 @@ func (c *Config) post(ctx context.Context, path string, in, out any, auth bool) 
 	}
 	_ = json.Unmarshal(data, &e)
 	msg := e.Error.Message
+	if loc := resp.Header.Get("Location"); msg == "" && loc != "" {
+		msg = "redirected to " + loc + " (a login page? set the access proxy's headers: see `cueflow runner register --header`)"
+	}
 	if msg == "" {
 		msg = strings.TrimSpace(string(data))
 	}
@@ -307,8 +452,9 @@ func (c *Config) post(ctx context.Context, path string, in, out any, auth bool) 
 // --- the loop ---
 
 type Runner struct {
-	cfg *Config
-	log *slog.Logger
+	cfg   *Config
+	log   *slog.Logger
+	proxy *mcpProxy // set while Loop runs, when cfg has headers
 }
 
 // New returns a runner for cfg (used by `cueflow runner run` and tests).
@@ -316,6 +462,14 @@ func New(cfg *Config, log *slog.Logger) *Runner { return &Runner{cfg: cfg, log: 
 
 // Loop claims and runs jobs until ctx ends, then waits for running jobs to wind down.
 func (r *Runner) Loop(ctx context.Context) error {
+	if len(r.cfg.Headers) > 0 {
+		p, err := startMCPProxy(r.cfg)
+		if err != nil {
+			return err
+		}
+		defer p.close() // after the jobs below wound down
+		r.proxy = p
+	}
 	slots := make(chan struct{}, r.cfg.Concurrency)
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -486,9 +640,14 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 			dir = wd
 		}
 	}
+	mcpURL := r.cfg.URL + job.MCPPath
+	if r.proxy != nil {
+		mcpURL = r.proxy.serve(job.MCPPath)
+		defer r.proxy.release(job.MCPPath)
+	}
 	return acpdrive.Run(ctx, acpdrive.Params{
 		Launch: launch, AuthMethod: auth, AllowWeb: allowWeb, AllowHost: r.cfg.AllowShell, Dir: dir,
-		MCPURL: r.cfg.URL + job.MCPPath, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
+		MCPURL: mcpURL, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
 		Model: cmp.Or(r.cfg.Models[job.Preset], job.Model),
 	})
 }
@@ -532,3 +691,67 @@ func (r *Runner) sendEvents(ctx context.Context, id string, events []runnerapi.E
 	}
 	return st.Cancel
 }
+
+// mcpProxy forwards an agent's calls to its job's tool server, adding the runner's headers. The agent is
+// given a loopback URL, so it can reach a server behind an access proxy without ever seeing the headers.
+// Only the tool servers of running jobs are forwarded: the proxy is no way into the rest of CueFlow.
+type mcpProxy struct {
+	base string // http://127.0.0.1:port
+	srv  *http.Server
+	mu   sync.Mutex
+	jobs map[string]int // MCP path -> running jobs using it
+}
+
+func startMCPProxy(c *Config) (*mcpProxy, error) {
+	target, err := url.Parse(c.URL)
+	if err != nil {
+		return nil, fmt.Errorf("server URL: %w", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("tool server proxy: %w", err)
+	}
+	p := &mcpProxy{base: "http://" + ln.Addr().String(), jobs: map[string]int{}}
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			for name, value := range c.Headers {
+				pr.Out.Header.Set(name, value)
+			}
+		},
+		FlushInterval: -1, // stream server-sent events as they come
+	}
+	p.srv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !p.serving(req.URL.Path) {
+			http.NotFound(w, req)
+			return
+		}
+		rp.ServeHTTP(w, req)
+	})}
+	go func() { _ = p.srv.Serve(ln) }()
+	return p, nil
+}
+
+// serve starts forwarding path and returns the URL the agent uses for it.
+func (p *mcpProxy) serve(path string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.jobs[path]++
+	return p.base + path
+}
+
+func (p *mcpProxy) release(path string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.jobs[path]--; p.jobs[path] <= 0 {
+		delete(p.jobs, path)
+	}
+}
+
+func (p *mcpProxy) serving(path string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.jobs[path] > 0
+}
+
+func (p *mcpProxy) close() { _ = p.srv.Close() }

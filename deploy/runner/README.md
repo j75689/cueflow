@@ -27,6 +27,25 @@ Your own `gh` / Claude / SSH logins on the host stay out of reach.
 5. Under **Connectors** add a **Runner pool** (label `claude-code`) and give the agent that runtime. Stop any other
    runner that is registered for the same pool, or they will share the tasks.
 
+## Behind Cloudflare Access
+
+If CueFlow is behind Cloudflare Access (or another proxy that wants its own credentials), create a service token
+in Cloudflare Zero Trust, allow it in the application's policy (a Service Auth rule), and register with its two
+headers. They are saved in `runner.json` in the `config` volume and sent on every request:
+
+```bash
+docker compose run --rm runner register --url https://<your CueFlow> --token cfreg_... --name docker-runner \
+  --header 'CF-Access-Client-Id: <id>.access' --header 'CF-Access-Client-Secret: <secret>'
+```
+
+To keep them in `.env` instead, set `CUEFLOW_RUNNER_HEADERS="CF-Access-Client-Id: <id>.access\nCF-Access-Client-Secret: <secret>"`
+(one `Name: value` per line; Compose turns `\n` in double quotes into a line break). It applies to `register` too,
+wins over `runner.json` for a name set in both, and is not saved. The agent is not given the headers. Its calls to
+CueFlow's tools go through a proxy that the runner listens on at `127.0.0.1`, and that proxy adds them. This
+runner allows the shell, though, and the agent runs as the same user, so it can still read `runner.json` and the
+runner's environment. Treat the service token like `GH_TOKEN`: give it a policy that lets it reach CueFlow and
+nothing else. See [api.md](../../docs/api.md#runners) for the details.
+
 ## Other tools and agents
 
 The compose file runs the published `ghcr.io/j75689/cueflow:runner` image: Claude Code, Codex, git, gh and nothing
@@ -52,7 +71,7 @@ repositories and permissions the work needs and the container has nothing else i
 | Credentials | only `.env`: the Claude token and `GH_TOKEN` (`gh` and `git push` use it; `.env` is never copied into the image) |
 | Files | `/work` (volume) and `/config` (volume); the root file system is read-only and the home directory is a tmpfs |
 | Process | non-root, no capabilities, no new privileges, 4 GB memory, 512 processes |
-| Network | outbound only (CueFlow, GitHub, Anthropic); nothing listens |
+| Network | outbound only (CueFlow, GitHub, Anthropic); nothing listens, except, when the runner has headers, its tool server proxy on `127.0.0.1` |
 
 `docker compose down -v` also removes `/work` and the registration; `docker compose down` keeps both. What the agent can
 do on GitHub is whatever `GH_TOKEN` allows, so keep it to the repositories and permissions the work needs and protect

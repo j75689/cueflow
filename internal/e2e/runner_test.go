@@ -4,8 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,5 +152,70 @@ func TestRunnerJobMatching(t *testing.T) {
 	}
 	if j2, _ := e.store.ClaimRunnerJob(ctx, full); j2 != nil {
 		t.Fatal("a claimed job must not be handed out twice")
+	}
+}
+
+// Behind an access proxy (Cloudflare Access) that turns away requests without its service token, a runner
+// with the token in its headers registers, claims the job, and its agent finishes the task through the
+// runner's loopback proxy, without being given the token.
+func TestRunnerBehindAccessProxy(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const secret = "access-s3cret"
+	api, _ := url.Parse(e.api.URL)
+	rp := httputil.NewSingleHostReverseProxy(api)
+	rp.FlushInterval = -1
+	var turnedAway atomic.Int32
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("CF-Access-Client-Id") != "id.access" || r.Header.Get("CF-Access-Client-Secret") != secret {
+			turnedAway.Add(1)
+			http.Redirect(w, r, "https://team.cloudflareaccess.com/cdn-cgi/access/login", http.StatusFound)
+			return
+		}
+		rp.ServeHTTP(w, r)
+	}))
+	defer front.Close()
+
+	var pool store.Connector
+	e.do("POST", "/connectors", map[string]any{"name": "Behind Access", "type": "runner_pool", "config": map[string]any{
+		"preset": "custom", "labels": []string{"fake"}, "timeout_minutes": 1}}, &pool)
+	var agent store.Agent
+	e.do("POST", "/agents", map[string]any{"name": "Remote writer", "slug": "remote-writer",
+		"capabilities": []string{"post_deliverables"}, "runtime_connector_id": pool.ID}, &agent)
+	var reg struct {
+		Token string `json:"token"`
+	}
+	e.do("POST", "/runners/registrations", map[string]any{"labels": []string{"fake"}}, &reg)
+
+	cfgPath := t.TempDir() + "/runner.json"
+	t.Setenv("CUEFLOW_RUNNER_HEADERS", "CF-Access-Client-Secret: "+secret)
+	if err := runner.Main([]string{"register", "--url", front.URL, "--token", reg.Token, "--name", "behind-access",
+		"--header", "CF-Access-Client-Id: id.access", "--config", cfgPath}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := runner.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Commands = map[string]string{"custom": os.Args[0]}
+	cfg.Env = map[string]string{"CUEFLOW_FAKE_ACP": "1", "FAKE_ACP_FORBID": secret}
+	every := 1
+	cfg.PollInterval = &every
+	go func() { _ = runner.New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx) }()
+
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
+	e.crew.RunPending(ctx, 3)
+
+	got, _ := e.store.GetTask(ctx, task.ID)
+	if got.Status != store.TaskReview || !strings.Contains(got.Result, "bash_refused=true") {
+		t.Fatalf("task: %s %q", got.Status, got.Result)
+	}
+	if posts, _ := e.ds.ForTask(ctx, task.ID); len(posts) != 1 {
+		t.Fatalf("the agent's tool calls did not reach CueFlow: %+v", posts)
+	}
+	if n := turnedAway.Load(); n != 0 {
+		t.Fatalf("%d requests went without the headers", n)
 	}
 }

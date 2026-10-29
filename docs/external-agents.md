@@ -62,7 +62,9 @@ CueFlow or one running elsewhere.
 
 Local policy wins: the runner's own `runner.json` can only narrow what the server asks for (allowed presets, no web,
 which command to run, which ACP login to use), and `cueflow runner status` checks the connection. Revoking a runner in
-the dashboard stops it at once. Details and an example: [api.md](api.md#runners).
+the dashboard stops it at once. Behind Cloudflare Access, register with the service token's headers
+(`register --header 'CF-Access-Client-Id: ...'`); they are sent on every request and never given to the agent.
+Details and an example: [api.md](api.md#runners).
 
 To keep the agent away from your own logins, run the runner in a container with its own Claude token, a GitHub token
 of its own and a clean work directory: [deploy/runner](../deploy/runner/README.md). To add tools or another agent CLI

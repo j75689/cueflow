@@ -54,6 +54,17 @@ func (a *fakeAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.
 	if len(p.McpServers) != 1 || p.McpServers[0].Http == nil {
 		return acp.NewSessionResponse{}, fmt.Errorf("expected one HTTP MCP server, got %+v", p.McpServers)
 	}
+	// FAKE_ACP_FORBID is a secret the agent must not be given: not in its environment or its MCP server.
+	if v := os.Getenv("FAKE_ACP_FORBID"); v != "" {
+		if len(p.McpServers[0].Http.Headers) > 0 || strings.Contains(p.McpServers[0].Http.Url, v) {
+			return acp.NewSessionResponse{}, fmt.Errorf("the MCP server carries a secret")
+		}
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "FAKE_ACP_FORBID=") && strings.Contains(kv, v) {
+				return acp.NewSessionResponse{}, fmt.Errorf("the environment carries a secret")
+			}
+		}
+	}
 	a.mu.Lock()
 	a.mcpURL = p.McpServers[0].Http.Url
 	a.mu.Unlock()
