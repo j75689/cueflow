@@ -32,9 +32,9 @@ func (v tokenVerifier) Verify(_ context.Context, bearer string) (string, error) 
 
 func TestInternalRoutesByMode(t *testing.T) {
 	var audiences [][]string
-	verifier := func(auds, accounts []string) internalauth.Verifier {
+	verifier := func(auds, accounts []string) (internalauth.Verifier, error) {
 		audiences = append(audiences, auds)
-		return tokenVerifier{accounts}
+		return tokenVerifier{accounts}, nil
 	}
 	call := func(h http.Handler, path, token string) int {
 		r := httptest.NewRequest("POST", path, strings.NewReader("not json"))
@@ -47,7 +47,10 @@ func TestInternalRoutesByMode(t *testing.T) {
 	}
 	handler := func(cfg *config.Config) http.Handler {
 		s := &api.Server{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-		s.InternalAuth, s.MediaRegisterAuth = internalGuards(cfg, verifier)
+		var err error
+		if s.InternalAuth, s.MediaRegisterAuth, err = internalGuards(cfg, verifier); err != nil {
+			t.Fatal(err)
+		}
 		return s.Handler()
 	}
 
@@ -73,9 +76,17 @@ func TestInternalRoutesByMode(t *testing.T) {
 		}
 	}
 
-	// Without accounts the route is not mounted (the path falls through to the dashboard).
-	if got := call(handler(&config.Config{Tick: "internal", InternalAudiences: auds}), "/internal/media/register", "render-token"); got == 400 {
-		t.Error("register without accounts reached the handler")
+	none := handler(&config.Config{Tick: "internal", InternalAudiences: auds})
+	for _, path := range []string{"/internal/media/register", "/internal/tick"} {
+		if got := call(none, path, "render-token"); got != 404 {
+			t.Errorf("%s with no internal route on: %d, want 404", path, got)
+		}
+	}
+
+	// The real verifier refuses an empty audience list rather than accepting any audience.
+	if _, _, err := internalGuards(&config.Config{Tick: "internal", MediaRegisterAccounts: []string{"render@p.iam"}},
+		internalauth.NewGoogleVerifier); err == nil || !strings.Contains(err.Error(), "CUEFLOW_INTERNAL_AUDIENCE") {
+		t.Errorf("no audience: %v", err)
 	}
 
 	cloud := handler(&config.Config{Tick: "external", InternalAudiences: auds,

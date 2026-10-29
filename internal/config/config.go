@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -196,7 +197,7 @@ func Load() (*Config, error) {
 			c.MediaRegisterAccounts = append(c.MediaRegisterAccounts, e)
 		}
 	}
-	if len(c.MediaRegisterAccounts) > 0 && !strings.HasPrefix(c.MediaStorage, "gcs://") {
+	if u, err := url.Parse(c.MediaStorage); len(c.MediaRegisterAccounts) > 0 && (err != nil || u.Scheme != "gcs") {
 		return nil, fmt.Errorf("CUEFLOW_MEDIA_REGISTER_ACCOUNTS needs CUEFLOW_MEDIA_STORAGE=gcs://<bucket>[/<prefix>]: it registers files written to that bucket (CUEFLOW_MEDIA_STORAGE is %q)", c.MediaStorage)
 	}
 	if len(c.InternalAudiences) == 0 && (c.Tick == "external" || c.Queue == "cloudtasks" || len(c.MediaRegisterAccounts) > 0) {

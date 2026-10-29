@@ -151,9 +151,8 @@ func (s *Server) Handler() http.Handler {
 			WriteError(w, http.StatusNotFound, "not_found", "no such endpoint")
 		})
 	})
-	if s.InternalAuth != nil || s.MediaRegisterAuth != nil {
-		r.Route("/internal", s.internalRoutes)
-	}
+	// Mounted even when none of its routes is on, so /internal/* answers 404 rather than the dashboard.
+	r.Route("/internal", s.internalRoutes)
 	// Runners authenticate with their own tokens, not the admin token.
 	r.Route("/api/runner/v1", s.runnerRoutes)
 	// Per-run MCP tool servers for external (ACP) agents. Authenticated by the unguessable run

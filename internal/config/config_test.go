@@ -437,7 +437,7 @@ func TestMediaRegisterNeedsGCS(t *testing.T) {
 		base(t)
 		t.Setenv("CUEFLOW_TICK", tick)
 		t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com, lessons@p.iam.gserviceaccount.com")
-		for _, storage := range []string{"", "file:///data/media"} {
+		for _, storage := range []string{"", "file:///data/media", "/data/gcs://bucket"} {
 			t.Setenv("CUEFLOW_MEDIA_STORAGE", storage)
 			_, err := Load()
 			if err == nil || !strings.Contains(err.Error(), "CUEFLOW_MEDIA_REGISTER_ACCOUNTS") || !strings.Contains(err.Error(), "CUEFLOW_MEDIA_STORAGE") {
@@ -445,15 +445,17 @@ func TestMediaRegisterNeedsGCS(t *testing.T) {
 			}
 		}
 	}
-	base(t)
-	t.Setenv("CUEFLOW_MEDIA_STORAGE", "gcs://bucket/media")
-	t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com, lessons@p.iam.gserviceaccount.com")
-	c, err := Load()
-	if err != nil {
-		t.Fatalf("single mode with GCS media: %v", err)
-	}
-	if c.Cloud() || len(c.MediaRegisterAccounts) != 2 {
-		t.Fatalf("%+v", c)
+	for _, storage := range []string{"gcs://bucket/media", "GCS://bucket"} {
+		base(t)
+		t.Setenv("CUEFLOW_MEDIA_STORAGE", storage)
+		t.Setenv("CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "render@p.iam.gserviceaccount.com, lessons@p.iam.gserviceaccount.com")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("single mode with GCS media %q: %v", storage, err)
+		}
+		if c.Cloud() || len(c.MediaRegisterAccounts) != 2 {
+			t.Fatalf("%+v", c)
+		}
 	}
 }
 

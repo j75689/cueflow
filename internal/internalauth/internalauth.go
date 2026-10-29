@@ -27,11 +27,17 @@ type googleVerifier struct {
 }
 
 // NewGoogleVerifier accepts Google ID tokens made out to any of audiences whose email is verified and in
-// allowedEmails (case-insensitive).
-func NewGoogleVerifier(audiences, allowedEmails []string) Verifier {
+// allowedEmails (case-insensitive). The token's audience is checked only against this list, so it must name
+// at least one.
+func NewGoogleVerifier(audiences, allowedEmails []string) (Verifier, error) {
 	auds := make(map[string]bool, len(audiences))
 	for _, a := range audiences {
-		auds[a] = true
+		if a = strings.TrimSpace(a); a != "" {
+			auds[a] = true
+		}
+	}
+	if len(auds) == 0 {
+		return nil, errors.New("internalauth: no audience to accept")
 	}
 	allowed := make(map[string]bool, len(allowedEmails))
 	for _, e := range allowedEmails {
@@ -39,7 +45,7 @@ func NewGoogleVerifier(audiences, allowedEmails []string) Verifier {
 			allowed[e] = true
 		}
 	}
-	return &googleVerifier{audiences: auds, allowed: allowed, validate: idtoken.Validate}
+	return &googleVerifier{audiences: auds, allowed: allowed, validate: idtoken.Validate}, nil
 }
 
 func (g *googleVerifier) Verify(ctx context.Context, bearer string) (string, error) {

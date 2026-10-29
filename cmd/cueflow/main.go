@@ -270,7 +270,9 @@ func serve() error {
 			*wq = q
 		}
 	}
-	apiSrv.InternalAuth, apiSrv.MediaRegisterAuth = internalGuards(cfg, internalauth.NewGoogleVerifier)
+	if apiSrv.InternalAuth, apiSrv.MediaRegisterAuth, err = internalGuards(cfg, internalauth.NewGoogleVerifier); err != nil {
+		return err
+	}
 	if apiSrv.MediaRegisterAuth != nil {
 		logger.Info("media register enabled: POST /internal/media/register", "accounts", cfg.MediaRegisterAccounts, "audiences", cfg.InternalAudiences)
 	}
@@ -534,12 +536,23 @@ func parseAge(s string) (time.Duration, error) {
 // internalGuards builds the auth of /internal/*; a nil guard leaves its routes out (404). The clock and
 // work deliveries (/internal/tick, /internal/work/*) exist only with an external clock. Media register
 // exists in any mode once its accounts are set (config.Load requires GCS media storage for it).
-func internalGuards(cfg *config.Config, verifier func(audiences, accounts []string) internalauth.Verifier) (internal, mediaRegister func(http.Handler) http.Handler) {
+func internalGuards(cfg *config.Config, verifier func(audiences, accounts []string) (internalauth.Verifier, error)) (internal, mediaRegister func(http.Handler) http.Handler, err error) {
+	guard := func(accounts []string) (func(http.Handler) http.Handler, error) {
+		v, err := verifier(cfg.InternalAudiences, accounts)
+		if err != nil {
+			return nil, fmt.Errorf("CUEFLOW_INTERNAL_AUDIENCE: %w", err)
+		}
+		return internalauth.Middleware(v), nil
+	}
 	if cfg.Tick == "external" {
-		internal = internalauth.Middleware(verifier(cfg.InternalAudiences, cfg.InternalServiceAccounts))
+		if internal, err = guard(cfg.InternalServiceAccounts); err != nil {
+			return nil, nil, err
+		}
 	}
 	if len(cfg.MediaRegisterAccounts) > 0 {
-		mediaRegister = internalauth.Middleware(verifier(cfg.InternalAudiences, cfg.MediaRegisterAccounts))
+		if mediaRegister, err = guard(cfg.MediaRegisterAccounts); err != nil {
+			return nil, nil, err
+		}
 	}
-	return internal, mediaRegister
+	return internal, mediaRegister, nil
 }
