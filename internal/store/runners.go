@@ -203,11 +203,10 @@ func (s *Store) ListRunners(ctx context.Context) ([]*Runner, error) {
 }
 
 type RunnerPatch struct {
-	Name           *string
-	Labels         *[]string
-	OrgIDs         *[]uuid.UUID
-	IsActive       *bool
-	MaxConcurrency *int
+	Name     *string
+	Labels   *[]string
+	OrgIDs   *[]uuid.UUID
+	IsActive *bool
 }
 
 func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (*Runner, error) {
@@ -234,14 +233,34 @@ func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (
 	if p.IsActive != nil {
 		r.IsActive = *p.IsActive
 	}
-	if p.MaxConcurrency != nil {
-		if *p.MaxConcurrency < 1 || *p.MaxConcurrency > 16 {
-			return nil, Invalid("max concurrency must be between 1 and 16")
-		}
-		r.MaxConcurrency = *p.MaxConcurrency
+	return scanRunner(s.pool.QueryRow(ctx, `UPDATE runners SET name=$2, labels=$3, org_ids=$4, is_active=$5
+		WHERE id=$1 RETURNING `+runnerCols, id, r.Name, r.Labels, r.OrgIDs, r.IsActive))
+}
+
+// MaxRunnerConcurrency is the most jobs a runner is given at once, whatever it reports.
+const MaxRunnerConcurrency = 16
+
+// ReportRunner stores the version and concurrency a runner sent with a claim. A blank version or a zero
+// concurrency (a runner from before these fields) keeps what is stored; concurrency is clamped to
+// 1..MaxRunnerConcurrency. It returns the runner as stored and whether anything changed.
+func (s *Store) ReportRunner(ctx context.Context, r *Runner, version string, concurrency int) (*Runner, bool, error) {
+	if len(version) > 32 { // the column's width; a claim must not fail over it
+		version = version[:32]
 	}
-	return scanRunner(s.pool.QueryRow(ctx, `UPDATE runners SET name=$2, labels=$3, org_ids=$4, is_active=$5, max_concurrency=$6
-		WHERE id=$1 RETURNING `+runnerCols, id, r.Name, r.Labels, r.OrgIDs, r.IsActive, r.MaxConcurrency))
+	if concurrency != 0 {
+		concurrency = max(1, min(concurrency, MaxRunnerConcurrency))
+	}
+	out, err := scanRunner(s.pool.QueryRow(ctx, `UPDATE runners
+		SET version = COALESCE(NULLIF($2, ''), version), max_concurrency = COALESCE(NULLIF($3, 0), max_concurrency)
+		WHERE id=$1 AND (version <> COALESCE(NULLIF($2, ''), version) OR max_concurrency <> COALESCE(NULLIF($3, 0), max_concurrency))
+		RETURNING `+runnerCols, r.ID, version, concurrency))
+	if errors.Is(err, domain.ErrNotFound) {
+		return r, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }
 
 // DeleteRunner revokes a runner at once: its token stops working and its running jobs are canceled.

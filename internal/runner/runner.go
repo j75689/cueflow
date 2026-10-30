@@ -44,8 +44,10 @@ type Config struct {
 	Token    string `json:"token"`
 	RunnerID string `json:"runner_id"`
 	Name     string `json:"name"`
-	// Concurrency is how many jobs this machine runs at once.
+	// Concurrency is how many jobs this machine runs at once. The runner reports it with every claim.
 	Concurrency int `json:"concurrency"`
+	// Version is the cueflow build running this runner, reported with every claim; it is not saved.
+	Version string `json:"-"`
 	// AllowPresets limits which agent CLIs this machine will launch; empty allows every preset.
 	// The server cannot widen this.
 	AllowPresets []string `json:"allow_presets,omitempty"`
@@ -221,7 +223,7 @@ func Main(args []string, version string) error {
 	case "register":
 		return register(args[1:], version)
 	case "run":
-		return run(args[1:])
+		return run(args[1:], version)
 	case "status":
 		return status(args[1:])
 	}
@@ -324,7 +326,7 @@ func status(args []string) error {
 	return nil
 }
 
-func run(args []string) error {
+func run(args []string, version string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	cfgPath := fs.String("config", DefaultConfigPath(), "runner credentials file")
 	conc := fs.Int("concurrency", 0, "override the configured concurrency")
@@ -338,6 +340,7 @@ func run(args []string) error {
 	if *conc > 0 {
 		c.Concurrency = *conc
 	}
+	c.Version = version
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -466,7 +469,7 @@ func (r *Runner) Loop(ctx context.Context) error {
 	defer wg.Wait()
 	backoff := time.Second
 	every := r.cfg.pollEvery()
-	claim := runnerapi.ClaimRequest{Protocol: runnerapi.ProtocolVersion}
+	claim := runnerapi.ClaimRequest{Protocol: runnerapi.ProtocolVersion, Version: r.cfg.Version, Concurrency: r.cfg.Concurrency}
 	if every > 0 {
 		now := 0 // answer at once; this runner asks again after `every`
 		claim.Wait = &now
