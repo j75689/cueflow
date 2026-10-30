@@ -12,7 +12,6 @@ import {
   ErrorBox,
   Field,
   Icon,
-  Input,
   Loading,
   Modal,
   PageHeader,
@@ -126,15 +125,9 @@ export default function RunnersPage() {
   );
 }
 
-const splitLabels = (text: string) =>
-  text
-    .split(",")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
 function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
-  const [labels, setLabels] = useState("claude-code");
+  const [labels, setLabels] = useState<string[]>(["claude-code"]);
   const [busy, setBusy] = useState(false);
   const [reg, setReg] = useState<RunnerRegistration | null>(null);
 
@@ -145,11 +138,7 @@ function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = async () => {
     setBusy(true);
     try {
-      setReg(
-        await api.createRunnerRegistration({
-          labels: splitLabels(labels),
-        }),
-      );
+      setReg(await api.createRunnerRegistration({ labels }));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -183,9 +172,9 @@ function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="space-y-3">
           <Field
             label="Labels"
-            help="Comma-separated. A Runner pool connector asks for labels; a runner needs all of them, or one of them when the pool matches any."
+            help="A Runner pool connector asks for labels; a runner needs all of them, or one of them when the pool matches any."
           >
-            <Input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="claude-code, mac" />
+            <TagInput value={labels} onChange={setLabels} placeholder="Add label" />
           </Field>
         </div>
       ) : (
