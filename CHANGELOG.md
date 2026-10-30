@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/j75689/cueflow/compare/v1.4.0...v1.5.0) (2026-10-30)
+
+
+### Features
+
+* **crew:** per-org agent concurrency, with CUEFLOW_AGENT_CONCURRENCY as the default ([#106](https://github.com/j75689/cueflow/issues/106)) ([fe0aa78](https://github.com/j75689/cueflow/commit/fe0aa781013bbd8b25032725206f7ddc5ba7a413))
+* **runner:** report the runner's version and concurrency with every claim ([#105](https://github.com/j75689/cueflow/issues/105)) ([3e4ad24](https://github.com/j75689/cueflow/commit/3e4ad24ce0b221926d942685b8a47090d64b1e51))
+
 ## [1.4.0](https://github.com/j75689/cueflow/compare/v1.3.0...v1.4.0) (2026-10-29)
 
 
