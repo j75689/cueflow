@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useDialog } from "@/components/dialog";
+import { TagInput } from "@/components/inputs";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -11,7 +12,6 @@ import {
   ErrorBox,
   Field,
   Icon,
-  Input,
   Loading,
   Modal,
   PageHeader,
@@ -35,7 +35,6 @@ export default function RunnersPage() {
     try {
       const u = await api.updateRunner(r.id, body);
       runners.setData((runners.data ?? []).map((x) => (x.id === r.id ? { ...x, ...u } : x)));
-      return u;
     } catch (e) {
       toast.error(e);
     }
@@ -92,7 +91,13 @@ export default function RunnersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-fg">{r.name}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
-                      <LabelsInput runner={r} onSave={(labels) => patch(r, { labels })} />
+                      <div className="w-64">
+                        <TagInput
+                          value={r.labels}
+                          onChange={(labels) => void patch(r, { labels })}
+                          placeholder="Add label"
+                        />
+                      </div>
                       <span>{r.platform || "unknown platform"}</span>
                       {r.version && <span>v{r.version}</span>}
                       <span title={fmtTime(r.last_seen_at)}>
@@ -120,49 +125,9 @@ export default function RunnersPage() {
   );
 }
 
-const splitLabels = (text: string) =>
-  text
-    .split(",")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-/** LabelsInput edits a runner's labels, comma-separated, saved on blur or Enter; it then shows what the server stored. */
-function LabelsInput({ runner, onSave }: { runner: Runner; onSave: (labels: string[]) => Promise<Runner | undefined> }) {
-  const stored = runner.labels.join(", ");
-  const [value, setValue] = useState(stored);
-  const [shown, setShown] = useState(stored);
-  if (shown !== stored) {
-    // The labels changed on the server (another admin): show them. A refetch with the same labels keeps an edit.
-    setShown(stored);
-    setValue(stored);
-  }
-  const save = async () => {
-    const next = splitLabels(value);
-    if (next.join(", ") === stored) {
-      setValue(stored);
-      return;
-    }
-    const u = await onSave(next);
-    setValue((u ?? runner).labels.join(", "));
-  };
-  return (
-    <Input
-      className="h-7 w-56 text-xs"
-      value={value}
-      placeholder="no labels"
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => void save()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-      aria-label={`Labels of ${runner.name}`}
-    />
-  );
-}
-
 function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
-  const [labels, setLabels] = useState("claude-code");
+  const [labels, setLabels] = useState<string[]>(["claude-code"]);
   const [busy, setBusy] = useState(false);
   const [reg, setReg] = useState<RunnerRegistration | null>(null);
 
@@ -173,11 +138,7 @@ function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = async () => {
     setBusy(true);
     try {
-      setReg(
-        await api.createRunnerRegistration({
-          labels: splitLabels(labels),
-        }),
-      );
+      setReg(await api.createRunnerRegistration({ labels }));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -211,9 +172,9 @@ function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="space-y-3">
           <Field
             label="Labels"
-            help="Comma-separated. A Runner pool connector asks for labels; a runner needs all of them, or one of them when the pool matches any."
+            help="A Runner pool connector asks for labels; a runner needs all of them, or one of them when the pool matches any."
           >
-            <Input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="claude-code, mac" />
+            <TagInput value={labels} onChange={setLabels} placeholder="Add label" />
           </Field>
         </div>
       ) : (
