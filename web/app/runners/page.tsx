@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useDialog } from "@/components/dialog";
+import { TagInput } from "@/components/inputs";
 import { useServerEvent, useToast } from "@/components/providers";
 import {
   Button,
@@ -35,7 +36,6 @@ export default function RunnersPage() {
     try {
       const u = await api.updateRunner(r.id, body);
       runners.setData((runners.data ?? []).map((x) => (x.id === r.id ? { ...x, ...u } : x)));
-      return u;
     } catch (e) {
       toast.error(e);
     }
@@ -92,7 +92,13 @@ export default function RunnersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-fg">{r.name}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
-                      <LabelsInput runner={r} onSave={(labels) => patch(r, { labels })} />
+                      <div className="w-64">
+                        <TagInput
+                          value={r.labels}
+                          onChange={(labels) => void patch(r, { labels })}
+                          placeholder="Add label"
+                        />
+                      </div>
                       <span>{r.platform || "unknown platform"}</span>
                       {r.version && <span>v{r.version}</span>}
                       <span title={fmtTime(r.last_seen_at)}>
@@ -125,40 +131,6 @@ const splitLabels = (text: string) =>
     .split(",")
     .map((l) => l.trim())
     .filter(Boolean);
-
-/** LabelsInput edits a runner's labels, comma-separated, saved on blur or Enter; it then shows what the server stored. */
-function LabelsInput({ runner, onSave }: { runner: Runner; onSave: (labels: string[]) => Promise<Runner | undefined> }) {
-  const stored = runner.labels.join(", ");
-  const [value, setValue] = useState(stored);
-  const [shown, setShown] = useState(stored);
-  if (shown !== stored) {
-    // The labels changed on the server (another admin): show them. A refetch with the same labels keeps an edit.
-    setShown(stored);
-    setValue(stored);
-  }
-  const save = async () => {
-    const next = splitLabels(value);
-    if (next.join(", ") === stored) {
-      setValue(stored);
-      return;
-    }
-    const u = await onSave(next);
-    setValue((u ?? runner).labels.join(", "));
-  };
-  return (
-    <Input
-      className="h-7 w-56 text-xs"
-      value={value}
-      placeholder="no labels"
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => void save()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-      aria-label={`Labels of ${runner.name}`}
-    />
-  );
-}
 
 function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
