@@ -60,12 +60,12 @@ func (s *Server) createRegistration(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// runnerBody leaves out max_concurrency: the runner reports its own with every claim.
 type runnerBody struct {
-	Name           *string      `json:"name"`
-	Labels         *[]string    `json:"labels"`
-	OrgIDs         *[]uuid.UUID `json:"org_ids"`
-	IsActive       *bool        `json:"is_active"`
-	MaxConcurrency *int         `json:"max_concurrency"`
+	Name     *string      `json:"name"`
+	Labels   *[]string    `json:"labels"`
+	OrgIDs   *[]uuid.UUID `json:"org_ids"`
+	IsActive *bool        `json:"is_active"`
 }
 
 func (s *Server) updateRunner(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +80,7 @@ func (s *Server) updateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.Store.UpdateRunner(r.Context(), id, store.RunnerPatch{Name: body.Name, Labels: body.Labels,
-		OrgIDs: body.OrgIDs, IsActive: body.IsActive, MaxConcurrency: body.MaxConcurrency})
+		OrgIDs: body.OrgIDs, IsActive: body.IsActive})
 	if err != nil {
 		s.Fail(w, err)
 		return
@@ -192,7 +192,14 @@ func (s *Server) runnerClaim(w http.ResponseWriter, r *http.Request) {
 	if !protocolOK(w, req.Protocol) {
 		return
 	}
-	runner := runnerFrom(r)
+	runner, changed, err := s.Store.ReportRunner(r.Context(), runnerFrom(r), req.Version, req.Concurrency)
+	if err != nil {
+		s.Fail(w, err)
+		return
+	}
+	if changed {
+		s.Broker.PublishGlobal("runner.updated", map[string]any{"id": runner.ID})
+	}
 	wait := runnerapi.ClaimWait
 	if req.Wait != nil {
 		wait = max(0, min(*req.Wait, runnerapi.ClaimWait))

@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/runner"
+	"github.com/j75689/cueflow/internal/runnerapi"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -217,5 +220,85 @@ func TestRunnerBehindAccessProxy(t *testing.T) {
 	}
 	if n := turnedAway.Load(); n != 0 {
 		t.Fatalf("%d requests went without the headers", n)
+	}
+}
+
+// A runner's own version and concurrency are what the server stores: every claim reports them, a claim from a
+// runner that predates these fields keeps what is stored, and an admin can no longer set the concurrency.
+func TestRunnerReportsVersionAndConcurrency(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	tok, _, err := e.store.CreateRegistration(ctx, []string{"fake"}, nil, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, token, err := e.store.RegisterRunner(ctx, tok, "box", "1.0.0", "linux/amd64", nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, stop := e.server.Broker.Subscribe()
+	defer stop()
+	updated := func() bool {
+		for {
+			select {
+			case ev := <-events:
+				if ev.Name == "runner.updated" {
+					return true
+				}
+			case <-time.After(200 * time.Millisecond):
+				return false
+			}
+		}
+	}
+	claim := func(req runnerapi.ClaimRequest) *store.Runner {
+		t.Helper()
+		now := 0
+		req.Protocol, req.Wait = runnerapi.ProtocolVersion, &now
+		raw, _ := json.Marshal(req)
+		hr, _ := http.NewRequest(http.MethodPost, e.api.URL+runnerapi.BasePath+"/jobs/claim", bytes.NewReader(raw))
+		hr.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(hr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("claim: %d", resp.StatusCode)
+		}
+		got, err := e.store.GetRunner(ctx, r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	if got := claim(runnerapi.ClaimRequest{Version: "1.5.0", Concurrency: 4}); got.Version != "1.5.0" || got.MaxConcurrency != 4 {
+		t.Fatalf("after a reporting claim: %q %d", got.Version, got.MaxConcurrency)
+	}
+	if !updated() {
+		t.Fatal("a claim that changed the runner did not publish runner.updated")
+	}
+	if got := claim(runnerapi.ClaimRequest{Version: "1.5.0", Concurrency: 4}); got.Version != "1.5.0" || got.MaxConcurrency != 4 {
+		t.Fatalf("after the same report: %q %d", got.Version, got.MaxConcurrency)
+	}
+	if updated() {
+		t.Fatal("a claim that changed nothing published runner.updated")
+	}
+	if got := claim(runnerapi.ClaimRequest{}); got.Version != "1.5.0" || got.MaxConcurrency != 4 {
+		t.Fatalf("a claim without the fields changed the stored values: %q %d", got.Version, got.MaxConcurrency)
+	}
+	if got := claim(runnerapi.ClaimRequest{Concurrency: 40}); got.MaxConcurrency != store.MaxRunnerConcurrency || got.Version != "1.5.0" {
+		t.Fatalf("concurrency 40: %q %d, want it clamped to %d", got.Version, got.MaxConcurrency, store.MaxRunnerConcurrency)
+	}
+	if got := claim(runnerapi.ClaimRequest{Concurrency: -3}); got.MaxConcurrency != 1 {
+		t.Fatalf("concurrency -3: %d, want 1", got.MaxConcurrency)
+	}
+
+	var patched store.Runner
+	if code := e.do("PATCH", "/runners/"+r.ID.String(), map[string]any{"name": "renamed", "max_concurrency": 9}, &patched); code != 200 {
+		t.Fatalf("patch: %d", code)
+	}
+	if patched.Name != "renamed" || patched.MaxConcurrency != 1 {
+		t.Fatalf("PATCH must not set max_concurrency: %+v", patched)
 	}
 }

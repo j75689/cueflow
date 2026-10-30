@@ -39,6 +39,10 @@ type ClaimRequest struct {
 	// Wait is how many seconds the server may hold the request for work to arrive, up to ClaimWait; 0 answers
 	// at once. Absent means ClaimWait: the long poll of runners from before this field.
 	Wait *int `json:"wait,omitempty"`
+	// Version and Concurrency are the runner's build and how many jobs it runs at once; the server stores
+	// them on every claim. Runners from before these fields leave them out and keep what is stored.
+	Version     string `json:"version,omitempty"`
+	Concurrency int    `json:"concurrency,omitempty"`
 }
 
 // Job is one unit of work for a runner.
