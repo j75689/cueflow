@@ -1,30 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Icon, Input, Textarea, cx } from "./ui";
 
-// TagInput edits a list of short tokens (hashtags, queries) as chips.
+// newTags splits typed text into the tokens it adds to value: comma or line separated, trimmed, without
+// prefix, and only those not there yet.
+function newTags(raw: string, value: string[], prefix?: string): string[] {
+  return raw
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .map((s) => (prefix && s.startsWith(prefix) ? s.slice(prefix.length) : s))
+    .filter(Boolean)
+    .filter((s) => !value.includes(s));
+}
+
+// TagInput edits a list of short tokens (hashtags, queries) as chips. The "inline" variant has no box
+// around the chips: they wrap freely, ending in a dashed "+ placeholder" chip that turns into an input.
+// Its × buttons show while an ancestor with the "group" class is hovered (a table row), on keyboard
+// focus, and always on touch screens.
 export function TagInput({
   value,
   onChange,
   placeholder,
   prefix,
   disabled,
+  variant = "box",
 }: {
   value: string[];
   onChange: (v: string[]) => void;
   placeholder?: string;
   prefix?: string;
   disabled?: boolean;
+  variant?: "box" | "inline";
 }) {
   const [draft, setDraft] = useState("");
+  if (variant === "inline") {
+    return (
+      <InlineTags value={value} onChange={onChange} placeholder={placeholder} prefix={prefix} disabled={disabled} />
+    );
+  }
   const add = (raw: string) => {
-    const parts = raw
-      .split(/[,\n]/)
-      .map((s) => s.trim())
-      .map((s) => (prefix && s.startsWith(prefix) ? s.slice(prefix.length) : s))
-      .filter(Boolean)
-      .filter((s) => !value.includes(s));
+    const parts = newTags(raw, value, prefix);
     if (parts.length) onChange([...value, ...parts]);
     setDraft("");
   };
@@ -70,6 +86,96 @@ export function TagInput({
         placeholder={value.length ? "" : placeholder}
         className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-fg-4"
       />
+    </div>
+  );
+}
+
+function InlineTags({
+  value,
+  onChange,
+  placeholder,
+  prefix,
+  disabled,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+  prefix?: string;
+  disabled?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  // Escape closes the input without adding; the blur that follows must not add it either.
+  const cancelled = useRef(false);
+  const add = (raw: string) => {
+    const parts = newTags(raw, value, prefix);
+    if (parts.length) onChange([...value, ...parts]);
+    setDraft("");
+  };
+  const chip = "inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {value.map((t) => (
+        <span key={t} className={cx(chip, "border border-line bg-subtle text-fg-2")}>
+          {prefix}
+          {t}
+          {!disabled && (
+            <button
+              type="button"
+              aria-label={`Remove ${prefix ?? ""}${t}`}
+              className="rounded-sm text-fg-4 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-indigo-500"
+              onClick={() => onChange(value.filter((x) => x !== t))}
+            >
+              <Icon name="x" className="h-3 w-3" />
+            </button>
+          )}
+        </span>
+      ))}
+      {!disabled &&
+        (editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                add(draft);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelled.current = true;
+                setDraft("");
+                setEditing(false);
+              }
+            }}
+            onBlur={() => {
+              if (!cancelled.current && draft) add(draft);
+              cancelled.current = false;
+              setEditing(false);
+            }}
+            aria-label={placeholder ?? "Add"}
+            className={cx(
+              chip,
+              "w-32 border border-accent-solid bg-canvas text-fg outline-none ring-3 ring-accent-soft",
+            )}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              // An Escape whose input went away without a blur left the flag set.
+              cancelled.current = false;
+              setEditing(true);
+            }}
+            className={cx(
+              chip,
+              "border border-dashed border-line-strong text-fg-4 hover:border-fg-4 hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-indigo-500",
+            )}
+          >
+            <Icon name="plus" className="h-3 w-3" />
+            {placeholder ?? "Add"}
+          </button>
+        ))}
     </div>
   );
 }

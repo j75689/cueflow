@@ -15,7 +15,9 @@ import {
   Loading,
   Modal,
   PageHeader,
+  Pill,
   Toggle,
+  cx,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtRelative, fmtTime } from "@/lib/format";
@@ -81,48 +83,94 @@ export default function RunnersPage() {
               hint="Add one, then run the command it shows on the machine that should do the work."
             />
           ) : (
-            <ul className="divide-y divide-line">
-              {runners.data.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${r.online ? "bg-emerald-500" : "bg-zinc-400"}`}
-                    title={r.online ? "Online" : "Offline"}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-fg">{r.name}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
-                      <div className="w-64">
-                        <TagInput
-                          value={r.labels}
-                          onChange={(labels) => void patch(r, { labels })}
-                          placeholder="Add label"
+            <>
+              <div
+                className={cx(
+                  grid,
+                  "hidden border-b border-line py-2 text-[11px] font-medium tracking-wider text-fg-4 uppercase md:grid",
+                )}
+              >
+                <span>Runner</span>
+                <span>Labels</span>
+                <span>Load</span>
+                <span className="text-right">Active</span>
+              </div>
+              <ul className="divide-y divide-line">
+                {runners.data.map((r) => (
+                  <li
+                    key={r.id}
+                    className={cx(grid, "group flex flex-col items-stretch gap-3 py-3.5 hover:bg-subtle/40 md:grid")}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={cx(
+                            "h-2 w-2 shrink-0 rounded-full",
+                            r.online ? "bg-emerald-500 ring-3 ring-emerald-500/15" : "bg-zinc-400 dark:bg-zinc-600",
+                          )}
+                          title={r.online ? "Online" : "Offline"}
                         />
+                        <span className="truncate text-sm font-medium text-fg">{r.name}</span>
+                        {!r.online && <Pill className="bg-subtle text-fg-3">Offline</Pill>}
                       </div>
-                      <span>{r.platform || "unknown platform"}</span>
-                      {r.version && <span>v{r.version}</span>}
-                      <span title={fmtTime(r.last_seen_at)}>
-                        {r.last_seen_at ? `seen ${fmtRelative(r.last_seen_at)}` : "never seen"}
-                      </span>
-                      <span>
-                        {r.running_jobs}/{r.max_concurrency} running
-                      </span>
+                      <div className="mt-0.5 ml-[18px] text-xs text-fg-4 tabular-nums">
+                        <span className="whitespace-nowrap">{r.platform || "unknown platform"}</span>
+                        {r.version && (
+                          <>
+                            <Sep />
+                            <span className="whitespace-nowrap">v{r.version}</span>
+                          </>
+                        )}
+                        <Sep />
+                        <span className="whitespace-nowrap" title={fmtTime(r.last_seen_at)}>
+                          {r.last_seen_at ? `seen ${fmtRelative(r.last_seen_at)}` : "never seen"}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Toggle checked={r.is_active} onChange={(on) => void patch(r, { is_active: on })} />
-                    <Button size="sm" variant="ghost" onClick={() => void revoke(r)}>
-                      Revoke
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    <TagInput
+                      variant="inline"
+                      value={r.labels}
+                      onChange={(labels) => void patch(r, { labels })}
+                      placeholder="Add label"
+                    />
+                    <div className="flex items-center gap-4 md:contents">
+                      <div className="min-w-0 flex-1 text-xs text-fg-3 tabular-nums">
+                        <span className="font-medium text-fg">{r.running_jobs}</span> / {r.max_concurrency} running
+                        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-accent-solid"
+                            style={{ width: `${Math.min(100, (100 * r.running_jobs) / Math.max(r.max_concurrency, 1))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-3">
+                        <Toggle checked={r.is_active} onChange={(on) => void patch(r, { is_active: on })} />
+                        <button
+                          type="button"
+                          onClick={() => void revoke(r)}
+                          className="h-7 rounded-md border border-transparent px-2.5 text-xs font-medium text-fg-3 transition-colors hover:border-red-500/25 hover:bg-red-500/10 hover:text-red-600 focus-visible:border-red-500/25 focus-visible:bg-red-500/10 focus-visible:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:hover:text-red-300 dark:focus-visible:text-red-300"
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Card>
       )}
       <AddRunner open={adding} onClose={() => setAdding(false)} />
     </div>
   );
+}
+
+// grid lays out the list's header and rows as Runner | Labels | Load | Active from md up.
+const grid = "px-4 md:grid-cols-[minmax(15rem,1fr)_minmax(0,1.6fr)_7.5rem_9.5rem] md:items-center md:gap-6";
+
+function Sep() {
+  return <span className="mx-1.5 text-line-strong">·</span>;
 }
 
 function AddRunner({ open, onClose }: { open: boolean; onClose: () => void }) {
