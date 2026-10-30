@@ -84,7 +84,8 @@ func runnerTimeout(pool runnerPool) time.Duration {
 }
 
 func runnerLabels(pool runnerPool) string {
-	if l := pool.Labels(); len(l) > 0 {
+	// As CreateRunnerJob stores them, so the text names the labels the claim matches.
+	if l := store.CleanLabels(pool.Labels()); len(l) > 0 {
 		if pool.LabelMatch() == store.LabelMatchAny {
 			return "any of labels: " + strings.Join(l, ", ")
 		}

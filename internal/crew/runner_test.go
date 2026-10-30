@@ -17,6 +17,8 @@ func TestRunnerLabelsText(t *testing.T) {
 		{connector.Config{"labels": []any{"mac", "gpu"}, "label_match": "all"}, "labels: mac, gpu"},
 		{connector.Config{"labels": []any{"mac", "gpu"}, "label_match": "any"}, "any of labels: mac, gpu"},
 		{connector.Config{"label_match": "any"}, "any runner"},
+		{connector.Config{"labels": []any{"Mac", " GPU ", "mac"}}, "labels: mac, gpu"},
+		{connector.Config{"labels": []any{"Mac", " GPU ", "mac"}, "label_match": "any"}, "any of labels: mac, gpu"},
 	} {
 		inst, err := runnerpool.New(c.cfg, connector.Env{})
 		if err != nil {
