@@ -162,7 +162,11 @@ function InlineTags({
         ) : (
           <button
             type="button"
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              // An Escape whose input went away without a blur left the flag set.
+              cancelled.current = false;
+              setEditing(true);
+            }}
             className={cx(
               chip,
               "border border-dashed border-line-strong text-fg-4 hover:border-fg-4 hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-indigo-500",
