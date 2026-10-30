@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -547,6 +549,25 @@ type Claim struct {
 // orgClaimLockSpace is the first key of ClaimTodo's per-org advisory locks; the second is the org's.
 const orgClaimLockSpace = 0x6f7267 // "org"
 
+// LockOrgClaims takes ClaimTodo's transaction advisory lock of each org, one at a time in key order, so
+// two claimers never deadlock. Two orgs whose keys collide share a lock, which only makes their claimers
+// take turns. Exported so a test can stand in for a claimer.
+func LockOrgClaims(ctx context.Context, tx pgx.Tx, orgs []uuid.UUID) error {
+	keys := make([]int32, 0, len(orgs))
+	for _, id := range orgs {
+		h := fnv.New32a()
+		h.Write(id[:])
+		keys = append(keys, int32(h.Sum32()))
+	}
+	slices.Sort(keys)
+	for _, k := range slices.Compact(keys) {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, orgClaimLockSpace, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // crewRun picks the tasks the built-in crew works (t, joined to their agent a): every runtime but an
 // external agent, which drives itself.
 const crewRun = `JOIN agents a ON a.id = t.assignee_agent_id
@@ -556,7 +577,7 @@ const crewRunWhere = `COALESCE(rc.type, '') <> 'external'`
 // ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS. Each org
 // gets no more than its agent_concurrency (orgDefault when unset) minus the tasks the crew already works
 // for it, counted across every instance. Claimers take a transaction advisory lock per org they claim
-// for (in key order, so they never deadlock) and count after taking it, so two instances never claim
+// for (LockOrgClaims) and count after taking it, so two instances never claim
 // past an org's limit together: the second waits for the first to commit and then sees its claims. An
 // advisory lock, not the org's row, so creating a task (which bumps the org's task number) never waits
 // on a claim.
@@ -578,10 +599,7 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 	if err != nil || len(orgs) == 0 {
 		return nil, err
 	}
-	// Two orgs whose ids hash alike share a lock, which only makes their claimers take turns.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, k) FROM (
-			SELECT DISTINCT hashtext(id::text) AS k FROM unnest($2::uuid[]) AS id ORDER BY k) keys`,
-		orgClaimLockSpace, orgs); err != nil {
+	if err := LockOrgClaims(ctx, tx, orgs); err != nil {
 		return nil, err
 	}
 	// A task an inactive agent still works holds its slot until the run ends, so running counts every agent.
@@ -597,11 +615,14 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 			SELECT todo.*, row_number() OVER (PARTITION BY org_id ORDER BY prio, updated_at) AS n FROM todo
 		), picked AS (
 			SELECT r.id FROM ranked r JOIN room USING (org_id) WHERE r.n <= room.free ORDER BY r.prio, r.updated_at LIMIT $2
+		), locked AS (
+			-- A task another writer holds is skipped, not waited on: this claim holds its orgs' locks.
+			SELECT id FROM tasks WHERE id IN (SELECT id FROM picked) AND status='TODO' FOR UPDATE SKIP LOCKED
 		)
 		UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1),
 			attempts = attempts + 1, run_id = gen_random_uuid(),
 			started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
-		WHERE id IN (SELECT id FROM picked) AND status='TODO'
+		WHERE id IN (SELECT id FROM locked)
 		RETURNING id, run_id`, lease.Seconds(), limit, orgs, orgDefault)
 	if err != nil {
 		return nil, err

@@ -341,12 +341,18 @@ function ConcurrencyInput({
   onSave: (n: number | null) => void;
 }) {
   const [value, setValue] = useState(org.agent_concurrency?.toString() ?? "");
-  const save = () => {
+  const revert = () => setValue(org.agent_concurrency?.toString() ?? "");
+  const save = (input: HTMLInputElement) => {
+    // A partial number ("-", "1e") reads as "": revert instead of clearing the limit.
+    if (input.validity.badInput) {
+      revert();
+      return;
+    }
     const text = value.trim();
     const n = text === "" ? null : Number(text);
     if (n === org.agent_concurrency) return;
     if (n !== null && (!Number.isInteger(n) || n < 1 || n > MAX_AGENT_CONCURRENCY)) {
-      setValue(org.agent_concurrency?.toString() ?? "");
+      revert();
       return;
     }
     onSave(n);
@@ -361,7 +367,7 @@ function ConcurrencyInput({
       value={value}
       placeholder={fallback ? `default ${fallback}` : "default"}
       onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
+      onBlur={(e) => save(e.currentTarget)}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}

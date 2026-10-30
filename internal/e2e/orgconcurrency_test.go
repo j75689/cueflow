@@ -133,9 +133,9 @@ func TestOrgAgentConcurrency(t *testing.T) {
 }
 
 // Two claimers racing for a full org, in the order that overshoots unless claimers take turns per org:
-// the first has claimed one task and waits on the second (a row another writer holds), an urgent task
-// arrives, and the second claimer, which cannot see the first's uncommitted claims, would pick the
-// urgent one.
+// the first (stood in for here by a transaction holding the org's claim lock) has claimed the org's two
+// tasks and not committed yet, an urgent task arrives, and the second claimer, which cannot see the
+// uncommitted claims, would take the urgent one. A TODO row another writer holds is skipped, not waited on.
 func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -149,58 +149,83 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 		}
 		return task.ID
 	}
-	newTask("first", "normal")
-	second := newTask("second", "normal")
+	first, second := newTask("first", "normal"), newTask("second", "normal")
+
+	// A row someone else holds does not stall a claim: it takes what it can and leaves that one.
+	other, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Rollback(ctx)
+	if _, err := other.Exec(ctx, `SELECT 1 FROM tasks WHERE id=$1 FOR UPDATE`, second); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []store.Claim, 1)
+	go func() {
+		claims, err := e.store.ClaimTodo(ctx, time.Minute, 10, 2)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- claims
+	}()
+	select {
+	case claims := <-done:
+		if len(claims) != 1 || claims[0].ID != first {
+			t.Fatalf("claims next to a held row: %+v, want only the first task", claims)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a claim waited on a task row another writer holds")
+	}
+	if err := other.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='TODO' WHERE id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
 
 	holder, err := e.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer holder.Rollback(ctx)
-	if _, err := holder.Exec(ctx, `SELECT 1 FROM tasks WHERE id=$1 FOR UPDATE`, second); err != nil {
+	if err := store.LockOrgClaims(ctx, holder, []uuid.UUID{org.ID}); err != nil {
 		t.Fatal(err)
 	}
-	waiting := func(n int) {
-		t.Helper()
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			var got int
-			if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-				WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&got); err != nil {
-				t.Fatal(err)
-			}
-			if got >= n {
-				return
-			}
-		}
-		t.Fatalf("%d claimers never waited", n)
+	if _, err := holder.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until=NOW() + interval '1 hour' WHERE id = ANY($1)`,
+		[]uuid.UUID{first, second}); err != nil {
+		t.Fatal(err)
 	}
-	var wg sync.WaitGroup
-	claimed := make([]int, 2)
-	claimer := func(i int) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			claims, err := e.store.ClaimTodo(ctx, time.Minute, 10, 2)
-			if err != nil {
-				t.Error(err)
-			}
-			claimed[i] = len(claims)
-		}()
-	}
-	claimer(0)
-	waiting(1) // the first claimer waits on the second task
 	newTask("urgent", "urgent")
-	claimer(1)
-	waiting(2) // the second waits too
+	go func() {
+		claims, err := e.store.ClaimTodo(ctx, time.Minute, 10, 2)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- claims
+	}()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		var waiting int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			// No wait: the claim already ran past the uncommitted claims.
+			break
+		}
+	}
 	if err := holder.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	wg.Wait()
+	claims := <-done
 	var running int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE org_id=$1 AND status='IN_PROGRESS'`, org.ID).Scan(&running); err != nil {
 		t.Fatal(err)
 	}
 	if running != 2 {
-		t.Fatalf("%d tasks running (claimers got %v), want the org's 2", running, claimed)
+		t.Fatalf("%d tasks running (the second claimer got %d), want the org's 2", running, len(claims))
 	}
 }
