@@ -291,6 +291,7 @@ type RunnerJob struct {
 	TaskID     uuid.UUID       `json:"task_id"`
 	AgentRunID *uuid.UUID      `json:"agent_run_id"`
 	Labels     []string        `json:"labels"`
+	LabelMatch string          `json:"label_match"`
 	Status     string          `json:"status"`
 	RunnerID   *uuid.UUID      `json:"runner_id"`
 	RunnerName string          `json:"runner_name"`
@@ -302,14 +303,14 @@ type RunnerJob struct {
 	FinishedAt *time.Time      `json:"finished_at"`
 }
 
-const jobCols = `j.id, j.org_id, j.task_id, j.agent_run_id, j.labels, j.status, j.runner_id, COALESCE(r.name,''), j.lease_until,
+const jobCols = `j.id, j.org_id, j.task_id, j.agent_run_id, j.labels, j.label_match, j.status, j.runner_id, COALESCE(r.name,''), j.lease_until,
 	j.payload, j.result, j.created_at, j.started_at, j.finished_at`
 
 const jobFrom = ` FROM runner_jobs j LEFT JOIN runners r ON r.id = j.runner_id`
 
 func scanJob(row pgx.Row) (*RunnerJob, error) {
 	j := &RunnerJob{}
-	err := row.Scan(&j.ID, &j.OrgID, &j.TaskID, &j.AgentRunID, &j.Labels, &j.Status, &j.RunnerID, &j.RunnerName, &j.LeaseUntil,
+	err := row.Scan(&j.ID, &j.OrgID, &j.TaskID, &j.AgentRunID, &j.Labels, &j.LabelMatch, &j.Status, &j.RunnerID, &j.RunnerName, &j.LeaseUntil,
 		&j.Payload, &j.Result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
 	if err != nil {
 		return nil, NotFound(err)
@@ -325,17 +326,33 @@ type NewRunnerJob struct {
 	TaskID     uuid.UUID
 	AgentRunID *uuid.UUID
 	Labels     []string
+	// LabelMatch is LabelMatchAll (blank) or LabelMatchAny.
+	LabelMatch string
 	Payload    any
 }
+
+// How a runner job's labels match a runner's (runner_jobs.label_match).
+const (
+	LabelMatchAll = "all" // the runner has every label
+	LabelMatchAny = "any" // the runner has at least one
+)
 
 func (s *Store) CreateRunnerJob(ctx context.Context, in NewRunnerJob) (*RunnerJob, error) {
 	raw, err := json.Marshal(in.Payload)
 	if err != nil {
 		return nil, err
 	}
+	match := in.LabelMatch
+	switch match {
+	case "":
+		match = LabelMatchAll
+	case LabelMatchAll, LabelMatchAny:
+	default:
+		return nil, Invalid("label_match must be all or any")
+	}
 	var id uuid.UUID
-	err = s.pool.QueryRow(ctx, `INSERT INTO runner_jobs (org_id, task_id, agent_run_id, labels, payload)
-		VALUES ($1,$2,$3,$4,$5) RETURNING id`, in.OrgID, in.TaskID, in.AgentRunID, runnerLabels(in.Labels), raw).Scan(&id)
+	err = s.pool.QueryRow(ctx, `INSERT INTO runner_jobs (org_id, task_id, agent_run_id, labels, label_match, payload)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, in.OrgID, in.TaskID, in.AgentRunID, runnerLabels(in.Labels), match, raw).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -368,8 +385,9 @@ func (s *Store) ListTaskRunnerJobs(ctx context.Context, taskID uuid.UUID) ([]*Ru
 	return out, rows.Err()
 }
 
-// ClaimRunnerJob hands the oldest queued job the runner may take (its labels cover the job's, the
-// job's org is one it serves) and reserves it. It returns nil when there is nothing to do or the
+// ClaimRunnerJob hands the oldest queued job the runner may take (its labels cover the job's, or share
+// one with them for a label_match 'any' job; a job with no labels fits any runner; the job's org is one
+// it serves) and reserves it. It returns nil when there is nothing to do or the
 // runner is at its concurrency limit.
 func (s *Store) ClaimRunnerJob(ctx context.Context, r *Runner) (*RunnerJob, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -386,7 +404,7 @@ func (s *Store) ClaimRunnerJob(ctx context.Context, r *Runner) (*RunnerJob, erro
 	}
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `SELECT id FROM runner_jobs
-		WHERE status='queued' AND labels <@ $1 AND (cardinality($2::uuid[]) = 0 OR org_id = ANY($2))
+		WHERE status='queued' AND (labels <@ $1 OR (label_match = 'any' AND labels && $1)) AND (cardinality($2::uuid[]) = 0 OR org_id = ANY($2))
 		ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`, r.Labels, r.OrgIDs).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

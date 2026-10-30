@@ -58,7 +58,8 @@ CueFlow or one running elsewhere.
    cueflow runner register --url http://localhost:3000 --token cfreg_... --name mbp
    cueflow runner run
    ```
-3. Under **Connectors**, add a **Runner pool** (label `claude-code`) and select it as an agent's *Runtime*.
+3. Under **Connectors**, add a **Runner pool** (label `claude-code`) and select it as an agent's *Runtime*. With
+   several labels, *Match labels* decides whether a runner needs all of them (`all`, the default) or one (`any`).
 
 Local policy wins: the runner's own `runner.json` can only narrow what the server asks for (allowed presets, no web,
 which command to run, which ACP login to use), and `cueflow runner status` checks the connection. Revoking a runner in

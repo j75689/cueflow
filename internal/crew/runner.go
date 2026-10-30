@@ -20,6 +20,8 @@ import (
 // runnerPool is what the runner_pool connector exposes (see connectors/runnerpool).
 type runnerPool interface {
 	Labels() []string
+	// LabelMatch is "all" (a runner needs every label) or "any" (one is enough).
+	LabelMatch() string
 	Preset() string
 	Model() string
 	RunTimeout() time.Duration
@@ -58,7 +60,7 @@ func (c *Crew) runnerLoop(ctx context.Context, task *store.Task, a *store.Agent,
 
 	timeout := runnerTimeout(pool)
 	job, err := c.store.CreateRunnerJob(ctx, store.NewRunnerJob{
-		OrgID: task.OrgID, TaskID: task.ID, AgentRunID: &run.ID, Labels: pool.Labels(),
+		OrgID: task.OrgID, TaskID: task.ID, AgentRunID: &run.ID, Labels: pool.Labels(), LabelMatch: pool.LabelMatch(),
 		Payload: runnerapi.Job{
 			TaskID: task.ID.String(), Title: task.Title, Preset: pool.Preset(), Model: pool.Model(), Prompt: prompt,
 			MCPPath: MCPPathPrefix + token, TimeoutSeconds: int(timeout.Seconds()), AllowWeb: pool.AllowWeb(),
@@ -83,6 +85,9 @@ func runnerTimeout(pool runnerPool) time.Duration {
 
 func runnerLabels(pool runnerPool) string {
 	if l := pool.Labels(); len(l) > 0 {
+		if pool.LabelMatch() == store.LabelMatchAny {
+			return "any of labels: " + strings.Join(l, ", ")
+		}
 		return "labels: " + strings.Join(l, ", ")
 	}
 	return "any runner"

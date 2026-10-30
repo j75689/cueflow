@@ -21,7 +21,9 @@ func init() {
 		Description: "Runs an agent's tasks on a registered Runner (your own machine), using the agent CLI and credentials on that machine. The Runner polls CueFlow for work, so it needs no inbound connection. Add runners under Runners.",
 		Fields: []connector.Field{
 			{Key: "labels", Label: "Runner labels", Type: connector.FieldStringList,
-				Help: "A runner must have every label listed here to take the work, e.g. claude-code. Blank accepts any runner"},
+				Help: "Which runners may take the work, e.g. claude-code. With \"all\", a runner needs every label; with \"any\", one is enough. Blank accepts any runner"},
+			{Key: "label_match", Label: "Match labels", Type: connector.FieldSelect, Options: []string{"all", "any"}, Default: "all",
+				Help: "\"all\": a runner needs every label above. \"any\": a runner with one of them is enough"},
 			{Key: "preset", Label: "Agent", Type: connector.FieldSelect,
 				Options: []string{"claude-code", "codex", "gemini", "opencode", "goose", "custom"}, Default: "claude-code",
 				Help: "Which agent CLI the runner launches. \"custom\" runs whatever the runner maps to it in its own config. The runner's policy can still refuse it"},
@@ -40,6 +42,7 @@ func init() {
 // Pool is a configured runner pool.
 type Pool struct {
 	labels       []string
+	labelMatch   string
 	preset       string
 	model        string
 	timeout      time.Duration
@@ -50,6 +53,7 @@ type Pool struct {
 func New(cfg connector.Config, _ connector.Env) (connector.Instance, error) {
 	p := &Pool{
 		labels:       cfg.StringList("labels"),
+		labelMatch:   "all",
 		preset:       cfg.String("preset"),
 		model:        cfg.String("model"),
 		timeout:      time.Duration(cfg.Int("timeout_minutes", 20)) * time.Minute,
@@ -59,6 +63,9 @@ func New(cfg connector.Config, _ connector.Env) (connector.Instance, error) {
 	if p.preset == "" {
 		p.preset = "claude-code"
 	}
+	if cfg.String("label_match") == "any" {
+		p.labelMatch = "any"
+	}
 	if _, set := cfg["allow_web"]; set {
 		p.allowWeb = cfg.Bool("allow_web")
 	}
@@ -66,6 +73,7 @@ func New(cfg connector.Config, _ connector.Env) (connector.Instance, error) {
 }
 
 func (p *Pool) Labels() []string                { return p.labels }
+func (p *Pool) LabelMatch() string              { return p.labelMatch }
 func (p *Pool) Model() string                   { return p.model }
 func (p *Pool) Preset() string                  { return p.preset }
 func (p *Pool) RunTimeout() time.Duration       { return p.timeout }

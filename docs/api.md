@@ -303,11 +303,12 @@ A schedule creates a new task for an agent on a cron expression (agents with `pl
 A Runner is a machine you own that works agents' tasks: `cueflow runner run` polls CueFlow for jobs (every 20 s by default, each claim answered at once; `poll_interval: 0` in `runner.json` or `CUEFLOW_RUNNER_POLL_INTERVAL=0` long-polls instead)
 (outbound HTTP only), launches the agent CLI locally (Claude Code, Codex, ...) with that machine's own
 credentials, and reports back. Point an agent at runners with a `runner_pool` runtime connector
-(`labels`, `preset`, `model`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`). `model` (also a field of
+(`labels`, `label_match`, `preset`, `model`, `timeout_minutes`, `queue_timeout_minutes`, `allow_web`). `model` (also a field of
 `acp_agent`) is chosen through the agent's ACP `model` session option, by id or display name; the run fails and
 lists the available models if the agent does not offer it. A runner's local `models` map pins its own and wins.
 A runner takes a job only if it
-has every label the connector asks for and serves the job's org. The agent still works through CueFlow's
+has the labels the connector asks for and serves the job's org: every label with `label_match` `all` (the
+default), at least one with `any`; a connector with no labels accepts any runner. The agent still works through CueFlow's
 per-run MCP tools, so review, permissions and "agents never publish" hold. Runners are global (not per org);
 a runner's `org_ids` can restrict it (empty = every org).
 
@@ -326,7 +327,7 @@ set here.
 | POST | `/runners/registrations` | `{labels?, org_ids?, ttl_minutes?}` | → `201 {"token":"cfreg_...","expires_at","url","command"}`. One-time token (default 1 h, max 24 h); `command` is the `cueflow runner register ...` line to run on the machine |
 | PATCH | `/runners/{id}` | `{name?, labels?, org_ids?, is_active?}` | |
 | DELETE | `/runners/{id}` | | Revokes: the token stops working and its running jobs are canceled |
-| GET | `/tasks/{id}/runner-jobs` | | → jobs of the task: `id`, `status` (`queued`, `running`, `canceling`, `done`, `failed`, `canceled`, `expired`), `labels`, `runner_name`, timestamps |
+| GET | `/tasks/{id}/runner-jobs` | | → jobs of the task: `id`, `status` (`queued`, `running`, `canceling`, `done`, `failed`, `canceled`, `expired`), `labels`, `label_match`, `runner_name`, timestamps |
 
 ### Runner protocol (`/api/runner/v1`, protocol 1)
 
