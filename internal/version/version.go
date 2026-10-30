@@ -3,4 +3,4 @@
 package version
 
 // Version is bumped by the release pull request (release-please); see CONTRIBUTING.md.
-const Version = "1.5.2" // x-release-please-version
+const Version = "1.6.0" // x-release-please-version
