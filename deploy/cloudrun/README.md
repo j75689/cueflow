@@ -79,7 +79,9 @@ g iam service-accounts create cueflow-run --display-name "CueFlow runtime"
 g storage buckets create "gs://$BUCKET" --location "$REGION" --uniform-bucket-level-access --public-access-prevention
 g storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SA" --role roles/storage.objectAdmin
 
-# Background work. Keep --max-concurrent-dispatches equal to CUEFLOW_AGENT_CONCURRENCY.
+# Background work. --max-concurrent-dispatches caps how many deliveries run at once (one works up to 8 agent tasks),
+# so it still caps parallelism in the cloud on top of each org's limit (CUEFLOW_AGENT_CONCURRENCY by default).
+# Nothing keeps the two in step: raise it yourself when you raise an org's limit.
 g tasks queues create "$QUEUE" --location "$REGION" --max-concurrent-dispatches 3 --max-attempts 5
 
 # Only what the account needs: enqueue tasks, act as itself for ID tokens, sign media URLs without a key file.

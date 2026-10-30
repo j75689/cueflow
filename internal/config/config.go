@@ -46,7 +46,8 @@ type Config struct {
 	PublishTimeout   time.Duration
 	LogLevel         string
 	DisableScheduler bool
-	// AgentConcurrency is how many agent tasks may run at once.
+	// AgentConcurrency is how many of an org's agent tasks may run at once, across every instance, for an
+	// org that sets no limit of its own.
 	AgentConcurrency int
 	// ContextHandOffAt is how full a run's context (prompt over the model's window) may get before the
 	// run hands off to a fresh one; the task page colours the size from here. Between 0 and 1.

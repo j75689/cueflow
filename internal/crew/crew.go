@@ -35,7 +35,9 @@ type Crew struct {
 	logger  *slog.Logger
 	fetcher *Fetcher
 
-	Concurrency int
+	// OrgConcurrency is how many of an org's tasks the crew works at once, across every instance, for an
+	// org that sets no agent_concurrency of its own (CUEFLOW_AGENT_CONCURRENCY). The web shows it from /meta.
+	OrgConcurrency int
 	// ContextHandOffAt is how full a run's context may get (prompt over the model's window) before it
 	// hands off to a fresh run (CUEFLOW_CONTEXT_HANDOFF); the task page reads it from /meta.
 	ContextHandOffAt float64
@@ -79,7 +81,7 @@ type Crew struct {
 
 func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
-		fetcher: NewFetcher(allowPrivateFetch), Concurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
+		fetcher: NewFetcher(allowPrivateFetch), OrgConcurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
 		Lease: 2 * time.Minute, Every: 2 * time.Second, DeliveryLimit: 30 * time.Minute,
 		DetachedWriteTimeout: DefaultDetachedWriteTimeout, running: map[uuid.UUID]*runSlot{}, wake: make(chan struct{}, 1)}
 }
@@ -127,15 +129,14 @@ func (c *Crew) Run(ctx context.Context) {
 	}
 }
 
+// claimBatch is the most tasks one claim takes. The real limit is each org's (store.ClaimTodo); the batch
+// keeps one instance from taking a whole backlog in one claim while the others find nothing, and bounds
+// how many runs one queued delivery works at once (HandleCrew waits for its batch before claiming again).
+const claimBatch = 8
+
 func (c *Crew) dispatch(ctx context.Context) {
 	c.recoverExpired(ctx)
-	c.mu.Lock()
-	free := c.Concurrency - len(c.running)
-	c.mu.Unlock()
-	if free <= 0 {
-		return
-	}
-	claims, err := c.store.ClaimTodo(ctx, c.Lease, free)
+	claims, err := c.store.ClaimTodo(ctx, c.Lease, claimBatch, c.OrgConcurrency)
 	if err != nil {
 		if ctx.Err() == nil {
 			c.logger.Error("claim tasks", "err", err)
@@ -164,16 +165,14 @@ func (c *Crew) start(ctx context.Context, cl store.Claim) {
 }
 
 // HandleCrew is the jobs.KindCrew handler: it keeps watching the runs an earlier delivery handed
-// over, claims TODO tasks (as many at once as this process has capacity for) and works them until
+// over, claims TODO tasks (up to claimBatch, within each org's limit) and works them until
 // their runs end or the delivery's time is nearly up (delivery.go), repeating until none are left.
 // Every delivery is idempotent: claiming is atomic, so a duplicate finds nothing to do.
 func (c *Crew) HandleCrew(ctx context.Context) error {
 	start := time.Now()
 	ctx = withDelivery(ctx, start, c.DeliveryLimit)
 	for time.Now().Before(claimUntil(start, c.DeliveryLimit)) && ctx.Err() == nil {
-		c.mu.Lock()
-		free := max(c.Concurrency-len(c.running), 1)
-		c.mu.Unlock()
+		free := claimBatch
 		runs, err := c.store.ClaimHandedOverRuns(ctx, free)
 		if err != nil {
 			return err
@@ -182,7 +181,7 @@ func (c *Crew) HandleCrew(ctx context.Context) error {
 		c.recoverExpired(ctx)
 		var claims []store.Claim
 		if free -= len(runs); free > 0 {
-			if claims, err = c.store.ClaimTodo(ctx, c.Lease, free); err != nil {
+			if claims, err = c.store.ClaimTodo(ctx, c.Lease, free, c.OrgConcurrency); err != nil {
 				return err
 			}
 		}
@@ -266,7 +265,7 @@ func (c *Crew) Sweep(ctx context.Context) error {
 // Intended for tests and one-shot CLI use.
 func (c *Crew) RunPending(ctx context.Context, maxRounds int) {
 	for i := 0; i < maxRounds; i++ {
-		claims, err := c.store.ClaimTodo(ctx, c.Lease, 10)
+		claims, err := c.store.ClaimTodo(ctx, c.Lease, 10, c.OrgConcurrency)
 		if err != nil || len(claims) == 0 {
 			return
 		}

@@ -34,9 +34,11 @@ first one is the default org.
 (`POST /agents/template?org=...`).
 
 ### `PATCH /api/v1/orgs/{id}`
-`{"name":"...","slug":"...","notifier_id":"uuid"}`, every field optional. `notifier_id` picks the notifier
-connector for the org's task alerts (`400` if the connector is not a notifier); `""` turns alerts off. Orgs
-carry `notifier_id` (or `null`) in every response.
+`{"name":"...","slug":"...","notifier_id":"uuid","agent_concurrency":3}`, every field optional. `notifier_id` picks the notifier
+connector for the org's task alerts (`400` if the connector is not a notifier); `""` turns alerts off.
+`agent_concurrency` (1–64) is how many of the org's tasks agents work at once, across every instance; `null`
+goes back to `CUEFLOW_AGENT_CONCURRENCY` (`agent_concurrency` in `/meta`). Orgs carry `notifier_id` and
+`agent_concurrency` (or `null`) in every response.
 
 ### `DELETE /api/v1/orgs/{id}`
 `204`. Only an empty org (no agents, tasks, schedules or deliverables) can be deleted, and never the last
@@ -214,10 +216,12 @@ own host), `runner_pool` (a registered [Runner](#runners) launches it) or `exter
 "agent_roles":["manager","researcher","writer","editor","custom"],
 "task_statuses":["BACKLOG","TODO","IN_PROGRESS","BLOCKED","WAITING_HUMAN","REVIEW","DONE","CANCELED"],
 "task_priorities":["low","normal","high","urgent"],
-"context_handoff_at":0.8
+"context_handoff_at":0.8,
+"agent_concurrency":3
 ```
 `context_handoff_at` is how full a run's context may get before it hands off to a fresh run
 (`CUEFLOW_CONTEXT_HANDOFF`, 0.8 by default); the task page colours a run's context size from there.
+`agent_concurrency` is the parallel tasks of an org that sets none (`CUEFLOW_AGENT_CONCURRENCY`).
 Capabilities come from the core (`research`, `delegation`, `planning`, `memory`) and the mounted modules
 (`sources`, `post_deliverables`, `imaging`, `deliverables`). Every agent always has `add_comment`, `ask_human`,
 `complete_task`. No capability can publish or act: everything an agent produces waits for a human under Deliverables.

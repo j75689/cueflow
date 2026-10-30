@@ -61,7 +61,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `CUEFLOW_AGENT_CONCURRENCY` | `3` | 同時執行的 agent 任務數 |
+| `CUEFLOW_AGENT_CONCURRENCY` | `3` | 每個 org 同時執行的 agent 任務數預設值，跨所有 instance 合計；org 可以在「Manage orgs」設定自己的值（1–64）。不是每個 process 的上限。external（self-driven）agent 的任務不計入 |
 | `CUEFLOW_CONTEXT_HANDOFF` | `0.8` | run 的 context（最新一次 prompt 占模型上限的比例）到多滿時交接給新的 run；任務頁從這個比例起會變色顯示。須為 0 到 1 之間的數字，其他值會沿用 0.8，並在啟動時記一筆警告 |
 | `CUEFLOW_MODULES` | `content,deliverables` | 要掛載的功能模組，逗號分隔（`all`、`none`，或 `content`、`deliverables` 任意組合；`content` 需要 `deliverables`）。沒掛載的模組沒有路由、agent 工具、worker 與 cron；資料表保留，儀表板會隱藏它的頁面（`/meta` 會列出掛載了哪些） |
 | `CUEFLOW_AGENT_ALLOW_PRIVATE_URLS` | `false` | 允許 agent 的 `read_url` 存取內網與 loopback 位址 |

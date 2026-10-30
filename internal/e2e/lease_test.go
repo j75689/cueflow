@@ -23,7 +23,7 @@ import (
 // claim claims the TODO tasks and returns task's claim.
 func claim(t *testing.T, e *env, task store.Task) store.Claim {
 	t.Helper()
-	claims, err := e.store.ClaimTodo(context.Background(), time.Minute, 10)
+	claims, err := e.store.ClaimTodo(context.Background(), time.Minute, 10, 3)
 	if err != nil {
 		t.Fatal(err)
 	}

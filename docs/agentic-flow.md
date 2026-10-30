@@ -264,7 +264,7 @@ sequenceDiagram
 
 Rules:
 
-- A subtask is `TODO` and assigned the moment it is created, and the runner claims it immediately; up to 3 tasks run in parallel (`CUEFLOW_AGENT_CONCURRENCY`).
+- A subtask is `TODO` and assigned the moment it is created, and the runner claims it immediately; up to 3 of an org's tasks run in parallel, counted across every instance (the org's own limit, or `CUEFLOW_AGENT_CONCURRENCY`).
 - After the parent calls `wait_for_subtasks` it is `BLOCKED`. Whenever any subtask enters `DONE` / `REVIEW` / `CANCELED` (whether an agent finished it or a human dragged it on the board), the system checks whether all subtasks are finished; if so, it posts a summary of the subtask results to the parent's thread and moves the parent back to `TODO`.
 - If a subtask is stuck in `WAITING_HUMAN` (e.g. the researcher has a question), the parent stays `BLOCKED` until a human deals with it.
 - Delegation is at most 3 levels deep (root task → subtask → sub-subtask); a sub-subtask cannot delegate further.
@@ -319,7 +319,7 @@ target each time.
 | One task file | 8 MB | `store/task_files.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
-| Parallel tasks | 3 (`CUEFLOW_AGENT_CONCURRENCY`) | `config` |
+| Parallel tasks | 3 per org, across every instance (the org's `agent_concurrency`, 1–64, set under Manage orgs; `CUEFLOW_AGENT_CONCURRENCY` when unset). Tasks of external (self-driven) agents don't count | `store.ClaimTodo`, `config` |
 | One model call | 10 minutes; every LLM connector streams the answer, so a long one isn't cut off by the timeout other connector requests have (`CUEFLOW_CONNECTOR_HTTP_TIMEOUT`, default 90s), nor by a proxy's idle timeout. Claude connectors wait up to 2 minutes for the answer to start and try again when a stream breaks off or reports an overload; an OpenAI-compatible server that doesn't stream is read the old way, within the 10 minutes | `llm/llm.go`, `connectors/anthropic`, `connectors/openai` |
 | Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN`. Each claim mints the id of the run that works it (`tasks.run_id`), and a run renews and finishes the task only under its own claim: a run that stalled past its lease while the task was claimed again stops at its next tool call or heartbeat, whichever comes first (a tool call is refused before it runs), and leaves the task to the new run | `crew/crew.go`, `store.Claim` |
 | `read_url` | http(s) only; blocks loopback / private / link-local / CGNAT / multicast at dial time; at most 5 redirects; 2 MB, 8,000 characters, 30 seconds; bypasses the system proxy (`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` relaxes this) | `crew/fetch.go` |

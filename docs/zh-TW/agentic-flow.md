@@ -232,7 +232,7 @@ sequenceDiagram
 
 規則：
 
-- 子任務一建立就是 `TODO` 並已指派，runner 會立即認領，同時最多 3 個任務並行（`CUEFLOW_AGENT_CONCURRENCY`）。
+- 子任務一建立就是 `TODO` 並已指派，runner 會立即認領，每個 org 同時最多 3 個任務並行，跨所有 instance 合計（org 自己的上限，未設定時用 `CUEFLOW_AGENT_CONCURRENCY`）。
 - 父任務呼叫 `wait_for_subtasks` 後進入 `BLOCKED`。之後只要任一子任務進入 `DONE` / `REVIEW` / `CANCELED`（不論是 agent 完成還是人在看板上拖的），系統就會檢查是否所有子任務都已結束；是的話，把子任務結果摘要寫進父任務對話串，並將父任務移回 `TODO`。
 - 子任務若卡在 `WAITING_HUMAN`（例如 Researcher 有問題要問），父任務會一直保持 `BLOCKED`，直到人處理完。
 - 委派最多 3 層（根任務 → 子任務 → 孫任務），孫任務不能再往下委派。
@@ -284,7 +284,7 @@ sequenceDiagram
 | 單一任務檔案 | 8 MB | `store/task_files.go` |
 | 帶入的記憶 | 最近 30 筆，單筆 2,000 字 | `crew/crew.go`、`store/agents.go` |
 | 排程頻率 | ≥ 5 分鐘 | `scheduler.ValidateSchedule` |
-| 並行任務 | 3（`CUEFLOW_AGENT_CONCURRENCY`） | `config` |
+| 並行任務 | 每個 org 3 個，跨所有 instance 合計（org 的 `agent_concurrency`，1–64，在「Manage orgs」設定；未設定時用 `CUEFLOW_AGENT_CONCURRENCY`）。external（self-driven）agent 的任務不計入 | `store.ClaimTodo`、`config` |
 | 單次模型呼叫 | 10 分鐘；所有 LLM connector 都以串流接收回覆，長回覆不會被其他 connector 請求適用的逾時（`CUEFLOW_CONNECTOR_HTTP_TIMEOUT`，預設 90s）切斷，也不會被 proxy 的閒置逾時切斷。Claude connector 最多等 2 分鐘開始回應，串流中斷或回報過載時會重試；不支援串流的 OpenAI 相容伺服器照舊一次讀取，同樣以 10 分鐘為限 | `llm/llm.go`、`connectors/anthropic`、`connectors/openai` |
 | 執行租約 | 2 分鐘，每 40 秒續約；過期 → `WAITING_HUMAN`。每次認領都會產生負責該次的執行 id（`tasks.run_id`），執行只在自己那次認領下續約、結束任務：若某次執行卡住超過租約、任務又被重新認領，它會在下一次呼叫工具或心跳時停下（看哪個先到；該次工具呼叫在執行前就被拒絕），把任務留給新的執行 | `crew/crew.go`、`store.Claim` |
 | `read_url` | 只允許 http(s)；連線時擋 loopback / 私有 / link-local / CGNAT / multicast；最多 5 次重新導向；2 MB、8,000 字、30 秒；不走系統 proxy（`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` 可放寬） | `crew/fetch.go` |

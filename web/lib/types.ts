@@ -74,6 +74,8 @@ export interface Org {
   slug: string;
   /** The notifier connector the org's task alerts go to; null sends none. */
   notifier_id: string | null;
+  /** How many of the org's tasks agents work at once, across every instance; null uses Meta.agent_concurrency. */
+  agent_concurrency: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -132,6 +134,8 @@ export interface Meta {
   agent_roles?: AgentRole[];
   /** How full a run's context (prompt over the model's window) may get before it hands off (CUEFLOW_CONTEXT_HANDOFF). */
   context_handoff_at?: number;
+  /** The parallel tasks of an org that sets no agent_concurrency (CUEFLOW_AGENT_CONCURRENCY). */
+  agent_concurrency?: number;
   task_statuses?: TaskStatus[];
   task_priorities?: TaskPriority[];
 }

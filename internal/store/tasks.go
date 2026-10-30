@@ -544,25 +544,73 @@ type Claim struct {
 	RunID uuid.UUID
 }
 
-// ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS.
-func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit int) ([]Claim, error) {
+// orgClaimLockSpace is the first key of ClaimTodo's per-org advisory locks; the second is the org's.
+const orgClaimLockSpace = 0x6f7267 // "org"
+
+// crewRun picks the tasks the built-in crew works (t, joined to their agent a): every runtime but an
+// external agent, which drives itself.
+const crewRun = `JOIN agents a ON a.id = t.assignee_agent_id
+	LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id`
+const crewRunWhere = `COALESCE(rc.type, '') <> 'external'`
+
+// ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS. Each org
+// gets no more than its agent_concurrency (orgDefault when unset) minus the tasks the crew already works
+// for it, counted across every instance. Claimers take a transaction advisory lock per org they claim
+// for (in key order, so they never deadlock) and count after taking it, so two instances never claim
+// past an org's limit together: the second waits for the first to commit and then sees its claims. An
+// advisory lock, not the org's row, so creating a task (which bumps the org's task number) never waits
+// on a claim.
+func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDefault int) ([]Claim, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1),
-		attempts = attempts + 1, run_id = gen_random_uuid(),
-		started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
-		WHERE id IN (
-			SELECT t.id FROM tasks t JOIN agents a ON a.id=t.assignee_agent_id AND a.is_active
-			LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id
-			WHERE t.status='TODO' AND COALESCE(rc.type,'') <> 'external'
-			ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.updated_at
-			LIMIT $2 FOR UPDATE OF t SKIP LOCKED)
-		RETURNING id, run_id`, lease.Seconds(), limit)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Claim])
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT t.org_id FROM tasks t `+crewRun+`
+		WHERE t.status='TODO' AND a.is_active AND `+crewRunWhere)
+	if err != nil {
+		return nil, err
+	}
+	orgs, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil || len(orgs) == 0 {
+		return nil, err
+	}
+	// Two orgs whose ids hash alike share a lock, which only makes their claimers take turns.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, k) FROM (
+			SELECT DISTINCT hashtext(id::text) AS k FROM unnest($2::uuid[]) AS id ORDER BY k) keys`,
+		orgClaimLockSpace, orgs); err != nil {
+		return nil, err
+	}
+	// A task an inactive agent still works holds its slot until the run ends, so running counts every agent.
+	rows, err = tx.Query(ctx, `WITH room AS (
+			SELECT o.id AS org_id, COALESCE(o.agent_concurrency, $4) - (
+				SELECT count(*) FROM tasks t `+crewRun+` WHERE t.org_id = o.id AND t.status='IN_PROGRESS' AND `+crewRunWhere+`) AS free
+			FROM orgs o WHERE o.id = ANY($3)
+		), todo AS (
+			SELECT t.id, t.org_id, t.updated_at,
+				CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END AS prio
+			FROM tasks t `+crewRun+` WHERE t.org_id = ANY($3) AND t.status='TODO' AND a.is_active AND `+crewRunWhere+`
+		), ranked AS (
+			SELECT todo.*, row_number() OVER (PARTITION BY org_id ORDER BY prio, updated_at) AS n FROM todo
+		), picked AS (
+			SELECT r.id FROM ranked r JOIN room USING (org_id) WHERE r.n <= room.free ORDER BY r.prio, r.updated_at LIMIT $2
+		)
+		UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1),
+			attempts = attempts + 1, run_id = gen_random_uuid(),
+			started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
+		WHERE id IN (SELECT id FROM picked) AND status='TODO'
+		RETURNING id, run_id`, lease.Seconds(), limit, orgs, orgDefault)
+	if err != nil {
+		return nil, err
+	}
+	claims, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Claim])
+	if err != nil {
+		return nil, err
+	}
+	return claims, tx.Commit(ctx)
 }
 
 // ExtendTaskLease keeps a running task reserved for the claim's run. It reports false when the
