@@ -42,7 +42,8 @@ claude mcp add --transport http cueflow http://localhost:3000/mcp \
    cueflow runner register --url http://localhost:3000 --token cfreg_... --name mbp
    cueflow runner run
    ```
-3. 在 **Connectors** 新增 **Runner pool**（標籤 `claude-code`），再把它選為 agent 的 *Runtime*。
+3. 在 **Connectors** 新增 **Runner pool**（標籤 `claude-code`），再把它選為 agent 的 *Runtime*。有多個標籤時，
+   *Match labels* 決定 Runner 要全部都有（`all`，預設）還是有其中一個就好（`any`）。
 
 本機政策優先：Runner 自己的 `runner.json` 只能縮小伺服器的要求（允許的 preset、禁用網路、要執行的指令、ACP 登入方式），`cueflow runner status` 可檢查連線，在後台撤銷 Runner 會立即讓它停止。CueFlow 放在 Cloudflare Access 後面時，註冊時帶上 service token 的 header（`register --header 'CF-Access-Client-Id: ...'`），之後每個請求都會帶上，而且不會交給 agent。細節與範例見 [api.md](../api.md#runners)（英文）。
 

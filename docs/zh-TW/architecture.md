@@ -125,7 +125,7 @@ Agent 的 runtime 決定誰來執行它的任務。不論哪一種，工具伺�
 
 **Runner。** `runner_pool` 的 agent 照常由 crew 認領任務、註冊 per-run MCP 工具伺服器，並寫入一筆 `runner_jobs`（標籤、
 prompt、工具伺服器路徑）。Runner 對 `/api/runner/v1/jobs/claim` 做 long-poll；認領使用 `FOR UPDATE SKIP LOCKED`，並比對標籤
-（`job.labels <@ runner.labels`）與 org。Runner 在本機啟動 agent，agent 直接呼叫 CueFlow 的 MCP 工具，Runner 回傳對話事件並送心跳
+（`job.labels <@ runner.labels`；pool 的 `label_match` 為 `any` 時改用 `job.labels && runner.labels`）與 org。Runner 在本機啟動 agent，agent 直接呼叫 CueFlow 的 MCP 工具，Runner 回傳對話事件並送心跳
 （2 分鐘 lease）。當終止型工具（`complete_task`、`ask_human`⋯）結束任務，伺服器把 job 改為 `canceling`；Runner 下一次心跳得知後
 停止 agent、回報最後的對話並完成 job。超過 `queue_timeout_minutes` 沒人認領，或 Runner 停止心跳，任務會失敗。
 Runner 與 agent token 只儲存 SHA-256。

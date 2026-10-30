@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/runnerapi"
@@ -156,6 +158,84 @@ func TestRunnerJobMatching(t *testing.T) {
 	if j2, _ := e.store.ClaimRunnerJob(ctx, full); j2 != nil {
 		t.Fatal("a claimed job must not be handed out twice")
 	}
+}
+
+// A job from a pool that matches "any" label goes to a runner with one label in common; "all" still needs
+// every label; a job with no labels goes to any runner either way; a job created without saying matches all.
+func TestRunnerJobLabelMatch(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	org, _ := e.store.DefaultOrg(ctx)
+	var agent store.Agent
+	e.do("POST", "/agents", map[string]any{"name": "A", "slug": "a", "capabilities": []string{"post_deliverables"}}, &agent)
+	var task store.Task
+	e.do("POST", "/tasks", map[string]any{"title": "T", "assignee_agent_id": agent.ID}, &task)
+	reg := func(labels ...string) *store.Runner {
+		tok, _, err := e.store.CreateRegistration(ctx, labels, nil, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, _, err := e.store.RegisterRunner(ctx, tok, "r", "t", "p", nil, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	job := func(match string, labels ...string) *store.RunnerJob {
+		j, err := e.store.CreateRunnerJob(ctx, store.NewRunnerJob{OrgID: org.ID, TaskID: task.ID, Labels: labels, LabelMatch: match, Payload: map[string]any{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	claims := func(r *store.Runner, want *store.RunnerJob) {
+		t.Helper()
+		got, err := e.store.ClaimRunnerJob(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case want == nil && got != nil:
+			t.Fatalf("runner %v claimed job %v %v, want none", r.Labels, got.LabelMatch, got.Labels)
+		case want != nil && (got == nil || got.ID != want.ID):
+			t.Fatalf("runner %v claimed %+v, want the %s %v job", r.Labels, got, want.LabelMatch, want.Labels)
+		}
+	}
+	mac, linux := reg("claude-code", "mac"), reg("linux")
+
+	if j := job("", "gpu"); j.LabelMatch != store.LabelMatchAll {
+		t.Fatalf("a job created without label_match has %q, want all", j.LabelMatch)
+	} else if _, err := e.pool.Exec(ctx, `UPDATE runner_jobs SET status='canceled' WHERE id=$1`, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.CreateRunnerJob(ctx, store.NewRunnerJob{OrgID: org.ID, TaskID: task.ID, LabelMatch: "some", Payload: map[string]any{}}); err == nil {
+		t.Fatal("an unknown label_match must be refused")
+	}
+
+	anyJob := job(store.LabelMatchAny, "mac", "windows")
+	claims(linux, nil) // no label in common
+	claims(mac, anyJob)
+
+	allJob := job(store.LabelMatchAll, "mac", "windows")
+	claims(mac, nil) // has mac, not windows
+	both := reg("mac", "windows", "extra")
+	claims(both, allJob)
+
+	for _, m := range []string{store.LabelMatchAll, store.LabelMatchAny} {
+		open := job(m)
+		claims(linux, open)
+	}
+
+	// A row written without label_match (a job queued before the column) matches all.
+	var old uuid.UUID
+	if err := e.pool.QueryRow(ctx, `INSERT INTO runner_jobs (org_id, task_id, labels, payload)
+		VALUES ($1,$2,$3,'{}') RETURNING id`, org.ID, task.ID, []string{"mac", "windows"}).Scan(&old); err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := e.store.GetRunnerJob(ctx, old); j == nil || j.LabelMatch != store.LabelMatchAll {
+		t.Fatalf("an existing job: %+v, want label_match all", j)
+	}
+	claims(mac, nil)
 }
 
 // Behind an access proxy (Cloudflare Access) that turns away requests without its service token, a runner

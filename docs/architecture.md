@@ -126,7 +126,7 @@ review, permissions and "agents never publish" do not depend on the runtime.
 
 **Runners.** For a `runner_pool` agent the crew claims the task as usual, registers the per-run MCP tool server, and
 inserts a `runner_jobs` row (labels, prompt, the tool server's path). A runner polls `/api/runner/v1/jobs/claim` (every 20 s, answered at once: a request held open is what Cloud Run bills, so a long-polling runner kept the service billed all day);
-the claim is `FOR UPDATE SKIP LOCKED` and matches labels (`job.labels <@ runner.labels`) and org. The runner launches the
+the claim is `FOR UPDATE SKIP LOCKED` and matches labels (`job.labels <@ runner.labels`, or `job.labels && runner.labels` for a pool whose `label_match` is `any`) and org. The runner launches the
 agent locally, the agent calls CueFlow's MCP tools directly, and the runner streams thread events and heartbeats (a
 2-minute lease). When a terminal tool (`complete_task`, `ask_human`...) ends the task the server moves the job to
 `canceling`; the runner's next heartbeat tells it to stop, it reports the tail of the conversation and completes the job.
