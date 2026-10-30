@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,15 +23,21 @@ type Org struct {
 	Slug string    `json:"slug"`
 	// NotifierID is the notifier connector the org's task alerts go to; nil sends none.
 	NotifierID *uuid.UUID `json:"notifier_id"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// AgentConcurrency is how many of the org's tasks the built-in crew works at once, counted across
+	// every instance; nil uses CUEFLOW_AGENT_CONCURRENCY.
+	AgentConcurrency *int      `json:"agent_concurrency"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-const orgColumns = `id, name, slug, notifier_id, created_at, updated_at`
+// MaxOrgAgentConcurrency is the highest agent_concurrency an org may set.
+const MaxOrgAgentConcurrency = 64
+
+const orgColumns = `id, name, slug, notifier_id, agent_concurrency, created_at, updated_at`
 
 func scanOrg(row pgx.Row) (*Org, error) {
 	var o Org
-	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.NotifierID, &o.CreatedAt, &o.UpdatedAt)
+	err := row.Scan(&o.ID, &o.Name, &o.Slug, &o.NotifierID, &o.AgentConcurrency, &o.CreatedAt, &o.UpdatedAt)
 	return &o, err
 }
 
@@ -131,8 +138,11 @@ func (s *Store) UpdateOrg(ctx context.Context, o *Org) (*Org, error) {
 			return nil, Invalid("the connector is not a notifier")
 		}
 	}
-	out, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET name=$2, slug=$3, notifier_id=$4, updated_at=NOW() WHERE id=$1 RETURNING `+orgColumns,
-		o.ID, truncate(o.Name, 64), o.Slug, o.NotifierID))
+	if c := o.AgentConcurrency; c != nil && (*c < 1 || *c > MaxOrgAgentConcurrency) {
+		return nil, Invalid(fmt.Sprintf("agent_concurrency must be between 1 and %d", MaxOrgAgentConcurrency))
+	}
+	out, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET name=$2, slug=$3, notifier_id=$4, agent_concurrency=$5, updated_at=NOW()
+		WHERE id=$1 RETURNING `+orgColumns, o.ID, truncate(o.Name, 64), o.Slug, o.NotifierID, o.AgentConcurrency))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}

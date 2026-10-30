@@ -5,11 +5,13 @@ import { api, errorMessage, setApiOrg } from "@/lib/api";
 import type { Connector, Org } from "@/lib/types";
 import { useDialog } from "./dialog";
 import { Popover } from "./popover";
-import { useServerEvent, useToast } from "./providers";
+import { useMeta, useServerEvent, useToast } from "./providers";
 import { Select } from "./select";
 import { Button, Checkbox, Field, Icon, Input, Modal, cx } from "./ui";
 
 const ORG_KEY = "cueflow.org";
+/** The highest agent_concurrency the server accepts (store.MaxOrgAgentConcurrency). */
+const MAX_AGENT_CONCURRENCY = 64;
 
 interface OrgState {
   orgs: Org[];
@@ -174,6 +176,7 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [seed, setSeed] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notifiers, setNotifiers] = useState<Connector[] | null>(null);
+  const { meta } = useMeta();
 
   useEffect(() => {
     if (!open) return;
@@ -183,6 +186,15 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
   const setNotifier = async (o: Org, id: string) => {
     try {
       await api.updateOrg(o.id, { notifier_id: id });
+      await reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
+  const setConcurrency = async (o: Org, n: number | null) => {
+    try {
+      await api.updateOrg(o.id, { agent_concurrency: n });
       await reload();
     } catch (e) {
       toast.error(e);
@@ -263,6 +275,15 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
                   </Button>
                 )}
               </div>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-xs text-fg-3">Parallel tasks</span>
+                <ConcurrencyInput
+                  key={`${o.id}:${o.agent_concurrency ?? ""}`}
+                  org={o}
+                  fallback={meta?.agent_concurrency}
+                  onSave={(n) => void setConcurrency(o, n)}
+                />
+              </div>
               {!!notifiers?.length && (
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 text-xs text-fg-3">Alerts</span>
@@ -303,5 +324,54 @@ function OrgManager({ open, onClose }: { open: boolean; onClose: () => void }) {
         </form>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * ConcurrencyInput edits how many of an org's tasks agents work at once, across every server instance.
+ * Blank goes back to the server's default (CUEFLOW_AGENT_CONCURRENCY), which the placeholder shows.
+ */
+function ConcurrencyInput({
+  org,
+  fallback,
+  onSave,
+}: {
+  org: Org;
+  fallback?: number;
+  onSave: (n: number | null) => void;
+}) {
+  const [value, setValue] = useState(org.agent_concurrency?.toString() ?? "");
+  const revert = () => setValue(org.agent_concurrency?.toString() ?? "");
+  const save = (input: HTMLInputElement) => {
+    // A partial number ("-", "1e") reads as "": revert instead of clearing the limit.
+    if (input.validity.badInput) {
+      revert();
+      return;
+    }
+    const text = value.trim();
+    const n = text === "" ? null : Number(text);
+    if (n === org.agent_concurrency) return;
+    if (n !== null && (!Number.isInteger(n) || n < 1 || n > MAX_AGENT_CONCURRENCY)) {
+      revert();
+      return;
+    }
+    onSave(n);
+  };
+  return (
+    <Input
+      type="number"
+      min={1}
+      max={MAX_AGENT_CONCURRENCY}
+      step={1}
+      className="w-28"
+      value={value}
+      placeholder={fallback ? `default ${fallback}` : "default"}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={(e) => save(e.currentTarget)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      aria-label={`Parallel tasks for ${org.name}`}
+    />
   );
 }

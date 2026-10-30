@@ -225,7 +225,7 @@ func serve() error {
 	}
 
 	team := crew.New(st, h, broker, logger, cfg.AgentAllowPrivateURLs)
-	team.Concurrency = cfg.AgentConcurrency
+	team.OrgConcurrency = cfg.AgentConcurrency
 	team.ContextHandOffAt = cfg.ContextHandOffAt
 	team.MCPBaseURL = localBaseURL(cfg.Addr)
 	team.PublicURL = cfg.PublicURL

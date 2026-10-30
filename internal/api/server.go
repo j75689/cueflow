@@ -274,6 +274,8 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		// How full a run's context may get before it hands off (CUEFLOW_CONTEXT_HANDOFF); the task page
 		// colours the size from here.
 		out["context_handoff_at"] = s.Crew.ContextHandOffAt
+		// The agent_concurrency of an org that sets none (CUEFLOW_AGENT_CONCURRENCY); the org page shows it.
+		out["agent_concurrency"] = s.Crew.OrgConcurrency
 	}
 	for _, m := range s.Modules {
 		if p, ok := m.(MetaProvider); ok {

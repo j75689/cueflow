@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -35,6 +36,8 @@ type orgBody struct {
 	Slug *string `json:"slug"`
 	// NotifierID picks the notifier connector for the org's task alerts; "" turns alerts off.
 	NotifierID *string `json:"notifier_id"`
+	// AgentConcurrency sets how many of the org's tasks run at once; null goes back to the default.
+	AgentConcurrency json.RawMessage `json:"agent_concurrency"`
 	// SeedAgents creates the starter Chief agent in a new org.
 	SeedAgents bool `json:"seed_agents"`
 }
@@ -98,6 +101,14 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request) {
 			}
 			cur.NotifierID = &id
 		}
+	}
+	if body.AgentConcurrency != nil {
+		var n *int
+		if err := json.Unmarshal(body.AgentConcurrency, &n); err != nil {
+			s.Fail(w, &store.ValidationError{Msg: "agent_concurrency must be a whole number or null"})
+			return
+		}
+		cur.AgentConcurrency = n
 	}
 	out, err := s.Store.UpdateOrg(r.Context(), cur)
 	if err != nil {
