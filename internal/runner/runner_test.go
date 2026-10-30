@@ -90,6 +90,7 @@ type claims struct {
 	mu   sync.Mutex
 	at   []time.Time
 	wait []*int
+	last runnerapi.ClaimRequest
 }
 
 func (c *claims) server(t *testing.T) *httptest.Server {
@@ -99,6 +100,7 @@ func (c *claims) server(t *testing.T) *httptest.Server {
 		c.mu.Lock()
 		c.at = append(c.at, time.Now())
 		c.wait = append(c.wait, req.Wait)
+		c.last = req
 		c.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -144,5 +146,20 @@ func TestLoopLongPolls(t *testing.T) {
 	defer c.mu.Unlock()
 	if len(c.wait) == 0 || c.wait[0] != nil {
 		t.Fatalf("a long poll must leave wait to the server: %v", c.wait)
+	}
+}
+
+// Every claim reports the runner's build and its concurrency, so the server shows what the machine runs.
+func TestClaimReportsVersionAndConcurrency(t *testing.T) {
+	var c claims
+	every := 1
+	cfg := &Config{URL: c.server(t).URL, Token: "t", Concurrency: 3, PollInterval: &every, Version: "1.5.0"}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Loop(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last.Version != "1.5.0" || c.last.Concurrency != 3 {
+		t.Fatalf("claim reported version %q concurrency %d, want 1.5.0 and 3", c.last.Version, c.last.Concurrency)
 	}
 }

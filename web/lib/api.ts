@@ -241,7 +241,7 @@ export const api = {
     request<RunnerRegistration>("POST", "/runners/registrations", body),
   updateRunner: (
     id: string,
-    body: Partial<Pick<Runner, "name" | "labels" | "org_ids" | "is_active" | "max_concurrency">>,
+    body: Partial<Pick<Runner, "name" | "labels" | "org_ids" | "is_active">>,
   ) => request<Runner>("PATCH", `/runners/${id}`, body),
   deleteRunner: (id: string) => request<void>("DELETE", `/runners/${id}`),
   taskRunnerJobs: (id: string) => request<RunnerJob[]>("GET", `/tasks/${id}/runner-jobs`),

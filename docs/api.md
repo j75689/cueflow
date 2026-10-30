@@ -316,13 +316,15 @@ a runner's `org_ids` can restrict it (empty = every org).
 {"id":"uuid","name":"mbp","labels":["claude-code","mac"],"org_ids":[],"is_active":true,"max_concurrency":1,
  "version":"0.2.0","platform":"darwin/arm64","last_seen_at":"...","created_at":"...","online":true,"running_jobs":0}
 ```
-`online` = polled within the last 90 s.
+`online` = polled within the last 90 s. `version` and `max_concurrency` are what the runner reports with every
+claim (its build, and `concurrency` from `runner.json` or `run --concurrency`, clamped to 1–16); they cannot be
+set here.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | GET | `/runners` | | → `[Runner]` |
 | POST | `/runners/registrations` | `{labels?, org_ids?, ttl_minutes?}` | → `201 {"token":"cfreg_...","expires_at","url","command"}`. One-time token (default 1 h, max 24 h); `command` is the `cueflow runner register ...` line to run on the machine |
-| PATCH | `/runners/{id}` | `{name?, labels?, org_ids?, is_active?, max_concurrency?}` | |
+| PATCH | `/runners/{id}` | `{name?, labels?, org_ids?, is_active?}` | |
 | DELETE | `/runners/{id}` | | Revokes: the token stops working and its running jobs are canceled |
 | GET | `/tasks/{id}/runner-jobs` | | → jobs of the task: `id`, `status` (`queued`, `running`, `canceling`, `done`, `failed`, `canceled`, `expired`), `labels`, `runner_name`, timestamps |
 
@@ -335,7 +337,7 @@ reverse proxy that guards the admin API must let this path through. A runner spe
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/register` | `{token, name, version, platform, labels, concurrency, protocol}` trades a registration token for a runner token (`401` if used/expired). Labels set at registration win; the runner's own are used only when the registration has none |
-| POST | `/jobs/claim` | `{protocol, wait?}`; holds the request up to `wait` seconds (0–25) for work to arrive, 25 when `wait` is absent (the long poll of older runners) → `200 {id, task_id, title, preset, prompt, mcp_path, timeout_seconds, allow_web}` or `204`. `401` once the runner is revoked or disabled. The runner reaches the tool server at its registered URL + `mcp_path` |
+| POST | `/jobs/claim` | `{protocol, wait?, version?, concurrency?}`; stores `version` and `concurrency` on the runner when present (older runners leave them out and keep what is stored); holds the request up to `wait` seconds (0–25) for work to arrive, 25 when `wait` is absent (the long poll of older runners) → `200 {id, task_id, title, preset, prompt, mcp_path, timeout_seconds, allow_web}` or `204`. `401` once the runner is revoked or disabled. The runner reaches the tool server at its registered URL + `mcp_path` |
 | POST | `/jobs/{id}/events` | `{events:[{kind: message\|tool_call\|tool_result\|system, content, data}]}` → thread messages; also extends the lease. → `{"cancel":bool}` |
 | POST | `/jobs/{id}/heartbeat` | Extends the 2-minute lease (send every 30 s) → `{"cancel":bool}`; `cancel` means stop the agent |
 | POST | `/jobs/{id}/complete` | `{stop_reason, final_text, agent_name, tool_calls, input_tokens, output_tokens, error, timed_out, canceled}` → `{"accepted":bool}` |
