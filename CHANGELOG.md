@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/j75689/cueflow/compare/v1.5.1...v1.5.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **web:** edit a runner's labels as chips, like a task's ([#110](https://github.com/j75689/cueflow/issues/110)) ([2f2c01a](https://github.com/j75689/cueflow/commit/2f2c01a77819d7576f991f48ce491761ce43626a))
+
 ## [1.5.1](https://github.com/j75689/cueflow/compare/v1.5.0...v1.5.1) (2026-10-30)
 
 
