@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/j75689/cueflow/compare/v1.5.0...v1.5.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **runner:** let a runner pool match any of its labels ([#108](https://github.com/j75689/cueflow/issues/108)) ([b3d6552](https://github.com/j75689/cueflow/commit/b3d65524e13583fec031719c04eaa492b8594b8e))
+
 ## [1.5.0](https://github.com/j75689/cueflow/compare/v1.4.0...v1.5.0) (2026-10-30)
 
 
