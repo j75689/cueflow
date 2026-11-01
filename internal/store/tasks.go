@@ -456,7 +456,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		}
 		add("assignee_agent_id", *p.AssigneeAgentID)
 		// A new assignee doesn't wait out the old one's backoff, and starts its own count.
-		if !sameID(before.AssigneeAgentID, *p.AssigneeAgentID) {
+		if !SameID(before.AssigneeAgentID, *p.AssigneeAgentID) {
 			resetRecover = true
 		}
 	}
@@ -1190,7 +1190,8 @@ func cleanList(in []string) []string {
 	return out
 }
 
-func sameID(a, b *uuid.UUID) bool {
+// SameID reports whether two optional ids are both unset or equal.
+func SameID(a, b *uuid.UUID) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
