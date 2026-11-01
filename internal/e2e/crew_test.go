@@ -28,6 +28,8 @@ var (
 	// scriptPrompt, when set, is the prompt size (input tokens) the script model reports for a
 	// request; 100 otherwise. The model's window is 1000 (ContextWindow).
 	scriptPrompt func(req llm.Request) int64
+	// scriptErr, when set, fails the calls it returns an error for, before the script sees them.
+	scriptErr func(req llm.Request) error
 )
 
 func (scriptLLM) Model() string { return "script" }
@@ -42,8 +44,13 @@ func (scriptLLM) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		panic("agent LLM calls must carry the agent marker")
 	}
 	scriptMu.Lock()
-	f, t := script, scriptT
+	f, t, fail := script, scriptT, scriptErr
 	scriptMu.Unlock()
+	if fail != nil {
+		if err := fail(req); err != nil {
+			return nil, err
+		}
+	}
 	msg := f(t, req)
 	msg.Role = llm.RoleAssistant
 	stop := "end"

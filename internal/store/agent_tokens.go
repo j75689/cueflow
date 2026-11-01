@@ -90,7 +90,7 @@ func (s *Store) AgentByToken(ctx context.Context, plain string) (*Agent, error) 
 // nil when there is nothing to claim, else the task and the id its run is to have (see Claim).
 func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID *uuid.UUID, lease time.Duration) (*Task, uuid.UUID, error) {
 	var id, runID uuid.UUID
-	err := s.pool.QueryRow(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $3),
+	err := s.pool.QueryRow(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $3), retry_at = NULL,
 		attempts = attempts + 1, run_id = gen_random_uuid(), started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
 		WHERE id = (
 			SELECT t.id FROM tasks t WHERE t.status='TODO' AND t.assignee_agent_id=$1 AND ($2::uuid IS NULL OR t.id=$2)

@@ -130,19 +130,19 @@ func (c *Crew) waitRunnerJob(ctx context.Context, run *store.AgentRun, env *runE
 		}
 		cur, err := c.store.GetRunnerJob(ctx, job.ID)
 		if err != nil {
-			return &outcome{kind: "error", text: "runner job lost: " + err.Error()}
+			return &outcome{kind: "error", text: "runner job lost: " + err.Error(), retry: true}
 		}
 		now := time.Now()
 		switch cur.Status {
 		case store.JobQueued:
 			if now.After(queueDeadline) {
 				_, _ = c.store.EndRunnerJob(ctx, job.ID, store.JobExpired, nil)
-				return &outcome{kind: "error", text: fmt.Sprintf("no runner picked up the work within %s (%s)", pool.QueueTimeout(), runnerLabels(pool))}
+				return &outcome{kind: "error", text: fmt.Sprintf("no runner picked up the work within %s (%s)", pool.QueueTimeout(), runnerLabels(pool)), retry: true}
 			}
 		case store.JobRunning:
 			if cur.LeaseUntil != nil && now.After(*cur.LeaseUntil) || now.After(deadline) {
 				_, _ = c.store.EndRunnerJob(ctx, job.ID, store.JobExpired, nil)
-				return &outcome{kind: "error", text: fmt.Sprintf("runner %q stopped responding", cur.RunnerName)}
+				return &outcome{kind: "error", text: fmt.Sprintf("runner %q stopped responding", cur.RunnerName), retry: true}
 			}
 		case store.JobCanceling:
 			// Only we set this; the runner is winding down.

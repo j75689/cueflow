@@ -37,7 +37,7 @@ func stopped(ctx context.Context) *outcome {
 	if errors.Is(context.Cause(ctx), errStopped) {
 		return &outcome{kind: "canceled"}
 	}
-	return &outcome{kind: "interrupted"}
+	return &outcome{kind: "interrupted", retry: true}
 }
 
 type deliveryKey struct{}
@@ -202,7 +202,7 @@ func (c *Crew) continueRun(ctx context.Context, task *store.Task, run *store.Age
 	if run == nil {
 		return false, why + ". Reply or press Run to continue."
 	}
-	n, err := c.streak(ctx, task, run, outcomeContinued)
+	n, err := c.streak(ctx, task, run, outcomeContinued, nil, outcomeRecovered) // a retry in between doesn't end it
 	if err != nil {
 		c.logger.Warn("count continued runs; waiting for the human", "task", task.ID, "err", err)
 		return false, why + ". Reply or press Run to continue."

@@ -61,6 +61,7 @@ type agentBody struct {
 	Platforms          *[]string    `json:"platforms"`
 	MaxTurns           *int         `json:"max_turns"`
 	AutoHandOff        *bool        `json:"auto_handoff"`
+	AutoRecover        *int         `json:"auto_recover"`
 	IsActive           *bool        `json:"is_active"`
 }
 
@@ -91,6 +92,9 @@ func (b *agentBody) apply(a *store.Agent) {
 	}
 	if b.AutoHandOff != nil {
 		a.AutoHandOff = *b.AutoHandOff
+	}
+	if b.AutoRecover != nil {
+		a.AutoRecover = *b.AutoRecover
 	}
 	if b.IsActive != nil {
 		a.IsActive = *b.IsActive

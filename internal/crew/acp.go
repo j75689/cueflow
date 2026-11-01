@@ -125,7 +125,7 @@ func (c *Crew) acpOutcome(ctx context.Context, run *store.AgentRun, env *runEnv,
 	case res.TimedOut:
 		return &outcome{kind: "error", text: fmt.Sprintf("the external agent did not finish within %s", timeout)}
 	case res.Err != nil:
-		return &outcome{kind: "error", text: res.Err.Error()}
+		return &outcome{kind: "error", text: res.Err.Error(), retry: true}
 	}
 	switch res.StopReason {
 	case acp.StopReasonEndTurn:

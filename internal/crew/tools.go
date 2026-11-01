@@ -31,6 +31,9 @@ type outcome struct {
 	text string
 	// noted is set on a handoff whose note was saved: only then may it continue on its own.
 	noted bool
+	// retry marks a transient failure (error or interrupted): it may start again without a human
+	// (see autoRecover).
+	retry bool
 	// job and token are a handed-over runner run's job and run token, for handOver to stop and revoke
 	// if the run turns out to have lost its claim.
 	job   uuid.UUID

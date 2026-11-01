@@ -91,6 +91,7 @@ func setup(t *testing.T) *env {
 	dmodule.Attach()
 	team := crew.New(st, h, broker, logger, false)
 	team.ValidateSchedule = scheduler.ValidateSchedule
+	team.RecoverBackoff = func(int) time.Duration { return 0 }
 
 	mock := publishermock.New("pub-token")
 	mockSrv := httptest.NewServer(mock.Handler())
