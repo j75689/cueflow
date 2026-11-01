@@ -301,14 +301,21 @@ func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, "DELETE FROM agents WHERE id=$1", id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Its tasks become unassigned (FK ON DELETE SET NULL): like any change of assignee (see
+		// UpdateTask), that ends an auto-recover backoff and starts its count again.
+		if _, err := tx.Exec(ctx, "UPDATE tasks SET retry_at=NULL, recover_reset_at=NOW() WHERE assignee_agent_id=$1", id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, "DELETE FROM agents WHERE id=$1", id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
 }
 
 type AgentMemory struct {

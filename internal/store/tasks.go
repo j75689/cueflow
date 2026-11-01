@@ -417,6 +417,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 	if p.Description != nil {
 		add("description", *p.Description)
 	}
+	resetRecover := false
 	if p.Status != nil {
 		st := *p.Status
 		if !st.Valid() {
@@ -428,7 +429,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		// A human move (or Run now) ends an auto-recover backoff and starts its count again; resending
 		// the current status is not a move.
 		if st != before.Status || p.RunNow {
-			sets = append(sets, "retry_at=NULL", "recover_reset_at=NOW()")
+			resetRecover = true
 		}
 		if st != before.Status {
 			add("status", string(st))
@@ -454,6 +455,13 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 			return nil, nil, err
 		}
 		add("assignee_agent_id", *p.AssigneeAgentID)
+		// A new assignee doesn't wait out the old one's backoff, and starts its own count.
+		if !sameID(before.AssigneeAgentID, *p.AssigneeAgentID) {
+			resetRecover = true
+		}
+	}
+	if resetRecover {
+		sets = append(sets, "retry_at=NULL", "recover_reset_at=NOW()")
 	}
 	if p.DueAt != nil {
 		add("due_at", *p.DueAt)
@@ -1180,4 +1188,11 @@ func cleanList(in []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+func sameID(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

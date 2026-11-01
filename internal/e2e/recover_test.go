@@ -687,3 +687,53 @@ func TestAutoRecoverOffForExternalAgents(t *testing.T) {
 		}
 	}
 }
+
+// A new assignee doesn't wait out the old one's backoff, and starts its own count; so does a task
+// left unassigned by deleting its agent.
+func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, team["writer"], 3)
+	setFail(t, alwaysFail)
+	backingOff := func(task store.Task) bool {
+		t.Helper()
+		var waiting bool
+		if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NOT NULL FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		return waiting
+	}
+
+	reassigned := newTask(t, e, "Reassigned", team["writer"])
+	runAll(e)
+	if !backingOff(reassigned) {
+		t.Fatal("not backing off")
+	}
+	if code := e.do("PATCH", "/tasks/"+reassigned.ID.String(), map[string]any{"assignee_agent_id": team["editor"].ID}, nil); code != 200 {
+		t.Fatalf("reassign: %d", code)
+	}
+	if backingOff(reassigned) {
+		t.Fatal("the new assignee waits out the old backoff")
+	}
+	if reset, err := e.store.RecoverResetAt(ctx, reassigned.ID); err != nil || reset == nil {
+		t.Fatalf("count not reset: %v %v", reset, err)
+	}
+	runAll(e)
+	if got := outcomes(t, e, reassigned); got != "error,retry" {
+		t.Fatalf("runs %s", got)
+	}
+
+	deleted := newTask(t, e, "Deleted", team["writer"])
+	runAll(e)
+	if !backingOff(deleted) {
+		t.Fatal("not backing off")
+	}
+	if code := e.do("DELETE", "/agents/"+team["writer"].ID.String(), nil, nil); code != 204 {
+		t.Fatalf("delete agent: %d", code)
+	}
+	got, err := e.store.GetTask(ctx, deleted.ID)
+	if err != nil || got.AssigneeAgentID != nil || backingOff(deleted) {
+		t.Fatalf("after delete: %+v %v, backing off %v", got, err, backingOff(deleted))
+	}
+}
