@@ -657,6 +657,40 @@ func TestAutoRecoverCommentDuringFailingRun(t *testing.T) {
 	}
 }
 
+// So does a comment left while a run whose lease then lapsed was failing.
+func TestAutoRecoverCommentDuringLapsedRun(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	writer := team["writer"]
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, writer, 3)
+	task := newTask(t, e, "Crashy", writer)
+	runID := uuid.New()
+	if _, err := e.store.StartAgentRun(ctx, runID, task.ID, writer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
+		WHERE id=$1`, task.ID, runID); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "also check X"}, nil); code != 201 {
+		t.Fatalf("comment: %d", code)
+	}
+	if err := e.crew.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var waiting bool
+	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
+		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
+	}
+	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 3: a fresh run starts now") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+}
+
 // An external (self-driven) agent never auto-recovers, so the setting is stored as 0 for it, whether
 // it is created that way or switched to the external runtime, and its template says so.
 func TestAutoRecoverOffForExternalAgents(t *testing.T) {
@@ -688,13 +722,14 @@ func TestAutoRecoverOffForExternalAgents(t *testing.T) {
 	}
 }
 
-// A new assignee doesn't wait out the old one's backoff, and starts its own count; so does a task
-// left unassigned by deleting its agent.
+// A new assignee doesn't wait out the old one's backoff, and starts its own count (resending the same
+// assignee changes nothing); so does a task left unassigned by deleting its agent.
 func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
 	e, team := crewSetup(t)
 	ctx := context.Background()
 	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
 	setAutoRecover(t, e, team["writer"], 3)
+	setAutoRecover(t, e, team["editor"], 1)
 	setFail(t, alwaysFail)
 	backingOff := func(task store.Task) bool {
 		t.Helper()
@@ -710,6 +745,14 @@ func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
 	if !backingOff(reassigned) {
 		t.Fatal("not backing off")
 	}
+	// Resending the same assignee along with an edit changes nothing.
+	if code := e.do("PATCH", "/tasks/"+reassigned.ID.String(), map[string]any{"assignee_agent_id": team["writer"].ID,
+		"title": "Reassigned soon"}, nil); code != 200 {
+		t.Fatalf("edit: %d", code)
+	}
+	if reset, err := e.store.RecoverResetAt(ctx, reassigned.ID); err != nil || reset != nil || !backingOff(reassigned) {
+		t.Fatalf("same assignee: reset %v %v, backing off %v", reset, err, backingOff(reassigned))
+	}
 	if code := e.do("PATCH", "/tasks/"+reassigned.ID.String(), map[string]any{"assignee_agent_id": team["editor"].ID}, nil); code != 200 {
 		t.Fatalf("reassign: %d", code)
 	}
@@ -720,8 +763,11 @@ func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
 		t.Fatalf("count not reset: %v %v", reset, err)
 	}
 	runAll(e)
-	if got := outcomes(t, e, reassigned); got != "error,retry" {
+	if got := outcomes(t, e, reassigned); got != "retry,retry" {
 		t.Fatalf("runs %s", got)
+	}
+	if thread := taskMessages(t, e, reassigned.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 1:") {
+		t.Fatalf("thread:\n%s", thread)
 	}
 
 	deleted := newTask(t, e, "Deleted", team["writer"])
