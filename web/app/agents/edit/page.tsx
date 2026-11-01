@@ -560,20 +560,28 @@ function AgentEditor() {
                   }
                 />
               </Field>
-              <Field
-                label="Auto-recover"
-                help="When a run fails for a transient reason (a connection or provider error, a lost runner, a server restart), start a fresh run on its own after a short wait, up to this many times in a row. 0 = off. Each failure still sends you an alert."
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={form.auto_recover}
-                  onChange={(e) =>
-                    set("auto_recover", Number(e.target.value) || 0)
-                  }
-                />
-              </Field>
+              {selectedRuntimeType !== "external" && (
+                <Field
+                  label="Auto-recover"
+                  help="When a run fails for a transient reason (a connection or provider error, a lost runner, a server restart), start a fresh run on its own after 30s, doubling up to 10 minutes, up to this many times in a row. 0 = off. Each failure still sends you an alert."
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={form.auto_recover}
+                    onChange={(e) =>
+                      set(
+                        "auto_recover",
+                        Math.min(
+                          10,
+                          Math.max(0, Math.trunc(Number(e.target.value) || 0)),
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+              )}
               {!form.runtime_connector_id && (
                 <Field
                   label="Hand-offs"
