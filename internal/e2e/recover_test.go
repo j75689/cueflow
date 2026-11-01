@@ -507,7 +507,7 @@ func TestAutoRecoverLeaseExpired(t *testing.T) {
 	}
 
 	crash()
-	if status(t, e, task) != store.TaskWaitingHuman || !strings.Contains(taskMessages(t, e, task.ID.String()), "Auto-recover gave up after 1 attempts") {
+	if status(t, e, task) != store.TaskWaitingHuman || !strings.Contains(taskMessages(t, e, task.ID.String()), "Auto-recover gave up after 1 attempt in a row") {
 		t.Fatalf("status %s\n%s", status(t, e, task), taskMessages(t, e, task.ID.String()))
 	}
 	if got := subjects(takeAlerts()); got != "🛑 Run failed, auto-recover gave up: Crashy" {
@@ -567,6 +567,48 @@ func TestAutoRecoverSetting(t *testing.T) {
 	for _, ta := range tmpl.Agents {
 		if ta.Slug == "writer" && ta.AutoRecover != 3 {
 			t.Fatalf("template: %+v", ta)
+		}
+	}
+}
+
+// An interrupted run that gives up asks for a reply once: the gave-up note does, the interrupted line
+// doesn't repeat it. Both for a lapsed lease and for a run interrupted in this process.
+func TestAutoRecoverInterruptedGiveUpAsksOnce(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	writer := team["writer"]
+	setAutoRecover(t, e, writer, 1)
+	lapsed := newTask(t, e, "Crashy", writer)
+	for range 2 {
+		runID := uuid.New()
+		if _, err := e.store.StartAgentRun(ctx, runID, lapsed.ID, writer.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
+			WHERE id=$1`, lapsed.ID, runID); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.crew.Sweep(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.crew.RecoverBackoff = func(int) time.Duration { return 0 }
+	shutdown := newTask(t, e, "Shutdown", writer)
+	for range 2 {
+		c, cancel := context.WithCancel(ctx)
+		setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+			cancel()
+			return calls("add_comment", map[string]any{"content": "working"})
+		})
+		e.crew.RunPending(c, 1)
+	}
+
+	for _, task := range []store.Task{lapsed, shutdown} {
+		thread := taskMessages(t, e, task.ID.String())
+		if status(t, e, task) != store.TaskWaitingHuman || strings.Count(thread, "Reply or press Run to continue.") != 1 ||
+			!strings.Contains(thread, "Auto-recover gave up after 1 attempt in a row. Reply or press Run to continue.") {
+			t.Fatalf("%s: status %s\n%s", task.Title, status(t, e, task), thread)
 		}
 	}
 }

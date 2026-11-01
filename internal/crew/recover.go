@@ -54,7 +54,11 @@ func (c *Crew) autoRecover(ctx context.Context, task *store.Task, a *store.Agent
 	}
 	n := a.AutoRecover
 	if k > n {
-		msg := fmt.Sprintf("Auto-recover gave up after %d attempts in a row. Reply or press Run to continue.", n)
+		attempts := "attempts"
+		if n == 1 {
+			attempts = "attempt"
+		}
+		msg := fmt.Sprintf("Auto-recover gave up after %d %s in a row. Reply or press Run to continue.", n, attempts)
 		return recovery{note: msg, kind: "recover_gaveup", alert: msg}
 	}
 	after := c.RecoverBackoff(k)
