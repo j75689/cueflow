@@ -182,15 +182,17 @@ sequenceDiagram
 | 超過 context 上限 | 系統訊息（說明該縮減什麼，或回覆後以新的 run 繼續） | `WAITING_HUMAN` | FAILED |
 | LLM／設定錯誤 | 系統訊息（含錯誤原因） | `WAITING_HUMAN` | FAILED |
 | 被人停止（按 Stop、拖走或改派卡片，在任何 instance 上） | 「Stopped.」 | `WAITING_HUMAN` | CANCELED |
-| 內建 loop 用完一次雲端 delivery 的時間（見下） | 系統訊息 | `TODO`，以新的 run 繼續（連續最多 5 次，之後 `WAITING_HUMAN`） | SUCCEEDED（`continued`） |
+| 內建 loop 用完一次雲端 delivery 的時間（見下） | 系統訊息 | `TODO`，以新的 run 繼續（連續最多 5 次，中間的 Auto-recover 重試略過不算，之後 `WAITING_HUMAN`） | SUCCEEDED（`continued`） |
 | 其他原因結束（伺服器停止、delivery 的請求被切斷） | 系統訊息（說明中斷，可回覆繼續） | `WAITING_HUMAN` | FAILED |
 | 程序重啟、租約過期 | 系統訊息（說明中斷） | `WAITING_HUMAN` | FAILED |
+| 暫時性失敗（LLM 或連線錯誤、runner 遺失或沒人接、runner／ACP 的不明錯誤、中斷、租約過期）且開啟 **Auto-recover**（§6.4） | 原本的系統訊息，再加「Auto-recover k of n: a fresh run starts in …」 | `TODO`，等退避時間過後才可認領 | FAILED（`retry`） |
+| 同上，但已超過 agent 的 Auto-recover 上限 | 原本的系統訊息，再加「Auto-recover gave up after n attempts in a row」 | `WAITING_HUMAN` | FAILED |
 
 **雲端 delivery**（`CUEFLOW_QUEUE=cloudtasks`）：一次執行跑在一個 Cloud Tasks delivery 裡，也就是一個 HTTP 請求，Cloud Tasks 和 Cloud Run 都會在 30 分鐘後切斷它。一個 delivery 只在前 20 分鐘認領新工作。內建 loop 過了 25 分鐘就不再開新回合，改由下一個 delivery 以新的 run 繼續（和一般 run 一樣從 brief 與對話串開始）。跑在 runner 上的 run 會在 28 分鐘時交棒：runner 上的 agent 繼續工作，下一個 delivery 接著看同一個 job，所以長時間的 QA 或建置不會被請求上限砍掉。直接在 CueFlow 主機上跑的 ACP agent 無法交棒，超過 30 分鐘會被中斷。
 
 **執行中有人留言**：runner 不會打斷正在跑的 LLM 呼叫，而是在結束時檢查「本次執行開始後是否有人類訊息」。如果有，就不套用完成狀態，改回 `TODO` 立即重跑，讓新的留言被處理（被停止或失敗時除外；第一輪就超過 context 上限時也不重跑，因為重跑只會重複同樣的結果）。
 
-**通知**：一次執行結束後，若任務停在需要人處理的狀態（`REVIEW` 或 `WAITING_HUMAN`：待審核、提問、等待核准、交接後停下、執行失敗，或因重啟被中斷），CueFlow 會透過該 org 選定的 notifier connector（**Manage orgs → Alerts**；Telegram 或 email）發一則訊息，內容包含 org、任務、agent、原因，以及任務連結（由 `CUEFLOW_PUBLIC_URL` 組成）。被人停止、因子任務而 `BLOCKED`、agent 建立的子任務結束為 `DONE`，以及因執行中留言而重新排入的執行，都不會發。發送採盡力而為（15 秒逾時，失敗只記 log）；停用該 notifier connector 即可靜音。
+**通知**：一次執行結束後，若任務停在需要人處理的狀態（`REVIEW` 或 `WAITING_HUMAN`：待審核、提問、等待核准、交接後停下、執行失敗，或因重啟被中斷），CueFlow 會透過該 org 選定的 notifier connector（**Manage orgs → Alerts**；Telegram 或 email）發一則訊息，內容包含 org、任務、agent、原因，以及任務連結（由 `CUEFLOW_PUBLIC_URL` 組成）。被人停止、因子任務而 `BLOCKED`、agent 建立的子任務結束為 `DONE`，以及因執行中留言而重新排入的執行，都不會發。發送採盡力而為（15 秒逾時，失敗只記 log）；停用該 notifier connector 即可靜音。由 Auto-recover 重試的失敗改發一則它自己的通知（§6.4）。
 
 ### 6.3 context 快滿時交接
 
@@ -200,9 +202,19 @@ run 的對話歷史只往後加（已送給模型的內容不會被截斷），�
 2. 筆記存好後 run 就結束：對話串會貼一則指向筆記的訊息（標示為 *hand-off*，點擊可開啟檔案），任務等待人處理。只有在請求之後寫的筆記才算數。如果 agent 改用文字回覆，那段文字就是筆記；如果它繼續呼叫工具，會再給一輪，之後 run 結束並說明沒有寫筆記。就算交接點剛好落在 run 允許的最後一輪，也會提出請求：寫筆記的回合可以超過回合上限。
 3. 人審閱後回覆，可以附上修正，也可以只說繼續。新的 run 的 brief 一開始就有「Hand-off from the previous run」區段，引用這份筆記（完整內容在 `handoff.md`），後面照常接對話串。舊的對話完全不會重播。筆記只會出現在交接後的下一個 run，不會出現在之後每一次的 brief 裡。
 
-**不等人審核。** 開啟 **Auto hand-off** 的 agent（`auto_handoff`，預設關閉，只適用內建 runtime）在筆記存好時會跳過第 3 步：任務直接回到 `TODO`，新的 run 從筆記開始；筆記一樣會貼到對話串，也會在新 run 的 brief 裡引用。連續最多 3 次交接會這樣自動繼續，第 4 次會停下來等人，並說明原因。計數依任務的 run 紀錄計算，只算最近連續自動繼續的交接：有一次交接停下來等人（之後讓任務繼續的一定是人，不論是回覆、拖曳卡片還是 Run now）、有 run 以其他方式結束，或有人留言，計數就重新開始。沒有寫筆記的交接（agent 不理會請求）一律等人處理。使用外部 runtime 的 agent 不能開啟這個設定。
+**不等人審核。** 開啟 **Auto hand-off** 的 agent（`auto_handoff`，預設關閉，只適用內建 runtime）在筆記存好時會跳過第 3 步：任務直接回到 `TODO`，新的 run 從筆記開始；筆記一樣會貼到對話串，也會在新 run 的 brief 裡引用。連續最多 3 次交接會這樣自動繼續，第 4 次會停下來等人，並說明原因。計數依任務的 run 紀錄計算，只算最近連續自動繼續的交接：有一次交接停下來等人（之後讓任務繼續的一定是人，不論是回覆、拖曳卡片還是 Run now）、有 run 以其他方式結束，或有人留言，計數就重新開始。Auto-recover 重試的 run（`retry`，§6.4）會略過不算，所以中間夾著重試不會讓計數重來。沒有寫筆記的交接（agent 不理會請求）一律等人處理。使用外部 runtime 的 agent 不能開啟這個設定。
 
 run 要比它的第一個 prompt 多長出模型上限的十分之一，才會交接。如果太早就達到交接點（brief 或筆記很大、模型上限很小），新的 run 一開始也幾乎一樣滿，只會再交接一次，所以這個 run 只會說明一次，然後照常繼續。不知道模型上限時不會交接；真的用完時，run 會以超過 context 上限的訊息結束。
+
+### 6.4 Auto-recover
+
+agent 的 **Auto-recover** 設定（`auto_recover`，0–10，預設 0 = 關閉；適用內建、runner 與 ACP runtime，不適用自行回報 run 的外部 self-driven agent）是「因暫時性原因而失敗的 run，連續最多幾次會自動重新開始，而不是等人處理」。在 **Agents** 頁打開該 agent，填寫 **Auto-recover** 欄位（外部 runtime 不會顯示這個欄位）；也可以用 `PATCH /agents/{id}` 或在 team template 裡帶 `auto_recover`（超出 0–10 的值會被夾到範圍內）。暫時性的失敗是指：內建模型呼叫失敗（context 滿了除外；目前 4xx 錯誤也算）、runner job 遺失、runner 停止回應或在 queue 逾時內沒有 runner 接手、runner 或 ACP agent 以錯誤結束、run 被中斷（伺服器停止、delivery 被切斷），或租約過期。不算暫時性的：回合用盡、context 滿了、模型的輸出上限、外部 agent 逾時或拒絕、設定錯誤，以及被人停止。
+
+- 任務回到 `TODO` 並設定 `tasks.retry_at`：在那之前認領會跳過它。退避時間從 30 秒開始，每次加倍，最長 10 分鐘。新的 run 和一般 run 一樣從任務、對話串與檔案開始（§6.1）。留言會讓它立刻執行，按 Run 也是；按 Stop 則停在 `WAITING_HUMAN`。
+- 例如 `auto_recover` 設為 3：連續三次失敗會分別在 30s、1m、2m 後重新開始；第四次就等人處理，並顯示「Auto-recover gave up after 3 attempts in a row」。
+- 計數依任務的 run 紀錄計算，只算最近連續記為 `retry` 的 run。超過上限的那次失敗保留自己的結果，所以會結束這一串；其他任何結果與有人留言也一樣。人移動任務也會讓計數重來（`tasks.recover_reset_at`）：在看板、List 檢視或放棄重試後改變狀態，以及按 Run（按過 Stop 之後，或任務已在 `TODO` 等退避時）。重送目前狀態的寫入，或只改標題等其他欄位，都不會重來。交接與 delivery 接續的計數會略過 `retry` 的 run，所以它們的上限（3 與 5）仍然限制得住在它們與失敗之間來回的任務。
+- **通知**：每次失敗一則，取代原本那則。「❌ Run failed, auto-recovering」（中斷的 run 或租約過期則為「⚠️ Interrupted, auto-recovering」）內容是「Auto-recover k of n: retrying in …」加上退避時間；超過上限時是「🛑 Run failed, auto-recover gave up」。恢復後成功的 run 照常發它自己的通知。
+- **升級**：migration 0027 會在啟動時執行，新增 `agents.auto_recover`（所有既有 agent 都是 0，設定之前行為不變）、`tasks.retry_at` 與 `tasks.recover_reset_at`。migration 只會往後加：退回舊版 binary 時這些欄位仍會留著，而舊版會立刻認領正在等退避的任務。
 
 ## 7. 委派與恢復
 
@@ -272,7 +284,8 @@ sequenceDiagram
 | 每次執行回合數 | 角色設定 `max_turns`（預設 12，Chief 16，最高 40） | `store/agents.go` |
 | run 的 context 可以多滿 | 預設為模型上限的 80%（`CUEFLOW_CONTEXT_HANDOFF`）；超過時 run 會寫交接筆記並等人處理（§6.3），寫筆記最多可以超過回合上限 2 輪。任務頁會把每個 run 最新一次的 prompt 顯示成「Context 182K / 1M (18%)」，達到這個比例起變色，不知道模型上限時則不顯示百分比 | `config`、`crew/handoff.go` |
 | 下一次 brief 帶入的交接筆記 | 12,000 字（其餘在 `handoff.md`） | `crew/handoff.go` |
-| 連續自動交接次數（開啟 Auto hand-off 時） | 3 次；下一次會等人處理。有交接停下等人、有 run 以其他方式結束，或有人留言，計數就重新開始 | `crew/handoff.go` |
+| 連續自動交接次數（開啟 Auto hand-off 時） | 3 次；下一次會等人處理。有交接停下等人、有 run 以其他方式結束（Auto-recover 的 `retry` 除外），或有人留言，計數就重新開始 | `crew/handoff.go` |
+| 連續自動恢復次數（開啟 Auto-recover 時） | agent 的 `auto_recover`，最多 10；退避 30 秒起加倍，最長 10 分鐘；下一次失敗會等人處理。其他任何結果、有人留言，或有人改變狀態或按 Run，計數就重新開始 | `crew/recover.go` |
 | 每次執行建立的子任務 + 獨立任務 | 8 | `crew/tools.go` |
 | 每次執行建立的草稿 | 10 | `crew/tools.go` |
 | 委派深度 | 3 層 | `crew/tools.go` |
