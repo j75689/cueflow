@@ -512,10 +512,14 @@ func (s *Store) RequeueClaimedTask(ctx context.Context, id, runID uuid.UUID, aft
 	return tag.RowsAffected() == 1, nil
 }
 
-// ClearTaskRetry makes a TODO task waiting out an auto-recover backoff claimable now.
-func (s *Store) ClearTaskRetry(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE tasks SET retry_at=NULL WHERE id=$1 AND retry_at IS NOT NULL`, id)
-	return err
+// ClearTaskRetry makes a TODO task waiting out an auto-recover backoff claimable now; false if it
+// wasn't waiting.
+func (s *Store) ClearTaskRetry(ctx context.Context, id uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET retry_at=NULL WHERE id=$1 AND retry_at IS NOT NULL`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // RecoverResetAt is when a human last moved the task (see UpdateTask); nil if never.

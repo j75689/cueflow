@@ -459,7 +459,7 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 			// parked
 		case store.TaskTodo:
 			// already queued; one waiting out an auto-recover backoff runs now
-			if err := s.Store.ClearTaskRetry(ctx, id); err == nil {
+			if waited, err := s.Store.ClearTaskRetry(ctx, id); err == nil && waited {
 				s.Crew.TaskChanged(ctx, t)
 			}
 		case store.TaskInProgress:
