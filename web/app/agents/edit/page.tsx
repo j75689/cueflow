@@ -147,6 +147,8 @@ function AgentEditor() {
       ...form,
       name: form.name.trim(),
       slug: form.slug.trim() || undefined,
+      // The field is hidden for external agents, which never auto-recover; don't send a stale value.
+      auto_recover: selectedRuntimeType === "external" ? 0 : form.auto_recover,
     };
     try {
       if (id) {

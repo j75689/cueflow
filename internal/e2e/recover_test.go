@@ -656,3 +656,34 @@ func TestAutoRecoverCommentDuringFailingRun(t *testing.T) {
 		t.Fatalf("alerts: %s", got)
 	}
 }
+
+// An external (self-driven) agent never auto-recovers, so the setting is stored as 0 for it, whether
+// it is created that way or switched to the external runtime, and its template says so.
+func TestAutoRecoverOffForExternalAgents(t *testing.T) {
+	e, team := crewSetup(t)
+	var rt store.Connector
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Self-driven", "type": "external", "config": map[string]any{}}, &rt); code != 201 {
+		t.Fatalf("create runtime: %d", code)
+	}
+	var a store.Agent
+	if code := e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"runtime_connector_id": rt.ID, "auto_recover": 5,
+		"auto_handoff": true}, &a); code != 200 || a.AutoRecover != 0 || a.AutoHandOff {
+		t.Fatalf("patch: %d %+v", code, a)
+	}
+	if code := e.do("POST", "/agents", map[string]any{"name": "Outside", "slug": "outside", "capabilities": []string{},
+		"runtime_connector_id": rt.ID, "auto_recover": 3}, &a); code != 201 || a.AutoRecover != 0 {
+		t.Fatalf("create: %d %+v", code, a)
+	}
+	var tmpl struct {
+		Agents []struct {
+			Slug        string `json:"slug"`
+			AutoRecover int    `json:"auto_recover"`
+		} `json:"agents"`
+	}
+	e.do("GET", "/agents/template", nil, &tmpl)
+	for _, ta := range tmpl.Agents {
+		if (ta.Slug == "writer" || ta.Slug == "outside") && ta.AutoRecover != 0 {
+			t.Fatalf("template: %+v", ta)
+		}
+	}
+}

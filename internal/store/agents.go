@@ -192,6 +192,23 @@ func (a *Agent) normalize() error {
 	return nil
 }
 
+// normalizeRuntime is normalize for what depends on the runtime connector's type: an external
+// (self-driven) agent reports its own runs, so it never auto-recovers.
+func (s *Store) normalizeRuntime(ctx context.Context, a *Agent) error {
+	if a.RuntimeConnectorID == nil || a.AutoRecover == 0 {
+		return nil
+	}
+	var external bool
+	if err := s.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM connectors WHERE id=$1 AND type=$2)",
+		*a.RuntimeConnectorID, ExternalRuntimeType).Scan(&external); err != nil {
+		return err
+	}
+	if external {
+		a.AutoRecover = 0
+	}
+	return nil
+}
+
 func dupSlug(err error) error {
 	var pg *pgconn.PgError
 	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
@@ -240,6 +257,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	if err := a.normalize(); err != nil {
 		return nil, err
 	}
+	if err := s.normalizeRuntime(ctx, a); err != nil {
+		return nil, err
+	}
 	if a.OrgID == uuid.Nil {
 		return nil, Invalid("org is required")
 	}
@@ -259,6 +279,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 
 func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	if err := a.normalize(); err != nil {
+		return nil, err
+	}
+	if err := s.normalizeRuntime(ctx, a); err != nil {
 		return nil, err
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2, slug=$3, avatar=$4, role=$5, description=$6, instructions=$7,
