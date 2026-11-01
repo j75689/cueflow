@@ -183,7 +183,7 @@ Benefits:
 | Context window exceeded | system message (what to shrink, or reply to continue in a fresh run) | `WAITING_HUMAN` | FAILED |
 | LLM / configuration error | system message (with the error) | `WAITING_HUMAN` | FAILED |
 | Stopped by a human (Stop, moving or reassigning the card, on any instance) | "Stopped." | `WAITING_HUMAN` | CANCELED |
-| Built-in run used its cloud delivery's time (below) | system message | `TODO`, continuing in a fresh run (up to 5 in a row, then `WAITING_HUMAN`) | SUCCEEDED (`continued`) |
+| Built-in run used its cloud delivery's time (below) | system message | `TODO`, continuing in a fresh run (up to 5 in a row, Auto-recover retries in between passed over, then `WAITING_HUMAN`) | SUCCEEDED (`continued`) |
 | Context ended any other way (the server stopped, a delivery's request was cut off) | system message (interrupted; reply to continue) | `WAITING_HUMAN` | FAILED |
 | Process restart, lease expired | system message (explaining the interruption) | `WAITING_HUMAN` | FAILED |
 | Transient failure (LLM or connection error, runner lost or not picked up, opaque runner/ACP error, interrupted, lease expired) with **Auto-recover** on (§6.4) | the usual system message, then "Auto-recover k of n: a fresh run starts in …" | `TODO`, claimable after a backoff | FAILED (`retry`) |
@@ -230,7 +230,8 @@ step 3 when the note was saved: the task goes straight back to `TODO` and the fr
 still posted to the thread and quoted in its brief. At most 3 hand-offs in a row continue this way; the next waits for
 the human, saying so. The count is read from the task's recorded runs: it covers the latest hand-offs that went on
 by themselves, so a hand-off that waited (whatever moved the task on afterwards was a human: a reply, dragging the
-card, Run now), a run that ended any other way, or a human message starts it again. A hand-off without a note, where
+card, Run now), a run that ended any other way, or a human message starts it again. A run that Auto-recover retried
+(`retry`, §6.4) is passed over, so retries in between don't start it again. A hand-off without a note, where
 the agent ignored the request, always waits. Agents on an external runtime can't have the setting.
 
 A run hands off only once it has grown by a tenth of the window since its first prompt. If it reaches the point
@@ -250,7 +251,9 @@ context window, an external agent's timeout or refusal, configuration errors, an
   doubles per attempt, capped at 10 minutes. The fresh run starts from the task, its thread and files, like any run
   (§6.1). A comment runs it at once, and so does Run; Stop parks it in `WAITING_HUMAN`.
 - The count is read from the task's runs: it covers the latest runs recorded `retry`. A failure past the limit keeps
-  its own outcome, so it ends the streak, as do any other outcome and a human message.
+  its own outcome, so it ends the streak, as do any other outcome, a human message, and a human moving the task (a
+  status change on the board, or Run, e.g. after Stop; `tasks.recover_reset_at`). Hand-off and delivery-continue
+  streaks pass over `retry` runs, so their caps (3 and 5) still bound a task that alternates between them and failures.
 - **Alerts**: one per failure, instead of the plain one. "❌ Run failed, auto-recovering" ("⚠️ Interrupted,
   auto-recovering" for an interrupted run or lapsed lease) says "Auto-recover k of n: retrying in 30s."; past the
   limit, "🛑 Run failed, auto-recover gave up". A run that succeeds after a recovery sends its usual alert.
@@ -326,8 +329,8 @@ target each time.
 | Turns per run | The role's `max_turns` (default 12, Chief 16, max 40) | `store/agents.go` |
 | How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); past it the run writes a hand-off note and waits for the human (§6.3), getting up to 2 turns past its turn limit for the note. The task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/handoff.go` |
 | The hand-off note in the next brief | 12,000 characters (`handoff.md` has the rest) | `crew/handoff.go` |
-| Automatic hand-offs in a row (Auto hand-off on) | 3; the next waits for the human. A hand-off that waited, a run that ends otherwise, or a human message resets the count | `crew/handoff.go` |
-| Automatic recoveries in a row (Auto-recover on) | The agent's `auto_recover`, at most 10; backoff 30s doubling to 10 minutes; the next failure waits for the human. Any other outcome or a human message resets the count | `crew/recover.go` |
+| Automatic hand-offs in a row (Auto hand-off on) | 3; the next waits for the human. A hand-off that waited, a run that ends otherwise (other than an Auto-recover `retry`), or a human message resets the count | `crew/handoff.go` |
+| Automatic recoveries in a row (Auto-recover on) | The agent's `auto_recover`, at most 10; backoff 30s doubling to 10 minutes; the next failure waits for the human. Any other outcome, a human message, or a human status change or Run resets the count | `crew/recover.go` |
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |

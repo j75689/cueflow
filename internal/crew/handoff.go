@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/j75689/cueflow/internal/llm"
@@ -181,12 +183,13 @@ const maxAutoHandOffs = 3
 // store clears for external runtimes), and only up to maxAutoHandOffs in a row. The streak is read
 // from the task's recorded runs: it counts the latest runs that continued on their own
 // ("handoff_auto"). A hand-off that waited ("handoff") ends it, since whatever moved the task on
-// after that was a human; so does any other outcome, or a human message since a run started.
+// after that was a human; so does any other outcome, or a human message since a run started. Runs that
+// auto-recover retried ("retry") are passed over: no human moved the task on there either.
 func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) (bool, string) {
 	if a == nil || !a.AutoHandOff || !out.noted || run == nil {
 		return false, out.text
 	}
-	streak, err := c.streak(ctx, task, run, outcomeAutoHandOff)
+	streak, err := c.streak(ctx, task, run, outcomeAutoHandOff, nil, outcomeRecovered)
 	if err != nil {
 		c.logger.Warn("count automatic hand-offs; waiting for the human", "task", task.ID, "err", err)
 		return false, out.text
@@ -199,9 +202,10 @@ func (c *Crew) autoHandOff(ctx context.Context, task *store.Task, a *store.Agent
 		contextPct(run), handOffFile, streak, maxAutoHandOffs)
 }
 
-// streak counts this run and the finished runs right before it that ended with outcome, stopping at
-// one a human message came after (any human move resets it).
-func (c *Crew) streak(ctx context.Context, task *store.Task, run *store.AgentRun, outcome string) (int, error) {
+// streak counts this run and the finished runs right before it that ended with outcome, passing over
+// those that ended with one of pass, and stopping at one a human message came after (any human move
+// resets it) or that started before since.
+func (c *Crew) streak(ctx context.Context, task *store.Task, run *store.AgentRun, outcome string, since *time.Time, pass ...string) (int, error) {
 	runs, err := c.store.ListAgentRuns(ctx, task.ID)
 	if err != nil {
 		return 0, err
@@ -215,7 +219,13 @@ func (c *Crew) streak(ctx context.Context, task *store.Task, run *store.AgentRun
 		if r.ID == run.ID || r.FinishedAt == nil {
 			continue
 		}
-		if r.Outcome != outcome || spoke && lastHuman.After(r.StartedAt) {
+		if spoke && lastHuman.After(r.StartedAt) || since != nil && since.After(r.StartedAt) {
+			break
+		}
+		if slices.Contains(pass, r.Outcome) {
+			continue
+		}
+		if r.Outcome != outcome {
 			break
 		}
 		n++

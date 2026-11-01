@@ -208,7 +208,7 @@ func TestAutoRecoverNotForPermanentFailures(t *testing.T) {
 }
 
 // A recovered task waits out its backoff in TODO: nothing claims it, and the cloud tick sees nothing to
-// do. A comment runs it at once and starts the count again; Run does too, as a retry; Stop parks it.
+// do. A comment runs it at once and starts the count again; so does Run; Stop parks it.
 func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 	e, team := crewSetup(t)
 	ctx := context.Background()
@@ -256,8 +256,9 @@ func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 		t.Fatalf("run: %d", code)
 	}
 	runAll(e)
-	if got := outcomes(t, e, task); got != "retry,retry,retry" || !strings.Contains(taskMessages(t, e, task.ID.String()), "Auto-recover 2 of 3") {
-		t.Fatalf("Run should retry now: runs %s", got)
+	thread = taskMessages(t, e, task.ID.String())
+	if got := outcomes(t, e, task); got != "retry,retry,retry" || strings.Count(thread, "Auto-recover 1 of 3") != 3 {
+		t.Fatalf("Run should retry now and reset the count: runs %s\n%s", got, thread)
 	}
 
 	if code := e.do("POST", "/tasks/"+task.ID.String()+"/cancel", nil, nil); code != 200 {
@@ -267,6 +268,105 @@ func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NULL FROM tasks WHERE id=$1`, task.ID).Scan(&cleared); err != nil || !cleared ||
 		status(t, e, task) != store.TaskWaitingHuman {
 		t.Fatalf("Stop: status %s, retry_at cleared %v %v", status(t, e, task), cleared, err)
+	}
+}
+
+// Moving the card starts the count again (decision 6), as does Stop then Run; without either, the next
+// failure in a row counts on.
+func TestAutoRecoverCountResetsOnAHumanMove(t *testing.T) {
+	e, team := crewSetup(t)
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, team["writer"], 3)
+	setFail(t, alwaysFail)
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		return calls("complete_task", map[string]any{"summary": "done"})
+	})
+	task := newTask(t, e, "Flaky", team["writer"])
+	id := task.ID.String()
+	runAll(e)
+	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo {
+		t.Fatalf("runs %s, status %s", got, status(t, e, task))
+	}
+
+	// During the backoff, Backlog then To do: the next failure is 1 of 3 again, not 2 of 3.
+	for _, st := range []string{"BACKLOG", "TODO"} {
+		if code := e.do("PATCH", "/tasks/"+id, map[string]any{"status": st}, nil); code != 200 {
+			t.Fatalf("move to %s: %d", st, code)
+		}
+	}
+	runAll(e)
+	thread := taskMessages(t, e, id)
+	if got := outcomes(t, e, task); got != "retry,retry" || strings.Count(thread, "Auto-recover 1 of 3") != 2 || strings.Contains(thread, "2 of 3") {
+		t.Fatalf("moving the card should reset the count: runs %s\n%s", got, thread)
+	}
+
+	// Stop, then Run: 1 of 3 again.
+	for _, op := range []string{"cancel", "run"} {
+		if code := e.do("POST", "/tasks/"+id+"/"+op, nil, nil); code != 200 {
+			t.Fatalf("%s: %d", op, code)
+		}
+	}
+	runAll(e)
+	thread = taskMessages(t, e, id)
+	if got := outcomes(t, e, task); got != "retry,retry,retry" || strings.Count(thread, "Auto-recover 1 of 3") != 3 || strings.Contains(thread, "2 of 3") {
+		t.Fatalf("Stop then Run should reset the count: runs %s\n%s", got, thread)
+	}
+
+	// No human move: the next failure in a row counts on.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE tasks SET retry_at=NOW() WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	runAll(e)
+	if !strings.Contains(taskMessages(t, e, id), "Auto-recover 2 of 3") {
+		t.Fatalf("the count should go on: runs %s", outcomes(t, e, task))
+	}
+}
+
+// Auto hand-off and auto-recover together: when every second fresh run fails, the retries in between
+// don't start the hand-off count again, so it still stops at the hand-off cap (3 in a row) instead of
+// alternating retry, handoff_auto for as long as the loop runs.
+func TestAutoRecoverInterleavedWithAutoHandOff(t *testing.T) {
+	e, team := crewSetup(t)
+	writer := team["writer"]
+	if code := e.do("PATCH", "/agents/"+writer.ID.String(), map[string]any{"auto_handoff": true}, nil); code != 200 {
+		t.Fatalf("auto_handoff: %d", code)
+	}
+	setAutoRecover(t, e, writer, 1)
+	setPrompt(t, func(req llm.Request) int64 {
+		if len(req.Messages) == 1 {
+			return 100
+		}
+		return 900
+	})
+	starts := 0
+	setFail(t, func(req llm.Request) error {
+		if len(req.Messages) == 1 {
+			starts++
+			if starts%2 == 0 {
+				return errConnReset
+			}
+		}
+		return nil
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		if asksForHandOff(req) {
+			return calls("write_file", map[string]any{"name": "handoff.md", "content": "progress so far"})
+		}
+		return calls("add_comment", map[string]any{"content": "working"})
+	})
+	task := newTask(t, e, "Long and flaky", writer)
+	for range 60 {
+		e.crew.RunPending(context.Background(), 10)
+	}
+	thread := taskMessages(t, e, task.ID.String())
+	// Newest first.
+	if got := outcomes(t, e, task); got != "handoff,retry,handoff_auto,retry,handoff_auto,retry,handoff_auto" ||
+		status(t, e, task) != store.TaskWaitingHuman {
+		t.Fatalf("runs %s, status %s\n%s", got, status(t, e, task), thread)
+	}
+	if !strings.Contains(thread, "automatic hand-off 3 of 3") || !strings.Contains(thread, "This is the 4th hand-off in a row") ||
+		strings.Count(thread, "Auto-recover 1 of 1") != 3 {
+		t.Fatalf("thread:\n%s", thread)
 	}
 }
 

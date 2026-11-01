@@ -420,7 +420,8 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		if !st.Valid() {
 			return nil, nil, Invalid("unknown status")
 		}
-		sets = append(sets, "retry_at=NULL") // a human move (or Run now) ends an auto-recover backoff
+		// A human move (or Run now) ends an auto-recover backoff and starts its count again.
+		sets = append(sets, "retry_at=NULL", "recover_reset_at=NOW()")
 		if st == TaskInProgress && before.Status != TaskInProgress {
 			return nil, nil, Invalid("IN_PROGRESS is set by the agent runner; move the task to TODO to start it")
 		}
@@ -515,6 +516,13 @@ func (s *Store) RequeueClaimedTask(ctx context.Context, id, runID uuid.UUID, aft
 func (s *Store) ClearTaskRetry(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `UPDATE tasks SET retry_at=NULL WHERE id=$1 AND retry_at IS NOT NULL`, id)
 	return err
+}
+
+// RecoverResetAt is when a human last moved the task (see UpdateTask); nil if never.
+func (s *Store) RecoverResetAt(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+	var at *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT recover_reset_at FROM tasks WHERE id=$1`, id).Scan(&at)
+	return at, NotFound(err)
 }
 
 // DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade

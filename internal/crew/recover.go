@@ -37,12 +37,17 @@ type recovery struct {
 // fresh run without a human: only for an agent with AutoRecover, and only that many times in a row.
 // The streak is read from the task's recorded runs, as autoHandOff's is: it counts the latest runs
 // recovered this way ("retry"). A failure that gave up keeps its own outcome and so ends it; so does
-// any other outcome, or a human message since a run started.
+// any other outcome, a human message since a run started, or a human moving the task (a status
+// change, Stop then Run) since.
 func (c *Crew) autoRecover(ctx context.Context, task *store.Task, a *store.Agent, run *store.AgentRun, out *outcome) recovery {
 	if a == nil || a.AutoRecover == 0 || !out.retry || run == nil {
 		return recovery{}
 	}
-	k, err := c.streak(ctx, task, run, outcomeRecovered)
+	reset, err := c.store.RecoverResetAt(ctx, task.ID)
+	var k int
+	if err == nil {
+		k, err = c.streak(ctx, task, run, outcomeRecovered, reset)
+	}
 	if err != nil {
 		c.logger.Warn("count recovered runs; waiting for the human", "task", task.ID, "err", err)
 		return recovery{}
