@@ -612,3 +612,47 @@ func TestAutoRecoverInterruptedGiveUpAsksOnce(t *testing.T) {
 		}
 	}
 }
+
+// A comment left while a run was failing ends the wait at once, as one left during the backoff does,
+// with the same alert.
+func TestAutoRecoverCommentDuringFailingRun(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	withNotifier(t, e)
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, team["writer"], 3)
+	var task store.Task
+	failed := false
+	setFail(t, func(req llm.Request) error {
+		if failed {
+			return nil
+		}
+		failed = true
+		if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "also check X"}, nil); code != 201 {
+			t.Errorf("comment: %d", code)
+		}
+		return errConnReset
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		return calls("complete_task", map[string]any{"summary": "done"})
+	})
+	task = newTask(t, e, "Flaky", team["writer"])
+	e.crew.RunPending(ctx, 1)
+	var waiting bool
+	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
+		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
+	}
+	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 3: a fresh run starts now") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+	runAll(e)
+	if got := outcomes(t, e, task); got != "complete,retry" {
+		t.Fatalf("runs %s", got)
+	}
+	if got := subjects(takeAlerts()); got != "❌ Run failed, auto-recovering: Flaky | ✅ Ready for review: Flaky" {
+		t.Fatalf("alerts: %s", got)
+	}
+}

@@ -61,11 +61,17 @@ func (c *Crew) autoRecover(ctx context.Context, task *store.Task, a *store.Agent
 		msg := fmt.Sprintf("Auto-recover gave up after %d %s in a row. Reply or press Run to continue.", n, attempts)
 		return recovery{note: msg, kind: "recover_gaveup", alert: msg}
 	}
-	after := c.RecoverBackoff(k)
 	kind := "recover"
 	if out.kind == "interrupted" {
 		kind = "recover_interrupted"
 	}
+	// A comment left while the run was failing ends the wait, as one left during the backoff does.
+	if commented, err := c.store.HumanMessageSince(ctx, task.ID, run.StartedAt); err == nil && commented {
+		return recovery{retry: true, kind: kind,
+			note:  fmt.Sprintf("Auto-recover %d of %d: a fresh run starts now from the task, its thread and files, for the new comment.", k, n),
+			alert: fmt.Sprintf("Auto-recover %d of %d: retrying now for a new comment.", k, n)}
+	}
+	after := c.RecoverBackoff(k)
 	return recovery{retry: true, after: after, kind: kind,
 		note: fmt.Sprintf("Auto-recover %d of %d: a fresh run starts in %s from the task, its thread and files. "+
 			"Comment or press Run to retry sooner, or Stop to cancel.", k, n, waitText(after)),
