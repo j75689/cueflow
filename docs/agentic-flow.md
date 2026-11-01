@@ -242,23 +242,33 @@ hand-off; the run ends with a context-overflow message if it runs out.
 ### 6.4 Auto-recover
 An agent's **Auto-recover** setting (`auto_recover`, 0–10, 0 = off by default; built-in, runner and ACP runtimes, not
 external self-driven agents, which report their own runs) is how many runs in a row
-that failed for a transient reason start again on their own instead of waiting for a human. Transient means: a
+that failed for a transient reason start again on their own instead of waiting for a human. Set it on the **Agents**
+page: open the agent and fill in **Auto-recover** (the field is not shown for an external runtime), or send
+`auto_recover` with `PATCH /agents/{id}` or in a team template (values outside 0–10 are clamped). Transient means: a
 built-in model call failed (other than a full context window; 4xx errors included for now), a runner job was lost,
 stopped responding or wasn't picked up within the queue timeout, a runner or ACP agent ended with an error, the
 run was interrupted (server stopped, delivery cut off) or its lease expired. Not transient: the turn budget, a full
-context window, an external agent's timeout or refusal, configuration errors, and a human stop.
+context window, the model's output limit, an external agent's timeout or refusal, configuration errors, and a human stop.
 
 - The task goes back to `TODO` with `tasks.retry_at` set: the claim skips it until then. The backoff is 30s and
   doubles per attempt, capped at 10 minutes. The fresh run starts from the task, its thread and files, like any run
   (§6.1). A comment runs it at once, and so does Run; Stop parks it in `WAITING_HUMAN`.
+- With `auto_recover` 3, three failures in a row start again, after 30s, 1m and 2m; the fourth waits for the human
+  with "Auto-recover gave up after 3 attempts in a row".
 - The count is read from the task's runs: it covers the latest runs recorded `retry`. A failure past the limit keeps
-  its own outcome, so it ends the streak, as do any other outcome, a human message, and a human moving the task (a
-  status change on the board, but not a write that resends the current status, or Run, e.g. after Stop;
-  `tasks.recover_reset_at`). Hand-off and delivery-continue
+  its own outcome, so it ends the streak, as do any other outcome and a human message. A human moving the task
+  starts it again too (`tasks.recover_reset_at`): a status change on the board, in the List view or after a give-up,
+  and pressing Run (after Stop, or on a task already `TODO` waiting out a backoff). A write that resends the
+  current status, or changes only other fields such as the title, does not. Hand-off and delivery-continue
   streaks pass over `retry` runs, so their caps (3 and 5) still bound a task that alternates between them and failures.
 - **Alerts**: one per failure, instead of the plain one. "❌ Run failed, auto-recovering" ("⚠️ Interrupted,
-  auto-recovering" for an interrupted run or lapsed lease) says "Auto-recover k of n: retrying in 30s."; past the
-  limit, "🛑 Run failed, auto-recover gave up". A run that succeeds after a recovery sends its usual alert.
+  auto-recovering" for an interrupted run or lapsed lease) says "Auto-recover k of n: retrying in …" with the
+  backoff; past the limit, "🛑 Run failed, auto-recover gave up". A run that succeeds after a recovery sends its usual
+  alert.
+- **Upgrading**: migration 0027 runs at startup and adds `agents.auto_recover` (0 for every existing agent, so
+  nothing changes until you set it), `tasks.retry_at` and `tasks.recover_reset_at`. Migrations are append-only:
+  rolling back to an older binary leaves the columns in place, and that binary claims a task waiting out a backoff
+  at once.
 
 ## 7. Delegation and resumption
 

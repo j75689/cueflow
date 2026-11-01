@@ -187,7 +187,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
   "language":"en","platforms":["threads","instagram"],
   "max_turns":12,"is_active":true,
   "auto_handoff":false,                    // continue a hand-off (with a note) without waiting, up to 3 in a row; always false with a runtime connector
-  "auto_recover":0,                        // failed runs in a row (transient failures) that start again on their own after a backoff, 0-10; 0 = off
+  "auto_recover":0,                        // failed runs in a row (transient failures) that start again on their own after a backoff, 0-10 (clamped); 0 = off
   "stats":{"open_tasks":2,"running":1},
   "created_at":"...","updated_at":"..."
 }
