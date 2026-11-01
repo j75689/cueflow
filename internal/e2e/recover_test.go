@@ -271,6 +271,38 @@ func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 	}
 }
 
+// ClearTaskRetry reports whether the task was waiting out a backoff (a comment wakes the crew only
+// then), and a self-driving agent's claim ends the backoff.
+func TestAutoRecoverRetryAtInTheStore(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	task := newTask(t, e, "Flaky", team["writer"])
+	backoff := func() {
+		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET retry_at=NOW() + interval '1 hour' WHERE id=$1`, task.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waiting := func() bool {
+		var ok bool
+		if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NOT NULL FROM tasks WHERE id=$1`, task.ID).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if waited, err := e.store.ClearTaskRetry(ctx, task.ID); err != nil || waited {
+		t.Fatalf("no backoff: %v %v", waited, err)
+	}
+	backoff()
+	if waited, err := e.store.ClearTaskRetry(ctx, task.ID); err != nil || !waited || waiting() {
+		t.Fatalf("in a backoff: %v %v", waited, err)
+	}
+
+	backoff()
+	if got, _, err := e.store.ClaimTaskForAgent(ctx, team["writer"].ID, &task.ID, time.Minute); err != nil || got == nil || waiting() {
+		t.Fatalf("claim: %v %v, still waiting %v", got, err, waiting())
+	}
+}
+
 // Moving the card starts the count again (decision 6), as does Stop then Run; without either, the next
 // failure in a row counts on.
 func TestAutoRecoverCountResetsOnAHumanMove(t *testing.T) {
