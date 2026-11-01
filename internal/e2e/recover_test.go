@@ -370,6 +370,48 @@ func TestAutoRecoverInterleavedWithAutoHandOff(t *testing.T) {
 	}
 }
 
+// The same for a built-in run that continues past its delivery: the retries in between don't start
+// the continue count again, so it stops at 5 in a row instead of alternating retry, continued.
+func TestAutoRecoverInterleavedWithDeliveryContinue(t *testing.T) {
+	e, team := crewSetup(t)
+	e.crew.Queue = &fakeQueue{}
+	e.crew.DeliveryLimit = 1500 * time.Millisecond // no new turn after 1.25 s
+	writer := team["writer"]
+	setAutoRecover(t, e, writer, 1)
+	starts := 0
+	setFail(t, func(req llm.Request) error {
+		if len(req.Messages) == 1 {
+			starts++
+			if starts%2 == 0 {
+				return errConnReset
+			}
+		}
+		return nil
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		time.Sleep(1300 * time.Millisecond) // every turn uses the delivery's time
+		return calls("add_comment", map[string]any{"content": "working"})
+	})
+	task := newTask(t, e, "Long and flaky", writer)
+	for range 30 {
+		if status(t, e, task) != store.TaskTodo {
+			break
+		}
+		if err := e.crew.HandleCrew(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	thread := taskMessages(t, e, task.ID.String())
+	// Newest first.
+	if got := outcomes(t, e, task); got != "continue,retry,continued,retry,continued,retry,continued,retry,continued,retry,continued" ||
+		status(t, e, task) != store.TaskWaitingHuman {
+		t.Fatalf("runs %s, status %s\n%s", got, status(t, e, task), thread)
+	}
+	if !strings.Contains(thread, "(5 of 5 in a row)") || !strings.Contains(thread, "for the 6th time in a row") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+}
+
 // A run interrupted in this process (the server shutting down) is recovered too.
 func TestAutoRecoverInterrupted(t *testing.T) {
 	e, team := crewSetup(t)
