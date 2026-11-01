@@ -240,7 +240,8 @@ run says so once and carries on instead. Without a known window there is no
 hand-off; the run ends with a context-overflow message if it runs out.
 
 ### 6.4 Auto-recover
-An agent's **Auto-recover** setting (`auto_recover`, 0–10, 0 = off by default; any runtime) is how many runs in a row
+An agent's **Auto-recover** setting (`auto_recover`, 0–10, 0 = off by default; built-in, runner and ACP runtimes, not
+external self-driven agents, which report their own runs) is how many runs in a row
 that failed for a transient reason start again on their own instead of waiting for a human. Transient means: a
 built-in model call failed (other than a full context window; 4xx errors included for now), a runner job was lost,
 stopped responding or wasn't picked up within the queue timeout, a runner or ACP agent ended with an error, the

@@ -716,22 +716,29 @@ func (s *Store) AdoptTaskRun(ctx context.Context, id, runID uuid.UUID) error {
 	return err
 }
 
+// ExpiredLease is an IN_PROGRESS task whose runner died, with the run of that claim (nil if the
+// claim recorded none), read together so a later claim's run is never taken for it.
+type ExpiredLease struct {
+	ID    uuid.UUID
+	RunID *uuid.UUID
+}
+
 // ExpiredTaskLeases returns IN_PROGRESS tasks whose runner died.
-func (s *Store) ExpiredTaskLeases(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM tasks WHERE status='IN_PROGRESS' AND (lease_until IS NULL OR lease_until < NOW())`)
+func (s *Store) ExpiredTaskLeases(ctx context.Context) ([]ExpiredLease, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, run_id FROM tasks WHERE status='IN_PROGRESS' AND (lease_until IS NULL OR lease_until < NOW())`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []uuid.UUID
+	var out []ExpiredLease
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var l ExpiredLease
+		if err := rows.Scan(&l.ID, &l.RunID); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, l)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
 // OpenSubtasks counts children that are not finished.

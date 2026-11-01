@@ -282,11 +282,12 @@ func (c *Crew) RunPending(ctx context.Context, maxRounds int) {
 }
 
 func (c *Crew) recoverExpired(ctx context.Context) {
-	ids, err := c.store.ExpiredTaskLeases(ctx)
+	leases, err := c.store.ExpiredTaskLeases(ctx)
 	if err != nil {
 		return
 	}
-	for _, id := range ids {
+	for _, l := range leases {
+		id := l.ID
 		c.mu.Lock()
 		_, mine := c.running[id]
 		c.mu.Unlock()
@@ -296,60 +297,57 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 		if c.recoverSelfDriven(ctx, id) {
 			continue
 		}
-		t, err := c.store.GetTask(ctx, id)
-		if err != nil {
-			continue
-		}
+		t, _ := c.store.GetTask(ctx, id) // nil: it still waits for a human below, without an alert
 		var a *store.Agent
-		if t.AssigneeAgentID != nil {
+		if t != nil && t.AssigneeAgentID != nil {
 			if got, err := c.store.GetAgent(ctx, *t.AssigneeAgentID); err == nil {
 				a = got
 			}
 		}
-		rec, runID := c.recoverLapsed(ctx, t, a)
-		next, ok := store.TaskWaitingHuman, false
-		if rec.retry {
-			next = store.TaskTodo
-			ok, _ = c.store.RequeueClaimedTask(ctx, id, runID, rec.after)
-		} else {
-			ok, _ = c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil)
+		var rec recovery
+		if t != nil && l.RunID != nil {
+			rec = c.recoverLapsed(ctx, t, a, *l.RunID)
 		}
-		if !ok {
+		if rec.retry {
+			// Fenced on the lapsed claim's run: a claim made since is left alone.
+			if ok, _ := c.store.RequeueClaimedTask(ctx, id, *l.RunID, rec.after); ok {
+				if err := c.store.FailAgentRun(ctx, *l.RunID, outcomeRecovered, "interrupted (the lease expired)"); err != nil {
+					c.logger.Warn("finish run", "err", err)
+				}
+				c.system(ctx, id, "The agent run was interrupted (server restart or crash).")
+				c.system(ctx, id, rec.note)
+				c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": id, "status": store.TaskTodo})
+				c.WakeAfter(rec.after)
+				c.alert(ctx, t, a, rec.kind, rec.alert)
+			}
 			continue
 		}
-		if rec.retry {
-			if err := c.store.FailAgentRun(ctx, runID, outcomeRecovered, "interrupted (the lease expired)"); err != nil {
-				c.logger.Warn("finish run", "err", err)
+		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {
+			c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
+			if rec.note != "" {
+				c.system(ctx, id, rec.note)
 			}
-		}
-		c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
-		if rec.note != "" {
-			c.system(ctx, id, rec.note)
-		}
-		c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": id, "status": next})
-		if rec.retry {
-			c.WakeAfter(rec.after)
-		}
-		if rec.kind != "" {
-			c.alert(ctx, t, a, rec.kind, rec.alert)
-		} else {
-			c.alert(ctx, t, a, "interrupted", "The run stopped (server restart or crash). Reply or press Run to continue.")
+			c.broker.Publish(c.taskOrg(ctx, id), "task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
+			if t != nil {
+				if rec.kind != "" {
+					c.alert(ctx, t, a, rec.kind, rec.alert)
+				} else {
+					c.alert(ctx, t, a, "interrupted", "The run stopped (server restart or crash). Reply or press Run to continue.")
+				}
+			}
 		}
 	}
 }
 
 // recoverLapsed is autoRecover for a task whose run's lease lapsed (its worker crashed or stalled),
-// with the run of the lapsed claim.
-func (c *Crew) recoverLapsed(ctx context.Context, task *store.Task, a *store.Agent) (recovery, uuid.UUID) {
-	runID, err := c.store.TaskRunID(ctx, task.ID)
-	if err != nil || runID == nil {
-		return recovery{}, uuid.Nil
-	}
-	run, err := c.store.GetAgentRun(ctx, *runID)
+// with the run of the lapsed claim. A worker that crashed before recording its run leaves none to
+// read, so its task waits for a human as before.
+func (c *Crew) recoverLapsed(ctx context.Context, task *store.Task, a *store.Agent, runID uuid.UUID) recovery {
+	run, err := c.store.GetAgentRun(ctx, runID)
 	if err != nil {
-		return recovery{}, uuid.Nil
+		return recovery{}
 	}
-	return c.autoRecover(ctx, task, a, run, &outcome{kind: "interrupted", retry: true}), *runID
+	return c.autoRecover(ctx, task, a, run, &outcome{kind: "interrupted", retry: true})
 }
 
 // --- thread helpers ---
@@ -868,8 +866,8 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		c.system(ctx, task.ID, "Stopped.")
 		runStatus = "CANCELED"
 	case "interrupted":
-		alertText = "The agent run was interrupted before it finished (the server stopped or its request was cut off). Reply or press Run to continue."
-		c.system(ctx, task.ID, alertText)
+		// Posted below, once auto-recover has decided whether a human is needed.
+		alertText = "The agent run was interrupted before it finished (the server stopped or its request was cut off)."
 		runStatus = "FAILED"
 		if run != nil {
 			run.Error = "interrupted"
@@ -897,12 +895,26 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 	if out.retry && runID != nil && next == store.TaskWaitingHuman {
 		rec = c.autoRecover(ctx, task, a, run, out)
 	}
+	if out.kind == "interrupted" {
+		if !rec.retry {
+			alertText += " Reply or press Run to continue."
+		}
+		c.system(ctx, task.ID, alertText)
+	}
+	var changed bool
+	var err error
+	if rec.retry {
+		// Only a requeue that took (no human stopped the task meanwhile) is announced and recorded as one.
+		changed, err = c.store.RequeueClaimedTask(ctx, task.ID, *runID, rec.after)
+		if err == nil && changed {
+			next = store.TaskTodo
+			run.Outcome = outcomeRecovered
+		} else {
+			rec = recovery{}
+		}
+	}
 	if rec.note != "" {
 		c.system(ctx, task.ID, rec.note)
-	}
-	if rec.retry {
-		next = store.TaskTodo
-		run.Outcome = outcomeRecovered
 	}
 	if run != nil {
 		run.Status = runStatus
@@ -914,11 +926,9 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		}
 	}
 
-	var changed bool
-	var err error
 	switch {
 	case rec.retry:
-		changed, err = c.store.RequeueClaimedTask(ctx, task.ID, *runID, rec.after)
+		// requeued above
 	case runID != nil:
 		changed, err = c.store.SetClaimedTaskStatus(ctx, task.ID, *runID, next, result)
 	default:

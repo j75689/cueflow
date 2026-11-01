@@ -46,7 +46,8 @@ type Agent struct {
 	AutoHandOff bool `json:"auto_handoff"`
 	// AutoRecover is how many runs in a row that failed for a transient reason (a connection or
 	// provider error, a lost runner, an interrupted server) start again on their own after a backoff,
-	// instead of waiting for a human; 0 = off, at most 10 (any runtime).
+	// instead of waiting for a human; 0 = off, at most 10. Not for external (self-driven) runtimes,
+	// whose agents report their own runs.
 	AutoRecover int        `json:"auto_recover"`
 	IsActive    bool       `json:"is_active"`
 	Stats       AgentStats `json:"stats"`
