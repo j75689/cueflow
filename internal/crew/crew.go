@@ -43,6 +43,8 @@ type Crew struct {
 	ContextHandOffAt float64
 	Lease            time.Duration
 	Every            time.Duration
+	// RecoverBackoff is how long the k-th auto-recover in a row waits before the fresh run (see recover.go).
+	RecoverBackoff func(k int) time.Duration
 	// DetachedWriteTimeout bounds each write made through detached (thread messages, a tool call's other
 	// writes, a run's token delete at its end) and taskOrg's lookup; <= 0 means the default.
 	DetachedWriteTimeout time.Duration
@@ -82,15 +84,19 @@ type Crew struct {
 func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
 		fetcher: NewFetcher(allowPrivateFetch), OrgConcurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
-		Lease: 2 * time.Minute, Every: 2 * time.Second, DeliveryLimit: 30 * time.Minute,
+		Lease: 2 * time.Minute, Every: 2 * time.Second, RecoverBackoff: defaultRecoverBackoff, DeliveryLimit: 30 * time.Minute,
 		DetachedWriteTimeout: DefaultDetachedWriteTimeout, running: map[uuid.UUID]*runSlot{}, wake: make(chan struct{}, 1)}
 }
 
-func (c *Crew) Wake() {
+func (c *Crew) Wake() { c.WakeAfter(0) }
+
+// WakeAfter is Wake for work that becomes claimable after d (an auto-recover backoff). In process the
+// regular poll finds it then, so only a queued delivery needs the delay.
+func (c *Crew) WakeAfter(d time.Duration) {
 	if c.Queue != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := c.Queue.Enqueue(ctx, jobs.KindCrew, uuid.Nil, 0); err != nil {
+		if err := c.Queue.Enqueue(ctx, jobs.KindCrew, uuid.Nil, d); err != nil {
 			c.logger.Warn("enqueue crew work", "err", err)
 		}
 		return
@@ -290,20 +296,60 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 		if c.recoverSelfDriven(ctx, id) {
 			continue
 		}
-		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {
-			c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
-			c.broker.Publish(c.taskOrg(ctx, id), "task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
-			if t, err := c.store.GetTask(ctx, id); err == nil {
-				var a *store.Agent
-				if t.AssigneeAgentID != nil {
-					if got, err := c.store.GetAgent(ctx, *t.AssigneeAgentID); err == nil {
-						a = got
-					}
-				}
-				c.alert(ctx, t, a, "interrupted", "The run stopped (server restart or crash). Reply or press Run to continue.")
+		t, err := c.store.GetTask(ctx, id)
+		if err != nil {
+			continue
+		}
+		var a *store.Agent
+		if t.AssigneeAgentID != nil {
+			if got, err := c.store.GetAgent(ctx, *t.AssigneeAgentID); err == nil {
+				a = got
 			}
 		}
+		rec, runID := c.recoverLapsed(ctx, t, a)
+		next, ok := store.TaskWaitingHuman, false
+		if rec.retry {
+			next = store.TaskTodo
+			ok, _ = c.store.RequeueClaimedTask(ctx, id, runID, rec.after)
+		} else {
+			ok, _ = c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil)
+		}
+		if !ok {
+			continue
+		}
+		if rec.retry {
+			if err := c.store.FailAgentRun(ctx, runID, outcomeRecovered, "interrupted (the lease expired)"); err != nil {
+				c.logger.Warn("finish run", "err", err)
+			}
+		}
+		c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
+		if rec.note != "" {
+			c.system(ctx, id, rec.note)
+		}
+		c.broker.Publish(t.OrgID, "task.updated", map[string]any{"id": id, "status": next})
+		if rec.retry {
+			c.WakeAfter(rec.after)
+		}
+		if rec.kind != "" {
+			c.alert(ctx, t, a, rec.kind, rec.alert)
+		} else {
+			c.alert(ctx, t, a, "interrupted", "The run stopped (server restart or crash). Reply or press Run to continue.")
+		}
 	}
+}
+
+// recoverLapsed is autoRecover for a task whose run's lease lapsed (its worker crashed or stalled),
+// with the run of the lapsed claim.
+func (c *Crew) recoverLapsed(ctx context.Context, task *store.Task, a *store.Agent) (recovery, uuid.UUID) {
+	runID, err := c.store.TaskRunID(ctx, task.ID)
+	if err != nil || runID == nil {
+		return recovery{}, uuid.Nil
+	}
+	run, err := c.store.GetAgentRun(ctx, *runID)
+	if err != nil {
+		return recovery{}, uuid.Nil
+	}
+	return c.autoRecover(ctx, task, a, run, &outcome{kind: "interrupted", retry: true}), *runID
 }
 
 // --- thread helpers ---
@@ -509,7 +555,7 @@ func (c *Crew) loop(ctx context.Context, task *store.Task, a *store.Agent, run *
 				c.logger.Warn("context window exceeded", "task", task.ID, "turns", run.Turns, "err", err)
 				return &outcome{kind: "overflow", text: overflowMessage(run.Turns)}
 			}
-			return &outcome{kind: "error", text: err.Error()}
+			return &outcome{kind: "error", text: err.Error(), retry: true}
 		}
 		run.Turns++
 		run.InputTokens += resp.Usage.InputTokens
@@ -846,6 +892,18 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 			next = store.TaskTodo
 		}
 	}
+	// A transient failure that no comment re-queued may start again on its own (auto-recover).
+	var rec recovery
+	if out.retry && runID != nil && next == store.TaskWaitingHuman {
+		rec = c.autoRecover(ctx, task, a, run, out)
+	}
+	if rec.note != "" {
+		c.system(ctx, task.ID, rec.note)
+	}
+	if rec.retry {
+		next = store.TaskTodo
+		run.Outcome = outcomeRecovered
+	}
 	if run != nil {
 		run.Status = runStatus
 		if run.Outcome == "" {
@@ -858,9 +916,12 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 
 	var changed bool
 	var err error
-	if runID != nil {
+	switch {
+	case rec.retry:
+		changed, err = c.store.RequeueClaimedTask(ctx, task.ID, *runID, rec.after)
+	case runID != nil:
 		changed, err = c.store.SetClaimedTaskStatus(ctx, task.ID, *runID, next, result)
-	} else {
+	default:
 		changed, err = c.store.SetTaskStatusIf(ctx, task.ID, []store.TaskStatus{store.TaskInProgress}, next, result)
 	}
 	if err != nil {
@@ -876,12 +937,14 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		c.resumeIfSubtasksDone(ctx, task.ID)
 	}
 	if next == store.TaskTodo {
-		c.Wake()
+		c.WakeAfter(rec.after)
 	}
 	if task.ParentID != nil && (next == store.TaskDone || next == store.TaskReview) {
 		c.resumeIfSubtasksDone(ctx, *task.ParentID)
 	}
-	if next == store.TaskWaitingHuman || next == store.TaskReview {
+	if rec.kind != "" {
+		c.alert(ctx, task, a, rec.kind, rec.alert) // instead of the plain failed one
+	} else if next == store.TaskWaitingHuman || next == store.TaskReview {
 		c.alert(ctx, task, a, out.kind, alertText)
 	}
 }

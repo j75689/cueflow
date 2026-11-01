@@ -37,7 +37,7 @@ func stopped(ctx context.Context) *outcome {
 	if errors.Is(context.Cause(ctx), errStopped) {
 		return &outcome{kind: "canceled"}
 	}
-	return &outcome{kind: "interrupted"}
+	return &outcome{kind: "interrupted", retry: true}
 }
 
 type deliveryKey struct{}

@@ -103,7 +103,7 @@ func (s *Store) TodoTaskCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks t JOIN agents a ON a.id=t.assignee_agent_id AND a.is_active
 		LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id
-		WHERE t.status='TODO' AND COALESCE(rc.type,'') <> 'external'`).Scan(&n)
+		WHERE t.status='TODO' AND COALESCE(rc.type,'') <> 'external' AND `+claimable).Scan(&n)
 	return n, err
 }
 

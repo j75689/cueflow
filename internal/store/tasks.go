@@ -420,6 +420,7 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		if !st.Valid() {
 			return nil, nil, Invalid("unknown status")
 		}
+		sets = append(sets, "retry_at=NULL") // a human move (or Run now) ends an auto-recover backoff
 		if st == TaskInProgress && before.Status != TaskInProgress {
 			return nil, nil, Invalid("IN_PROGRESS is set by the agent runner; move the task to TODO to start it")
 		}
@@ -486,7 +487,7 @@ func (s *Store) setTaskStatus(ctx context.Context, id uuid.UUID, from []TaskStat
 		fs[i] = string(f)
 	}
 	completed := to == TaskDone || to == TaskReview
-	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status=$3::text, lease_until=NULL, version=version+1, updated_at=NOW(),
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status=$3::text, lease_until=NULL, retry_at=NULL, version=version+1, updated_at=NOW(),
 		result = COALESCE($4, result),
 		completed_at = CASE WHEN $5 THEN NOW() ELSE completed_at END,
 		position = COALESCE((SELECT max(o.position) FROM tasks o WHERE o.status=$3::text AND o.org_id=tasks.org_id), 0) + 1024
@@ -495,6 +496,25 @@ func (s *Store) setTaskStatus(ctx context.Context, id uuid.UUID, from []TaskStat
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// RequeueClaimedTask is how the holder of a claim sends its task back to TODO after a transient
+// failure (auto-recover): ClaimTodo skips it until after has passed. Fenced like SetClaimedTaskStatus.
+func (s *Store) RequeueClaimedTask(ctx context.Context, id, runID uuid.UUID, after time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET status='TODO', lease_until=NULL, retry_at=NOW() + make_interval(secs => $3),
+		version=version+1, updated_at=NOW(),
+		position = COALESCE((SELECT max(o.position) FROM tasks o WHERE o.status='TODO' AND o.org_id=tasks.org_id), 0) + 1024
+		WHERE id=$1 AND status='IN_PROGRESS' AND run_id=$2`, id, runID, after.Seconds())
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ClearTaskRetry makes a TODO task waiting out an auto-recover backoff claimable now.
+func (s *Store) ClearTaskRetry(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE tasks SET retry_at=NULL WHERE id=$1 AND retry_at IS NOT NULL`, id)
+	return err
 }
 
 // DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade
@@ -574,6 +594,9 @@ const crewRun = `JOIN agents a ON a.id = t.assignee_agent_id
 	LEFT JOIN connectors rc ON rc.id = a.runtime_connector_id`
 const crewRunWhere = `COALESCE(rc.type, '') <> 'external'`
 
+// claimable leaves out a TODO task t still waiting out an auto-recover backoff.
+const claimable = `(t.retry_at IS NULL OR t.retry_at <= NOW())`
+
 // ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS. Each org
 // gets no more than its agent_concurrency (orgDefault when unset) minus the tasks the crew already works
 // for it, counted across every instance. Claimers take a transaction advisory lock per org they claim
@@ -591,7 +614,7 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 	}
 	defer tx.Rollback(ctx)
 	rows, err := tx.Query(ctx, `SELECT DISTINCT t.org_id FROM tasks t `+crewRun+`
-		WHERE t.status='TODO' AND a.is_active AND `+crewRunWhere)
+		WHERE t.status='TODO' AND a.is_active AND `+crewRunWhere+` AND `+claimable)
 	if err != nil {
 		return nil, err
 	}
@@ -610,7 +633,7 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 		), todo AS (
 			SELECT t.id, t.org_id, t.updated_at,
 				CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END AS prio
-			FROM tasks t `+crewRun+` WHERE t.org_id = ANY($3) AND t.status='TODO' AND a.is_active AND `+crewRunWhere+`
+			FROM tasks t `+crewRun+` WHERE t.org_id = ANY($3) AND t.status='TODO' AND a.is_active AND `+crewRunWhere+` AND `+claimable+`
 		), ranked AS (
 			SELECT todo.*, row_number() OVER (PARTITION BY org_id ORDER BY prio, updated_at) AS n FROM todo
 		), picked AS (
@@ -619,7 +642,7 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 			-- A task another writer holds is skipped, not waited on: this claim holds its orgs' locks.
 			SELECT id FROM tasks WHERE id IN (SELECT id FROM picked) AND status='TODO' FOR UPDATE SKIP LOCKED
 		)
-		UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1),
+		UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $1), retry_at = NULL,
 			attempts = attempts + 1, run_id = gen_random_uuid(),
 			started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
 		WHERE id IN (SELECT id FROM locked)
@@ -816,7 +839,8 @@ type AgentRun struct {
 	ContextTokens int64 `json:"context_tokens"`
 	ContextWindow int64 `json:"context_window"`
 	// Outcome is how the run ended: complete, ask, approval, wait, handoff, overflow, limit, error,
-	// canceled, interrupted, continued ("" while running, and for runs before it was recorded;
+	// canceled, interrupted, continued, retry (failed, and auto-recover sent the task back to TODO)
+	// ("" while running, and for runs before it was recorded;
 	// "handover" while a running run waits for the next delivery to keep watching it).
 	Outcome string `json:"outcome"`
 	Error   string `json:"error"`
@@ -859,6 +883,13 @@ func (s *Store) FinishAgentRun(ctx context.Context, r *AgentRun) error {
 		WHERE id=$1`,
 		r.ID, r.Status, r.Turns, r.ToolCalls, r.InputTokens, r.OutputTokens, r.Error, r.ConnectorID, r.Model, runtime,
 		r.CacheReadTokens, r.CacheWriteTokens, r.ContextTokens, r.ContextWindow, r.Outcome)
+	return err
+}
+
+// FailAgentRun closes a run that is still recorded as running, whose worker is gone (a lapsed lease).
+func (s *Store) FailAgentRun(ctx context.Context, id uuid.UUID, outcome, errText string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET status='FAILED', outcome=$2, error=$3, finished_at=NOW()
+		WHERE id=$1 AND status='RUNNING'`, id, outcome, errText)
 	return err
 }
 

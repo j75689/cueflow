@@ -187,6 +187,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
   "language":"en","platforms":["threads","instagram"],
   "max_turns":12,"is_active":true,
   "auto_handoff":false,                    // continue a hand-off (with a note) without waiting, up to 3 in a row; always false with a runtime connector
+  "auto_recover":0,                        // failed runs in a row (transient failures) that start again on their own after a backoff, 0-10; 0 = off
   "stats":{"open_tasks":2,"running":1},
   "created_at":"...","updated_at":"..."
 }
@@ -197,7 +198,7 @@ An agent is a configured role (persona + capabilities + connectors) that works t
 |---|---|---|---|
 | GET | `/agents` | | → `[Agent]` |
 | POST | `/agents` | Agent fields (no id/stats/timestamps); `slug` derived from name if omitted | |
-| POST | `/agents/template` | A team template file: `{"version":1,"name","description","agents":[{"name","slug","avatar","role","description","instructions","capabilities","platforms","language","max_turns","auto_handoff"}]}` (example: `templates/social-content.json`) | Imports the roles the org does not have yet (matched by slug), so importing twice or over a hand-made team only adds what is missing → `200 {"created":[Agent, ...],"skipped":["writer"]}`; a malformed file or an unknown capability/role/platform is `400` |
+| POST | `/agents/template` | A team template file: `{"version":1,"name","description","agents":[{"name","slug","avatar","role","description","instructions","capabilities","platforms","language","max_turns","auto_handoff","auto_recover"}]}` (example: `templates/social-content.json`) | Imports the roles the org does not have yet (matched by slug), so importing twice or over a hand-made team only adds what is missing → `200 {"created":[Agent, ...],"skipped":["writer"]}`; a malformed file or an unknown capability/role/platform is `400` |
 | GET | `/agents/template` | | The org's agents as a template file (no ids, connectors or stats), `Content-Disposition: attachment` |
 | GET/PATCH/DELETE | `/agents/{id}` | | PATCH = partial; DELETE unassigns its tasks |
 | GET | `/agents/{id}/memories` | | → `[{"id","agent_id","content","created_at"}]` newest first |
@@ -445,7 +446,7 @@ prompt cache), and `"context_tokens"` / `"context_window"`: the prompt of the ru
 context is; `input_tokens` adds up every call) and the model's input limit, `0` when unknown. The window comes from the
 connector's Context window setting, or for Claude on the Claude API from the Models API (`max_input_tokens`, asked
 once per model per process). `"outcome"` is how the run ended: `complete`, `ask`, `approval`, `wait`, `handoff` (waited for
-the human), `handoff_auto` (continued on its own), `overflow`, `limit`, `error` or `canceled` (`""` while running and for runs recorded before it existed).
+the human), `handoff_auto` (continued on its own), `retry` (failed, and Auto-recover sent the task back to `TODO`), `overflow`, `limit`, `error` or `canceled` (`""` while running and for runs recorded before it existed).
 
 ---
 

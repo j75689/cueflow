@@ -16,7 +16,8 @@ import (
 const alertTimeout = 15 * time.Second
 
 // alertHeadline is the alert's first line for a run that ended with the task waiting for a human
-// (WAITING_HUMAN or REVIEW); "" for outcomes that send none.
+// (WAITING_HUMAN or REVIEW), or failed and starts again on its own (recover*; see autoRecover); ""
+// for outcomes that send none.
 func alertHeadline(kind string) string {
 	switch kind {
 	case "complete":
@@ -37,6 +38,12 @@ func alertHeadline(kind string) string {
 		return "⚠️ Interrupted"
 	case "error":
 		return "❌ Run failed"
+	case "recover":
+		return "❌ Run failed, auto-recovering"
+	case "recover_interrupted":
+		return "⚠️ Interrupted, auto-recovering"
+	case "recover_gaveup":
+		return "🛑 Run failed, auto-recover gave up"
 	}
 	return "" // canceled (a human stopped it) and wait (blocked on subtasks) need no one
 }

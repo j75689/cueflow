@@ -30,6 +30,8 @@ type TeamAgent struct {
 	MaxTurns int `json:"max_turns,omitempty"`
 	// AutoHandOff continues hand-offs without waiting for a human (see store.Agent.AutoHandOff).
 	AutoHandOff bool `json:"auto_handoff,omitempty"`
+	// AutoRecover is how many transient failures in a row start again on their own (see store.Agent.AutoRecover).
+	AutoRecover int `json:"auto_recover,omitempty"`
 }
 
 // Team is a team template: a set of roles as data, kept as a JSON file outside the code (the way
@@ -94,7 +96,8 @@ func (ta TeamAgent) Agent(org uuid.UUID) *store.Agent {
 	}
 	return &store.Agent{OrgID: org, Name: ta.Name, Slug: ta.Slug, Avatar: ta.Avatar, Role: ta.Role,
 		Description: ta.Description, Instructions: ta.Instructions, Capabilities: caps,
-		Platforms: append([]string{}, ta.Platforms...), Language: lang, MaxTurns: turns, AutoHandOff: ta.AutoHandOff, IsActive: true}
+		Platforms: append([]string{}, ta.Platforms...), Language: lang, MaxTurns: turns, AutoHandOff: ta.AutoHandOff,
+		AutoRecover: ta.AutoRecover, IsActive: true}
 }
 
 // TeamFromAgents is the export: an org's agents as a template, without ids, connectors, stats or
@@ -108,7 +111,8 @@ func TeamFromAgents(name string, agents []*store.Agent) Team {
 		}
 		t.Agents = append(t.Agents, TeamAgent{Name: a.Name, Slug: a.Slug, Avatar: a.Avatar, Role: a.Role,
 			Description: a.Description, Instructions: a.Instructions, Capabilities: caps,
-			Platforms: append([]string{}, a.Platforms...), Language: a.Language, MaxTurns: a.MaxTurns, AutoHandOff: a.AutoHandOff})
+			Platforms: append([]string{}, a.Platforms...), Language: a.Language, MaxTurns: a.MaxTurns, AutoHandOff: a.AutoHandOff,
+			AutoRecover: a.AutoRecover})
 	}
 	return t
 }

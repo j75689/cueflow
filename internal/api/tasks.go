@@ -455,8 +455,13 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 
 	if t.AssigneeAgentID != nil {
 		switch t.Status {
-		case store.TaskBacklog, store.TaskCanceled, store.TaskTodo:
-			// parked, or already queued
+		case store.TaskBacklog, store.TaskCanceled:
+			// parked
+		case store.TaskTodo:
+			// already queued; one waiting out an auto-recover backoff runs now
+			if err := s.Store.ClearTaskRetry(ctx, id); err == nil {
+				s.Crew.TaskChanged(ctx, t)
+			}
 		case store.TaskInProgress:
 			// the runner notices the new comment when this run ends and goes again
 		default:

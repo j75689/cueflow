@@ -186,6 +186,8 @@ Benefits:
 | Built-in run used its cloud delivery's time (below) | system message | `TODO`, continuing in a fresh run (up to 5 in a row, then `WAITING_HUMAN`) | SUCCEEDED (`continued`) |
 | Context ended any other way (the server stopped, a delivery's request was cut off) | system message (interrupted; reply to continue) | `WAITING_HUMAN` | FAILED |
 | Process restart, lease expired | system message (explaining the interruption) | `WAITING_HUMAN` | FAILED |
+| Transient failure (LLM or connection error, runner lost or not picked up, opaque runner/ACP error, interrupted, lease expired) with **Auto-recover** on (§6.4) | the usual system message, then "Auto-recover k of n: a fresh run starts in …" | `TODO`, claimable after a backoff | FAILED (`retry`) |
+| The same, past the agent's Auto-recover limit | the usual system message, then "Auto-recover gave up after n attempts in a row" | `WAITING_HUMAN` | FAILED |
 
 **Cloud deliveries** (`CUEFLOW_QUEUE=cloudtasks`): a run works inside one Cloud Tasks delivery, an HTTP
 request that Cloud Tasks and Cloud Run cut off after 30 minutes. A delivery claims work only in its first
@@ -203,7 +205,7 @@ message through the notifier connector the org picked (**Manage orgs → Alerts*
 names the org, task, agent and reason, with a link to the task (built from `CUEFLOW_PUBLIC_URL`). A run
 stopped by a human, a task blocked on subtasks, an agent-created subtask that ends `DONE` and a run that a
 mid-run comment re-queues send none. Sending is best effort (15 s timeout, errors logged); disabling the
-notifier connector mutes it.
+notifier connector mutes it. A failure that Auto-recover retries sends one alert of its own instead (§6.4).
 
 ### 6.3 Hand-off when the context fills up
 
@@ -235,6 +237,23 @@ A run hands off only once it has grown by a tenth of the window since its first 
 sooner (a large brief or note, a small window), a fresh run would start almost as full and hand off again, so the
 run says so once and carries on instead. Without a known window there is no
 hand-off; the run ends with a context-overflow message if it runs out.
+
+### 6.4 Auto-recover
+An agent's **Auto-recover** setting (`auto_recover`, 0–10, 0 = off by default; any runtime) is how many runs in a row
+that failed for a transient reason start again on their own instead of waiting for a human. Transient means: a
+built-in model call failed (other than a full context window; 4xx errors included for now), a runner job was lost,
+stopped responding or wasn't picked up within the queue timeout, a runner or ACP agent ended with an error, the
+run was interrupted (server stopped, delivery cut off) or its lease expired. Not transient: the turn budget, a full
+context window, an external agent's timeout or refusal, configuration errors, and a human stop.
+
+- The task goes back to `TODO` with `tasks.retry_at` set: the claim skips it until then. The backoff is 30s and
+  doubles per attempt, capped at 10 minutes. The fresh run starts from the task, its thread and files, like any run
+  (§6.1). A comment runs it at once, and so does Run; Stop parks it in `WAITING_HUMAN`.
+- The count is read from the task's runs: it covers the latest runs recorded `retry`. A failure past the limit keeps
+  its own outcome, so it ends the streak, as do any other outcome and a human message.
+- **Alerts**: one per failure, instead of the plain one. "❌ Run failed, auto-recovering" ("⚠️ Interrupted,
+  auto-recovering" for an interrupted run or lapsed lease) says "Auto-recover k of n: retrying in 30s."; past the
+  limit, "🛑 Run failed, auto-recover gave up". A run that succeeds after a recovery sends its usual alert.
 
 ## 7. Delegation and resumption
 
@@ -308,6 +327,7 @@ target each time.
 | How full a run's context may get | 80% of the model's window by default (`CUEFLOW_CONTEXT_HANDOFF`); past it the run writes a hand-off note and waits for the human (§6.3), getting up to 2 turns past its turn limit for the note. The task page shows each run's latest prompt as "Context 182K / 1M (18%)", coloured from there, and without a percentage when the window is unknown | `config`, `crew/handoff.go` |
 | The hand-off note in the next brief | 12,000 characters (`handoff.md` has the rest) | `crew/handoff.go` |
 | Automatic hand-offs in a row (Auto hand-off on) | 3; the next waits for the human. A hand-off that waited, a run that ends otherwise, or a human message resets the count | `crew/handoff.go` |
+| Automatic recoveries in a row (Auto-recover on) | The agent's `auto_recover`, at most 10; backoff 30s doubling to 10 minutes; the next failure waits for the human. Any other outcome or a human message resets the count | `crew/recover.go` |
 | Subtasks + standalone tasks created per run | 8 | `crew/tools.go` |
 | Drafts created per run | 10 | `crew/tools.go` |
 | Delegation depth | 3 levels | `crew/tools.go` |
@@ -321,7 +341,7 @@ target each time.
 | Schedule frequency | ≥ 5 minutes | `scheduler.ValidateSchedule` |
 | Parallel tasks | 3 per org, across every instance (the org's `agent_concurrency`, 1–64, set under Manage orgs; `CUEFLOW_AGENT_CONCURRENCY` when unset). Tasks of external (self-driven) agents don't count | `store.ClaimTodo`, `config` |
 | One model call | 10 minutes; every LLM connector streams the answer, so a long one isn't cut off by the timeout other connector requests have (`CUEFLOW_CONNECTOR_HTTP_TIMEOUT`, default 90s), nor by a proxy's idle timeout. Claude connectors wait up to 2 minutes for the answer to start and try again when a stream breaks off or reports an overload; an OpenAI-compatible server that doesn't stream is read the old way, within the 10 minutes | `llm/llm.go`, `connectors/anthropic`, `connectors/openai` |
-| Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN`. Each claim mints the id of the run that works it (`tasks.run_id`), and a run renews and finishes the task only under its own claim: a run that stalled past its lease while the task was claimed again stops at its next tool call or heartbeat, whichever comes first (a tool call is refused before it runs), and leaves the task to the new run | `crew/crew.go`, `store.Claim` |
+| Run lease | 2 minutes, renewed every 40 seconds; expired → `WAITING_HUMAN` (or back to `TODO` with Auto-recover, §6.4). Each claim mints the id of the run that works it (`tasks.run_id`), and a run renews and finishes the task only under its own claim: a run that stalled past its lease while the task was claimed again stops at its next tool call or heartbeat, whichever comes first (a tool call is refused before it runs), and leaves the task to the new run | `crew/crew.go`, `store.Claim` |
 | `read_url` | http(s) only; blocks loopback / private / link-local / CGNAT / multicast at dial time; at most 5 redirects; 2 MB, 8,000 characters, 30 seconds; bypasses the system proxy (`CUEFLOW_AGENT_ALLOW_PRIVATE_URLS=true` relaxes this) | `crew/fetch.go` |
 | Publishing | Impossible for any agent, see §4 | `guard`, `connector` |
 
