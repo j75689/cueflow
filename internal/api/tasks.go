@@ -501,7 +501,7 @@ func (s *Server) runTaskOp(ctx context.Context, id uuid.UUID) (*store.Task, erro
 		return t, nil
 	}
 	st := store.TaskTodo
-	_, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{Status: &st})
+	_, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{Status: &st, RunNow: true})
 	if err != nil {
 		return nil, err
 	}

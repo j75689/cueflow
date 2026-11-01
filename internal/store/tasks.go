@@ -388,6 +388,8 @@ type TaskPatch struct {
 	AssigneeAgentID **uuid.UUID
 	DueAt           **time.Time
 	Position        *float64
+	// RunNow is the human's Run: with Status, it resets an auto-recover count even on a TODO task.
+	RunNow bool
 	// Publishing defaults: both are set together.
 	PublisherConnectorID **uuid.UUID
 	PublishAccounts      *[]string
@@ -420,10 +422,13 @@ func (s *Store) UpdateTask(ctx context.Context, id uuid.UUID, p TaskPatch) (befo
 		if !st.Valid() {
 			return nil, nil, Invalid("unknown status")
 		}
-		// A human move (or Run now) ends an auto-recover backoff and starts its count again.
-		sets = append(sets, "retry_at=NULL", "recover_reset_at=NOW()")
 		if st == TaskInProgress && before.Status != TaskInProgress {
 			return nil, nil, Invalid("IN_PROGRESS is set by the agent runner; move the task to TODO to start it")
+		}
+		// A human move (or Run now) ends an auto-recover backoff and starts its count again; resending
+		// the current status is not a move.
+		if st != before.Status || p.RunNow {
+			sets = append(sets, "retry_at=NULL", "recover_reset_at=NOW()")
 		}
 		if st != before.Status {
 			add("status", string(st))

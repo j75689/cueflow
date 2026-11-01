@@ -344,7 +344,10 @@ func TestAutoRecoverCountResetsOnAHumanMove(t *testing.T) {
 		t.Fatalf("Stop then Run should reset the count: runs %s\n%s", got, thread)
 	}
 
-	// No human move: the next failure in a row counts on.
+	// No human move, only an edit that resends the current status: the next failure in a row counts on.
+	if code := e.do("PATCH", "/tasks/"+id, map[string]any{"title": "Flaky job", "status": "TODO"}, nil); code != 200 {
+		t.Fatalf("edit: %d", code)
+	}
 	if _, err := e.pool.Exec(context.Background(), `UPDATE tasks SET retry_at=NOW() WHERE id=$1`, task.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -253,7 +253,8 @@ context window, an external agent's timeout or refusal, configuration errors, an
   (§6.1). A comment runs it at once, and so does Run; Stop parks it in `WAITING_HUMAN`.
 - The count is read from the task's runs: it covers the latest runs recorded `retry`. A failure past the limit keeps
   its own outcome, so it ends the streak, as do any other outcome, a human message, and a human moving the task (a
-  status change on the board, or Run, e.g. after Stop; `tasks.recover_reset_at`). Hand-off and delivery-continue
+  status change on the board, but not a write that resends the current status, or Run, e.g. after Stop;
+  `tasks.recover_reset_at`). Hand-off and delivery-continue
   streaks pass over `retry` runs, so their caps (3 and 5) still bound a task that alternates between them and failures.
 - **Alerts**: one per failure, instead of the plain one. "❌ Run failed, auto-recovering" ("⚠️ Interrupted,
   auto-recovering" for an interrupted run or lapsed lease) says "Auto-recover k of n: retrying in 30s."; past the
