@@ -102,6 +102,7 @@ export interface TeamAgent {
   language?: string;
   max_turns?: number;
   auto_handoff?: boolean;
+  auto_recover?: number;
 }
 
 /** A team template: a JSON file imported into an org (Agents → Import team) or exported from one. */
@@ -390,6 +391,8 @@ export interface Agent {
   max_turns: number;
   /** Continue a hand-off (with a note) in a fresh run without waiting for a human, up to 3 in a row. */
   auto_handoff: boolean;
+  /** Failed runs in a row (transient failures) that start again on their own after a backoff; 0 = off, max 10. */
+  auto_recover: number;
   is_active: boolean;
   stats?: { open_tasks: number; running: number } | null;
   created_at: string;
