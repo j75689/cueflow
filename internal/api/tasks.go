@@ -238,7 +238,7 @@ func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.Tas
 	if err != nil {
 		return nil, err
 	}
-	if before.Status != after.Status || !sameAgent(before.AssigneeAgentID, after.AssigneeAgentID) {
+	if before.Status != after.Status || !store.SameID(before.AssigneeAgentID, after.AssigneeAgentID) {
 		if before.Status == store.TaskInProgress {
 			s.Crew.Cancel(id) // a human moved or reassigned a running card
 		}
@@ -254,13 +254,6 @@ func (s *Server) updateTaskOp(ctx context.Context, id uuid.UUID, patch store.Tas
 	}
 	s.Broker.Publish(after.OrgID, "task.updated", map[string]any{"id": after.ID, "status": after.Status})
 	return after, nil
-}
-
-func sameAgent(a, b *uuid.UUID) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +429,7 @@ func (s *Server) postTaskMessageOp(ctx context.Context, id uuid.UUID, content st
 		return nil, err
 	}
 	if m := mentionRe.FindStringSubmatch(strings.ToLower(content)); m != nil {
-		if a, err := s.Store.GetAgentBySlug(ctx, t.OrgID, m[1]); err == nil && !sameAgent(t.AssigneeAgentID, &a.ID) {
+		if a, err := s.Store.GetAgentBySlug(ctx, t.OrgID, m[1]); err == nil && !store.SameID(t.AssigneeAgentID, &a.ID) {
 			aid := &a.ID
 			if _, after, err := s.Store.UpdateTask(ctx, id, store.TaskPatch{AssigneeAgentID: &aid}); err == nil {
 				if t.Status == store.TaskInProgress {

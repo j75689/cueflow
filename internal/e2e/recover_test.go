@@ -507,7 +507,7 @@ func TestAutoRecoverLeaseExpired(t *testing.T) {
 	}
 
 	crash()
-	if status(t, e, task) != store.TaskWaitingHuman || !strings.Contains(taskMessages(t, e, task.ID.String()), "Auto-recover gave up after 1 attempts") {
+	if status(t, e, task) != store.TaskWaitingHuman || !strings.Contains(taskMessages(t, e, task.ID.String()), "Auto-recover gave up after 1 attempt in a row") {
 		t.Fatalf("status %s\n%s", status(t, e, task), taskMessages(t, e, task.ID.String()))
 	}
 	if got := subjects(takeAlerts()); got != "🛑 Run failed, auto-recover gave up: Crashy" {
@@ -568,5 +568,218 @@ func TestAutoRecoverSetting(t *testing.T) {
 		if ta.Slug == "writer" && ta.AutoRecover != 3 {
 			t.Fatalf("template: %+v", ta)
 		}
+	}
+}
+
+// An interrupted run that gives up asks for a reply once: the gave-up note does, the interrupted line
+// doesn't repeat it. Both for a lapsed lease and for a run interrupted in this process.
+func TestAutoRecoverInterruptedGiveUpAsksOnce(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	writer := team["writer"]
+	setAutoRecover(t, e, writer, 1)
+	lapsed := newTask(t, e, "Crashy", writer)
+	for range 2 {
+		runID := uuid.New()
+		if _, err := e.store.StartAgentRun(ctx, runID, lapsed.ID, writer.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
+			WHERE id=$1`, lapsed.ID, runID); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.crew.Sweep(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.crew.RecoverBackoff = func(int) time.Duration { return 0 }
+	shutdown := newTask(t, e, "Shutdown", writer)
+	for range 2 {
+		c, cancel := context.WithCancel(ctx)
+		setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+			cancel()
+			return calls("add_comment", map[string]any{"content": "working"})
+		})
+		e.crew.RunPending(c, 1)
+	}
+
+	for _, task := range []store.Task{lapsed, shutdown} {
+		thread := taskMessages(t, e, task.ID.String())
+		if status(t, e, task) != store.TaskWaitingHuman || strings.Count(thread, "Reply or press Run to continue.") != 1 ||
+			!strings.Contains(thread, "Auto-recover gave up after 1 attempt in a row. Reply or press Run to continue.") {
+			t.Fatalf("%s: status %s\n%s", task.Title, status(t, e, task), thread)
+		}
+	}
+}
+
+// A comment left while a run was failing ends the wait at once, as one left during the backoff does,
+// with the same alert.
+func TestAutoRecoverCommentDuringFailingRun(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	withNotifier(t, e)
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, team["writer"], 3)
+	var task store.Task
+	failed := false
+	setFail(t, func(req llm.Request) error {
+		if failed {
+			return nil
+		}
+		failed = true
+		if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "also check X"}, nil); code != 201 {
+			t.Errorf("comment: %d", code)
+		}
+		return errConnReset
+	})
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		return calls("complete_task", map[string]any{"summary": "done"})
+	})
+	task = newTask(t, e, "Flaky", team["writer"])
+	e.crew.RunPending(ctx, 1)
+	var waiting bool
+	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
+		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
+	}
+	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 3: a fresh run starts now") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+	runAll(e)
+	if got := outcomes(t, e, task); got != "complete,retry" {
+		t.Fatalf("runs %s", got)
+	}
+	if got := subjects(takeAlerts()); got != "❌ Run failed, auto-recovering: Flaky | ✅ Ready for review: Flaky" {
+		t.Fatalf("alerts: %s", got)
+	}
+}
+
+// So does a comment left while a run whose lease then lapsed was failing.
+func TestAutoRecoverCommentDuringLapsedRun(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	writer := team["writer"]
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, writer, 3)
+	task := newTask(t, e, "Crashy", writer)
+	runID := uuid.New()
+	if _, err := e.store.StartAgentRun(ctx, runID, task.ID, writer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
+		WHERE id=$1`, task.ID, runID); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "also check X"}, nil); code != 201 {
+		t.Fatalf("comment: %d", code)
+	}
+	if err := e.crew.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var waiting bool
+	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
+		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
+	}
+	if thread := taskMessages(t, e, task.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 3: a fresh run starts now") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+}
+
+// An external (self-driven) agent never auto-recovers, so the setting is stored as 0 for it, whether
+// it is created that way or switched to the external runtime, and its template says so.
+func TestAutoRecoverOffForExternalAgents(t *testing.T) {
+	e, team := crewSetup(t)
+	var rt store.Connector
+	if code := e.do("POST", "/connectors", map[string]any{"name": "Self-driven", "type": "external", "config": map[string]any{}}, &rt); code != 201 {
+		t.Fatalf("create runtime: %d", code)
+	}
+	var a store.Agent
+	if code := e.do("PATCH", "/agents/"+team["writer"].ID.String(), map[string]any{"runtime_connector_id": rt.ID, "auto_recover": 5,
+		"auto_handoff": true}, &a); code != 200 || a.AutoRecover != 0 || a.AutoHandOff {
+		t.Fatalf("patch: %d %+v", code, a)
+	}
+	if code := e.do("POST", "/agents", map[string]any{"name": "Outside", "slug": "outside", "capabilities": []string{},
+		"runtime_connector_id": rt.ID, "auto_recover": 3}, &a); code != 201 || a.AutoRecover != 0 {
+		t.Fatalf("create: %d %+v", code, a)
+	}
+	var tmpl struct {
+		Agents []struct {
+			Slug        string `json:"slug"`
+			AutoRecover int    `json:"auto_recover"`
+		} `json:"agents"`
+	}
+	e.do("GET", "/agents/template", nil, &tmpl)
+	for _, ta := range tmpl.Agents {
+		if (ta.Slug == "writer" || ta.Slug == "outside") && ta.AutoRecover != 0 {
+			t.Fatalf("template: %+v", ta)
+		}
+	}
+}
+
+// A new assignee doesn't wait out the old one's backoff, and starts its own count (resending the same
+// assignee changes nothing); so does a task left unassigned by deleting its agent.
+func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	e.crew.RecoverBackoff = func(int) time.Duration { return time.Hour }
+	setAutoRecover(t, e, team["writer"], 3)
+	setAutoRecover(t, e, team["editor"], 1)
+	setFail(t, alwaysFail)
+	backingOff := func(task store.Task) bool {
+		t.Helper()
+		var waiting bool
+		if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NOT NULL FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		return waiting
+	}
+
+	reassigned := newTask(t, e, "Reassigned", team["writer"])
+	runAll(e)
+	if !backingOff(reassigned) {
+		t.Fatal("not backing off")
+	}
+	// Resending the same assignee along with an edit changes nothing.
+	if code := e.do("PATCH", "/tasks/"+reassigned.ID.String(), map[string]any{"assignee_agent_id": team["writer"].ID,
+		"title": "Reassigned soon"}, nil); code != 200 {
+		t.Fatalf("edit: %d", code)
+	}
+	if reset, err := e.store.RecoverResetAt(ctx, reassigned.ID); err != nil || reset != nil || !backingOff(reassigned) {
+		t.Fatalf("same assignee: reset %v %v, backing off %v", reset, err, backingOff(reassigned))
+	}
+	if code := e.do("PATCH", "/tasks/"+reassigned.ID.String(), map[string]any{"assignee_agent_id": team["editor"].ID}, nil); code != 200 {
+		t.Fatalf("reassign: %d", code)
+	}
+	if backingOff(reassigned) {
+		t.Fatal("the new assignee waits out the old backoff")
+	}
+	if reset, err := e.store.RecoverResetAt(ctx, reassigned.ID); err != nil || reset == nil {
+		t.Fatalf("count not reset: %v %v", reset, err)
+	}
+	runAll(e)
+	if got := outcomes(t, e, reassigned); got != "retry,retry" {
+		t.Fatalf("runs %s", got)
+	}
+	if thread := taskMessages(t, e, reassigned.ID.String()); !strings.Contains(thread, "Auto-recover 1 of 1:") {
+		t.Fatalf("thread:\n%s", thread)
+	}
+
+	deleted := newTask(t, e, "Deleted", team["writer"])
+	runAll(e)
+	if !backingOff(deleted) {
+		t.Fatal("not backing off")
+	}
+	if code := e.do("DELETE", "/agents/"+team["writer"].ID.String(), nil, nil); code != 204 {
+		t.Fatalf("delete agent: %d", code)
+	}
+	got, err := e.store.GetTask(ctx, deleted.ID)
+	if err != nil || got.AssigneeAgentID != nil || backingOff(deleted) {
+		t.Fatalf("after delete: %+v %v, backing off %v", got, err, backingOff(deleted))
 	}
 }

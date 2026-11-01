@@ -323,9 +323,11 @@ func (c *Crew) recoverExpired(ctx context.Context) {
 			continue
 		}
 		if ok, _ := c.store.SetTaskStatusIf(ctx, id, []store.TaskStatus{store.TaskInProgress}, store.TaskWaitingHuman, nil); ok {
-			c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
-			if rec.note != "" {
+			if rec.note != "" { // gave up: the note asks for a reply itself
+				c.system(ctx, id, "The agent run was interrupted (server restart or crash).")
 				c.system(ctx, id, rec.note)
+			} else {
+				c.system(ctx, id, "The agent run was interrupted (server restart or crash). Reply or press Run to continue.")
 			}
 			c.broker.Publish(c.taskOrg(ctx, id), "task.updated", map[string]any{"id": id, "status": store.TaskWaitingHuman})
 			if t != nil {
@@ -896,7 +898,7 @@ func (c *Crew) finish(ctx context.Context, task *store.Task, a *store.Agent, run
 		rec = c.autoRecover(ctx, task, a, run, out)
 	}
 	if out.kind == "interrupted" {
-		if !rec.retry {
+		if !rec.retry && rec.note == "" { // a gave-up note asks for it itself
 			alertText += " Reply or press Run to continue."
 		}
 		c.system(ctx, task.ID, alertText)

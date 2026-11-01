@@ -192,6 +192,23 @@ func (a *Agent) normalize() error {
 	return nil
 }
 
+// normalizeRuntime is normalize for what depends on the runtime connector's type: an external
+// (self-driven) agent reports its own runs, so it never auto-recovers.
+func (s *Store) normalizeRuntime(ctx context.Context, a *Agent) error {
+	if a.RuntimeConnectorID == nil || a.AutoRecover == 0 {
+		return nil
+	}
+	var external bool
+	if err := s.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM connectors WHERE id=$1 AND type=$2)",
+		*a.RuntimeConnectorID, ExternalRuntimeType).Scan(&external); err != nil {
+		return err
+	}
+	if external {
+		a.AutoRecover = 0
+	}
+	return nil
+}
+
 func dupSlug(err error) error {
 	var pg *pgconn.PgError
 	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
@@ -240,6 +257,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	if err := a.normalize(); err != nil {
 		return nil, err
 	}
+	if err := s.normalizeRuntime(ctx, a); err != nil {
+		return nil, err
+	}
 	if a.OrgID == uuid.Nil {
 		return nil, Invalid("org is required")
 	}
@@ -261,6 +281,9 @@ func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	if err := a.normalize(); err != nil {
 		return nil, err
 	}
+	if err := s.normalizeRuntime(ctx, a); err != nil {
+		return nil, err
+	}
 	tag, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2, slug=$3, avatar=$4, role=$5, description=$6, instructions=$7,
 		capabilities=$8, llm_connector_id=$9, search_connector_id=$10, source_connector_ids=$11, language=$12,
 		platforms=$13, max_turns=$14, is_active=$15, runtime_connector_id=$16, tool_connector_ids=$17, auto_handoff=$18,
@@ -278,14 +301,21 @@ func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, "DELETE FROM agents WHERE id=$1", id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Its tasks become unassigned (FK ON DELETE SET NULL): like any change of assignee (see
+		// UpdateTask), that ends an auto-recover backoff and starts its count again.
+		if _, err := tx.Exec(ctx, "UPDATE tasks SET retry_at=NULL, recover_reset_at=NOW() WHERE assignee_agent_id=$1", id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, "DELETE FROM agents WHERE id=$1", id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
 }
 
 type AgentMemory struct {
