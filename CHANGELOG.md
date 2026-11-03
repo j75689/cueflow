@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.6.0](https://github.com/j75689/cueflow/compare/v1.5.2...v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **crew:** auto-recover failed agent runs up to a per-agent limit ([#114](https://github.com/j75689/cueflow/issues/114)) ([23259a3](https://github.com/j75689/cueflow/commit/23259a323d86d30d840bff5db38b18f73add158a))
+* **web:** lay out the registered runners as a Runner | Labels | Load | Active grid ([#112](https://github.com/j75689/cueflow/issues/112)) ([0133501](https://github.com/j75689/cueflow/commit/0133501d88c86817586929a0f9b63981881aa4f3))
+* **web:** set an agent's auto-recover limit on the agent form ([#115](https://github.com/j75689/cueflow/issues/115)) ([196f0d9](https://github.com/j75689/cueflow/commit/196f0d94e8c57ea6b1016dd9f906fb8b7c5d7808))
+
+
+### Bug Fixes
+
+* **crew:** auto-recover retries at once on a comment, resets on reassign ([#117](https://github.com/j75689/cueflow/issues/117)) ([373f169](https://github.com/j75689/cueflow/commit/373f1699b4228c33ced22abde929be36c5fc151a))
+
+
+### Documentation
+
+* explain auto-recover for failed agent runs ([#116](https://github.com/j75689/cueflow/issues/116)) ([5545d6b](https://github.com/j75689/cueflow/commit/5545d6b26c47e74bf95b80e40b609cac76730267))
+
 ## [1.5.2](https://github.com/j75689/cueflow/compare/v1.5.1...v1.5.2) (2026-10-30)
 
 
