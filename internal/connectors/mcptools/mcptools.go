@@ -4,7 +4,6 @@
 package mcptools
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -117,18 +116,8 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 			}
 			o.Headers[http.CanonicalHeaderKey(k)] = v
 		}
-		// The lines hold secrets, names included: name them by number only. The raw value, as
-		// cfg.String trims leading blank lines and the numbers must match what the user sees. Any
-		// other type is printed, so it fails as a bad line instead of being dropped.
-		var raw string
-		switch v := cfg["secret_headers"].(type) {
-		case nil:
-		case string:
-			raw = v
-		default:
-			raw = fmt.Sprint(v)
-		}
-		for i, line := range strings.Split(raw, "\n") {
+		// The lines hold secrets, names included: name them by number only.
+		for i, line := range rawLines(cfg, "secret_headers") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -153,20 +142,34 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 	for k, v := range cfg.KV("env") {
 		o.Env[k] = v
 	}
-	sc := bufio.NewScanner(strings.NewReader(cfg.String("secret_env")))
-	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
+	for i, line := range rawLines(cfg, "secret_env") {
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			// The line holds a secret value: name it by number only.
-			return nil, fmt.Errorf("mcp server: secret environment: line %d: want KEY=VALUE", n)
+			return nil, fmt.Errorf("mcp server: secret environment: line %d: want KEY=VALUE", i+1)
 		}
 		o.Env[strings.TrimSpace(k)] = v
 	}
 	return &Server{opts: o, timeout: timeout}, nil
+}
+
+// rawLines splits a multi-line field as typed, since cfg.String trims leading blank lines and the
+// line numbers in errors must match what the user sees. Any other type is printed, so it fails as a
+// bad line instead of being dropped.
+func rawLines(cfg connector.Config, key string) []string {
+	var raw string
+	switch v := cfg[key].(type) {
+	case nil:
+	case string:
+		raw = v
+	default:
+		raw = fmt.Sprint(v)
+	}
+	return strings.Split(raw, "\n")
 }
 
 func (s *Server) Test(ctx context.Context) (*connector.TestResult, error) {
