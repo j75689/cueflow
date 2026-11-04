@@ -255,7 +255,8 @@ func TestSecretEnvMalformed(t *testing.T) {
 	if strings.Contains(err.Error(), "supersecretvalue") {
 		t.Fatalf("the error must not quote the secret: %v", err)
 	}
-	// The number counts every line the user sees: leading blank lines, comments, CRLF.
+	// The number counts every line the user sees: leading blank lines, comments, CRLF. The last
+	// case starts with a non-blank line, so it was numbered right before too: a regression guard.
 	for prefix, n := range map[string]int{
 		"\n\nAPI_KEY=k\n": 4,
 		"  \r\n# c\r\n  # indented\r\nAPI_KEY=k\r\n": 5,
@@ -291,6 +292,36 @@ func TestSecretEnvMerge(t *testing.T) {
 	}
 	if inst, err = New(connector.Config{"transport": "stdio", "command": "true", "secret_env": nil}, connector.Env{}); err != nil || len(inst.(*Server).opts.Env) != 0 {
 		t.Fatalf("nil secret_env: %v %v", err, inst)
+	}
+	// Read on every transport, as before: only the header fields are stdio-aware.
+	for _, tr := range []string{"streamable_http", "sse"} {
+		inst, err := New(connector.Config{"transport": tr, "endpoint_url": "https://mcp.example.com/mcp",
+			"secret_env": "A=s"}, connector.Env{})
+		if err != nil || inst.(*Server).opts.Env["A"] != "s" {
+			t.Errorf("%s: want secret_env read: %v %v", tr, err, inst)
+		}
+		if _, err := New(connector.Config{"transport": tr, "endpoint_url": "https://mcp.example.com/mcp",
+			"secret_env": "s3cret"}, connector.Env{}); err == nil {
+			t.Errorf("%s: want a malformed secret_env line to fail", tr)
+		}
+	}
+}
+
+// A line over bufio.Scanner's 64 KiB limit used to drop itself and every line after it.
+func TestSecretEnvLongLine(t *testing.T) {
+	big := "BIG=" + strings.Repeat("s", 70<<10)
+	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
+		"secret_env": big + "\nB=2"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := inst.(*Server).opts.Env; len(e) != 2 || len(e["BIG"]) != 70<<10 || e["B"] != "2" {
+		t.Fatalf("want BIG (%d bytes) and B: got %d vars, BIG %d bytes, B %q", 70<<10, len(e), len(e["BIG"]), e["B"])
+	}
+	_, err = New(connector.Config{"transport": "stdio", "command": "true",
+		"secret_env": big + "\nnot-a-pair"}, connector.Env{})
+	if err == nil || err.Error() != "mcp server: secret environment: line 2: want KEY=VALUE" {
+		t.Fatalf("want a secret environment error naming line 2: %v", err)
 	}
 }
 
