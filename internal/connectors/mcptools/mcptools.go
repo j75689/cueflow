@@ -103,9 +103,10 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		}
 		o.HTTPClient = c
 	}
-	// stdio sends no headers, so neither header field is read there. Elsewhere each one is checked
-	// here, so Test and save report it rather than the first request; canonical names, so the
-	// precedence (plain, then secret, then the bearer token) holds whatever case each field uses.
+	// stdio sends no headers, so neither header field nor the bearer token is read there. Elsewhere
+	// each header is checked here, so Test connection and agent tool loading report it rather than
+	// the first request; canonical names, so the precedence (plain, then secret, then the bearer
+	// token) holds whatever case each field uses.
 	if o.Transport != mcpx.TransportStdio {
 		for k, v := range cfg.KV("headers") {
 			if !httpguts.ValidHeaderFieldName(k) {
@@ -116,8 +117,10 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 			}
 			o.Headers[http.CanonicalHeaderKey(k)] = v
 		}
-		// The lines hold secrets, names included: name them by number only.
-		for i, line := range strings.Split(cfg.String("secret_headers"), "\n") {
+		// The lines hold secrets, names included: name them by number only. The raw value, as
+		// cfg.String trims leading blank lines and the numbers must match what the user sees.
+		raw, _ := cfg["secret_headers"].(string)
+		for i, line := range strings.Split(raw, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -135,9 +138,9 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 			}
 			o.Headers[http.CanonicalHeaderKey(h.Name)] = h.Value
 		}
-	}
-	if t := cfg.String("auth_token"); t != "" {
-		o.Headers["Authorization"] = "Bearer " + t
+		if t := cfg.String("auth_token"); t != "" {
+			o.Headers["Authorization"] = "Bearer " + t
+		}
 	}
 	for k, v := range cfg.KV("env") {
 		o.Env[k] = v

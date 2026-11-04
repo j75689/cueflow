@@ -3,6 +3,7 @@ package mcptools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -271,9 +272,16 @@ func TestSecretHeadersMalformed(t *testing.T) {
 	}
 }
 
-// A bad header fails at New, so Test and save show it instead of every request. A secret line is
-// named by its number only: a pasted secret may sit on either side of the colon.
+// A bad header fails at New, so Test connection and agent tool loading show it instead of every
+// request. A secret line is named by its number only: a pasted secret may sit on either side of
+// the colon. The number counts every line the user sees: leading blank lines, comments, CRLF.
 func TestSecretHeadersInvalid(t *testing.T) {
+	prefixes := map[string]int{
+		"# token\nX-Ok: fine\n": 3,
+		"\n\n":                  3,
+		"  \r\n# c\r\n  # indented\r\nX-Ok: fine\r\n": 5,
+		"  # token\r\n \t \r\nX-Ok: fine\r\n":         4,
+	}
 	for _, line := range []string{
 		"X-Empty:",
 		"X-Empty:   ",
@@ -283,16 +291,19 @@ func TestSecretHeadersInvalid(t *testing.T) {
 		"X-Ctl: s3\x00cret",
 		"X-Ctl: s3\x7fcret",
 	} {
-		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
-			"secret_headers": "# token\nX-Ok: fine\n" + line}, connector.Env{})
-		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: secret headers: line 3: ") {
-			t.Errorf("%q: want a secret headers error naming line 3: %v", line, err)
-			continue
-		}
-		name, value, _ := strings.Cut(line, ":")
-		for _, part := range []string{name, strings.TrimSpace(value)} {
-			if part != "" && strings.Contains(err.Error(), part) {
-				t.Errorf("%q: the error quotes %q: %v", line, part, err)
+		for prefix, n := range prefixes {
+			_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+				"secret_headers": prefix + line}, connector.Env{})
+			want := fmt.Sprintf("mcp server: secret headers: line %d: ", n)
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("%q after %q: want a secret headers error naming line %d: %v", line, prefix, n, err)
+				continue
+			}
+			name, value, _ := strings.Cut(line, ":")
+			for _, part := range []string{name, strings.TrimSpace(value)} {
+				if part != "" && strings.Contains(err.Error(), part) {
+					t.Errorf("%q: the error quotes %q: %v", line, part, err)
+				}
 			}
 		}
 	}
@@ -321,11 +332,13 @@ func TestPlainHeadersInvalid(t *testing.T) {
 	}
 }
 
-// stdio sends no headers, so a header field it cannot use does not stop it.
+// stdio sends no headers, so a header field it cannot use does not stop it, and neither the
+// header fields nor the bearer token end up in its headers.
 func TestStdioIgnoresHeaders(t *testing.T) {
 	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
 		"headers":        map[string]any{"Bad Name": "v"},
-		"secret_headers": "no colon\nX-Empty:"}, connector.Env{})
+		"secret_headers": "no colon\nX-Empty:",
+		"auth_token":     "tok"}, connector.Env{})
 	if err != nil {
 		t.Fatal(err)
 	}
