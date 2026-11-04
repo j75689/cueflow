@@ -17,6 +17,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/googleid"
+	"github.com/j75689/cueflow/internal/headerlines"
 	"github.com/j75689/cueflow/internal/mcpx"
 )
 
@@ -34,6 +35,8 @@ func init() {
 			{Key: "auth_token", Label: "Bearer token", Type: connector.FieldPassword, Secret: true,
 				Help: "Sent as Authorization: Bearer <token>"},
 			{Key: "headers", Label: "Extra headers", Type: connector.FieldKV},
+			{Key: "secret_headers", Label: "Secret headers", Type: connector.FieldText, Secret: true,
+				Help: "Header-Name: value, one per line (Streamable HTTP or SSE). For a Cloudflare Access service token: CF-Access-Client-Id and CF-Access-Client-Secret"},
 			{Key: "google_identity", Label: "Sign requests with CueFlow's Google identity", Type: connector.FieldBool,
 				Help: "For a private Cloud Run service: each request carries an ID token of the account CueFlow runs as (it needs roles/run.invoker on that service); the bearer token above still goes in Authorization. Off for anything else"},
 			{Key: "command", Label: "Command (stdio)", Type: connector.FieldString, Placeholder: "npx",
@@ -98,8 +101,17 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		}
 		o.HTTPClient = c
 	}
+	// Canonical names, so the precedence (plain, then secret, then the bearer token) holds whatever
+	// case each field spells a header in.
 	for k, v := range cfg.KV("headers") {
-		o.Headers[k] = v
+		o.Headers[http.CanonicalHeaderKey(k)] = v
+	}
+	secret, err := headerlines.Parse(cfg.String("secret_headers"))
+	if err != nil {
+		return nil, fmt.Errorf("mcp server: secret headers: %w", err)
+	}
+	for _, h := range secret {
+		o.Headers[http.CanonicalHeaderKey(h.Name)] = h.Value
 	}
 	if t := cfg.String("auth_token"); t != "" {
 		o.Headers["Authorization"] = "Bearer " + t
@@ -108,14 +120,15 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		o.Env[k] = v
 	}
 	sc := bufio.NewScanner(strings.NewReader(cfg.String("secret_env")))
-	for sc.Scan() {
+	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("mcp server: secret environment line %q is not KEY=VALUE", line)
+			// The line holds a secret value: name it by number only.
+			return nil, fmt.Errorf("mcp server: secret environment: line %d: want KEY=VALUE", n)
 		}
 		o.Env[strings.TrimSpace(k)] = v
 	}

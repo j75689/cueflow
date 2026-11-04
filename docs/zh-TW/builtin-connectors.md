@@ -10,7 +10,7 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 | LLM | `openai`（OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI 等 OpenAI 相容服務）· `anthropic`（Claude API）· `anthropic_bedrock`（Amazon Bedrock 上的 Claude）· `anthropic_vertex`（Google Vertex AI 上的 Claude）· `gemini_vertex`（Google Vertex AI 上的 Gemini） |
 | 通知 | `telegram`（由 bot 發到私訊、群組、頻道或論壇主題）· `smtp`（email）。每個 org 各自選一個接收任務通知（[agentic-flow §6.2](agentic-flow.md#62-結束條件與狀態對應)） |
 | 動作 | `mcp_action`：把核准的 deliverable 交給你自己 MCP 伺服器上的一個工具（預設 `deliver`，參數 `{id, kind, title, payload, previous}`）；只有 worker 會呼叫 |
-| Agent 工具 | `mcp_server`：任何 MCP server（HTTP 或 stdio），每個工具可設為允許、詢問（每次呼叫由你核准）或禁止 |
+| Agent 工具 | `mcp_server`：任何 MCP server（HTTP 或 stdio），每個工具可設為允許、詢問（每次呼叫由你核准）或禁止。走 HTTP 時可帶機密標頭（加密儲存），例如 Cloudflare Access service token |
 | 圖片生成 | `openai_image`（OpenAI / Azure / 相容服務）· `gemini_image`（AI Studio key）· `vertex_image`（Vertex AI，ADC）· `comfyui`（自架） |
 | Runtime | `acp_agent`（在 CueFlow 主機上跑外部 agent）· `runner_pool`（在 [Runner](external-agents.md#在自己的機器上跑-agentrunner) 上跑外部 agent）· `external`（自主驅動的 agent） |
 
@@ -25,6 +25,29 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 | OpenAI 相容 | API key（Bearer；Azure 用 `api-key` header）· 給閘道用的自訂 header · 本機服務不需要。預設值：OpenAI、OpenRouter、Azure OpenAI、DeepSeek、Ollama、vLLM、LocalAI |
 
 在 UI 填的憑證會依 connector 分別加密保存（AES-256-GCM，綁定 connector 那一列資料），優先於伺服器環境變數。Docker 想改用環境變數或憑證檔，見 `deploy/.env.example` 與 `deploy/docker-compose.yml` 裡註解掉的 `volumes:` 範例。
+
+## MCP 伺服器的標頭
+
+**MCP server** connector（`mcp_server`）走 Streamable HTTP 或 SSE 時，每個請求都會帶上下列標頭；stdio 不送標頭。
+
+| 設定 | 說明 |
+|---|---|
+| Bearer token | 以 `Authorization: Bearer <token>` 送出，加密儲存 |
+| Extra headers | 一般標頭，以明文儲存 |
+| Secret headers | 每行一個 `Header-Name: value`，加密儲存。空白行與 `#` 開頭的行會略過 |
+| Sign requests with CueFlow's Google identity | 在 `X-Serverless-Authorization` 帶 ID token，給私有 Cloud Run 服務用（見[下方](#呼叫私有服務)） |
+
+伺服器在 Cloudflare Access 後面時，把 service token 填進 **Secret headers**：
+
+```
+# Cloudflare Access service token
+CF-Access-Client-Id: <client id>
+CF-Access-Client-Secret: <client secret>
+```
+
+同一個標頭設了不只一次時，**Bearer token** 優先於 **Secret headers**，**Secret headers** 又優先於 **Extra headers**。標頭名稱不分大小寫（`x-env` 與 `X-Env` 是同一個）。Google 身分只設定 `X-Serverless-Authorization`，可以和上面三者並用。有一行沒有 `:` 時，connector 會以 `mcp server: secret headers: line N: want "Header-Name: value"` 失敗；錯誤訊息不會引用該行內容。
+
+**升級須知。** 加入 Secret headers 之前，同時設了 Bearer token 與名為 `authorization`（`Authorization` 以外的任何大小寫）的 Extra headers 的 `mcp_server` connector，每個請求會隨機送出其中一個；現在一律送 Bearer token。兩個只差在大小寫的 Extra headers（`x-env` 與 `X-Env`）現在只送一個值，但送哪一個並不固定，所以每個名稱請只用一種寫法。stdio 的 Secret environment 有格式錯誤的行時，現在回報為 `mcp server: secret environment: line N: want KEY=VALUE`，不再帶出該行的值。
 
 ## 網頁搜尋
 
