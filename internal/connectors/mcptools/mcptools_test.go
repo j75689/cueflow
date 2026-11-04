@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
@@ -110,5 +112,101 @@ func TestCallToolSendsMirroredParamHeaders(t *testing.T) {
 	text, isErr, err := inst.(*Server).CallTool(context.Background(), "issue_read", []byte(`{"owner":"j75689"}`))
 	if err != nil || isErr || text != "read" {
 		t.Fatalf("call: %q %v %v", text, isErr, err)
+	}
+}
+
+// A server behind Cloudflare Access needs the service token's headers on every request, over either
+// HTTP transport; they are kept with the secret fields, not in the plain-text headers.
+func TestSecretHeadersReachTheServer(t *testing.T) {
+	streamable := func(g func(*http.Request) *mcp.Server) http.Handler {
+		return mcp.NewStreamableHTTPHandler(g, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	}
+	for _, tc := range []struct {
+		name, transport string
+		identity        bool
+		handler         func(func(*http.Request) *mcp.Server) http.Handler
+	}{
+		{"streamable_http", "streamable_http", false, streamable},
+		{"sse", "sse", false, func(g func(*http.Request) *mcp.Server) http.Handler { return mcp.NewSSEHandler(g, nil) }},
+		// google_identity swaps the HTTP client; the headers are added around it.
+		{"google_identity", "streamable_http", true, streamable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := mcp.NewServer(&mcp.Implementation{Name: "cf", Version: "test"}, nil)
+			srv.AddTool(&mcp.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+				func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil
+				})
+			mcpHandler := tc.handler(func(*http.Request) *mcp.Server { return srv })
+			var mu sync.Mutex
+			requests, missing := 0, 0
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				requests++
+				if r.Header.Get("CF-Access-Client-Id") != "cid" || r.Header.Get("CF-Access-Client-Secret") != "csecret" ||
+					tc.identity && r.Header.Get(googleid.Header) != "Bearer tok-9" {
+					missing++
+				}
+				mu.Unlock()
+				mcpHandler.ServeHTTP(w, r)
+			}))
+			t.Cleanup(ts.Close)
+
+			fakeIdentity(t, staticToken("tok-9"), nil)
+			inst, err := New(connector.Config{"endpoint_url": ts.URL, "transport": tc.transport, "google_identity": tc.identity,
+				"secret_headers": "# service token\nCF-Access-Client-Id: cid\n\nCF-Access-Client-Secret: csecret\n"}, connector.Env{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			text, isErr, err := inst.(*Server).CallTool(ctx, "ping", []byte(`{}`))
+			if err != nil || isErr || text != "pong" {
+				t.Fatalf("call: %q %v %v", text, isErr, err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if requests == 0 || missing != 0 {
+				t.Fatalf("%d of %d requests lacked the access headers", missing, requests)
+			}
+		})
+	}
+}
+
+// Same order as mcp_action: plain headers, then secret headers, then the bearer token in Authorization.
+func TestSecretHeadersPrecedence(t *testing.T) {
+	inst, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+		"headers":        map[string]any{"X-Env": "plain", "Authorization": "plain", "X-Plain": "kept"},
+		"secret_headers": "X-Env: secret\nAuthorization: secret",
+		"auth_token":     "tok"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := inst.(*Server).opts.Headers
+	if h["X-Env"] != "secret" || h["Authorization"] != "Bearer tok" || h["X-Plain"] != "kept" {
+		t.Fatalf("headers: %v", h)
+	}
+	inst, err = New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+		"secret_headers": "Authorization: Basic abc"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inst.(*Server).opts.Headers["Authorization"]; got != "Basic abc" {
+		t.Fatalf("without a bearer token the secret Authorization stays: %q", got)
+	}
+}
+
+func TestSecretHeadersMalformed(t *testing.T) {
+	_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+		"secret_headers": "CF-Access-Client-Id: cid\nsupersecretvalue"}, connector.Env{})
+	if err == nil || !strings.Contains(err.Error(), "secret headers") || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("want a secret headers error naming the line: %v", err)
+	}
+	if strings.Contains(err.Error(), "supersecretvalue") {
+		t.Fatalf("the error must not quote the secret: %v", err)
+	}
+	// Existing configs without the field, and stdio servers, are unaffected.
+	if _, err := New(connector.Config{"transport": "stdio", "command": "true"}, connector.Env{}); err != nil {
+		t.Fatal(err)
 	}
 }
