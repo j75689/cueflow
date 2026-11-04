@@ -3,6 +3,7 @@ package mcptools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -268,5 +269,100 @@ func TestSecretHeadersMalformed(t *testing.T) {
 	// Existing configs without the field, and stdio servers, are unaffected.
 	if _, err := New(connector.Config{"transport": "stdio", "command": "true"}, connector.Env{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A bad header fails at New, so Test connection and agent tool loading show it instead of every
+// request. A secret line is named by its number only: a pasted secret may sit on either side of
+// the colon. The number counts every line the user sees: leading blank lines, comments, CRLF.
+func TestSecretHeadersInvalid(t *testing.T) {
+	prefixes := map[string]int{
+		"# token\nX-Ok: fine\n": 3,
+		"\n\n":                  3,
+		"  \r\n# c\r\n  # indented\r\nX-Ok: fine\r\n": 5,
+		"  # token\r\n \t \r\nX-Ok: fine\r\n":         4,
+	}
+	for _, line := range []string{
+		"X-Empty:",
+		"X-Empty:   ",
+		"Bad Name: s3cret",
+		"Bad(Name): s3cret",
+		"X-Ctl: s3\rcret",
+		"X-Ctl: s3\x00cret",
+		"X-Ctl: s3\x7fcret",
+	} {
+		for prefix, n := range prefixes {
+			_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+				"secret_headers": prefix + line}, connector.Env{})
+			want := fmt.Sprintf("mcp server: secret headers: line %d: ", n)
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("%q after %q: want a secret headers error naming line %d: %v", line, prefix, n, err)
+				continue
+			}
+			name, value, _ := strings.Cut(line, ":")
+			for _, part := range []string{name, strings.TrimSpace(value)} {
+				if part != "" && strings.Contains(err.Error(), part) {
+					t.Errorf("%q: the error quotes %q: %v", line, part, err)
+				}
+			}
+		}
+	}
+}
+
+// The UI always sends a string, but an API client may not: a non-string fails like a bad line
+// rather than leaving the server without its secret headers.
+func TestSecretHeadersNotAString(t *testing.T) {
+	for _, v := range []any{123, true} {
+		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+			"secret_headers": v}, connector.Env{})
+		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: secret headers: line 1: ") {
+			t.Errorf("%v: want a secret headers error naming line 1: %v", v, err)
+			continue
+		}
+		if strings.Contains(err.Error(), fmt.Sprint(v)) {
+			t.Errorf("%v: the error quotes the value: %v", v, err)
+		}
+	}
+	// stdio does not read the field at all.
+	if _, err := New(connector.Config{"transport": "stdio", "command": "true", "secret_headers": 123}, connector.Env{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlainHeadersInvalid(t *testing.T) {
+	for name, value := range map[string]string{"Bad Name": "s3cret", "X-Ctl": "s3cret\r\nX-Injected: 1", "": "s3cret"} {
+		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+			"headers": map[string]any{name: value}}, connector.Env{})
+		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: header ") {
+			t.Errorf("%q: want a header error: %v", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%q: the error quotes the value: %v", name, err)
+		}
+	}
+	// An empty plain value is still sent as it is.
+	inst, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+		"headers": map[string]any{"X-Empty": ""}}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := inst.(*Server).opts.Headers["X-Empty"]; !ok || v != "" {
+		t.Fatalf("headers: %v", inst.(*Server).opts.Headers)
+	}
+}
+
+// stdio sends no headers, so a header field it cannot use does not stop it, and neither the
+// header fields nor the bearer token end up in its headers.
+func TestStdioIgnoresHeaders(t *testing.T) {
+	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
+		"headers":        map[string]any{"Bad Name": "v"},
+		"secret_headers": "no colon\nX-Empty:",
+		"auth_token":     "tok"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := inst.(*Server).opts.Headers; len(h) != 0 {
+		t.Fatalf("headers: %v", h)
 	}
 }
