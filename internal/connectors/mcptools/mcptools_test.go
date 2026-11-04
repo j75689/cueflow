@@ -196,6 +196,66 @@ func TestSecretHeadersPrecedence(t *testing.T) {
 	}
 }
 
+// Header names are case-insensitive on the wire, so the precedence must hold whatever case each
+// field uses; otherwise every request picks a random winner among the spellings.
+func TestSecretHeadersPrecedenceOnTheWire(t *testing.T) {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "case", Version: "test"}, nil)
+	srv.AddTool(&mcp.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil
+		})
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	want := map[string]string{"X-Env": "secret", "X-Over": "secret", "Authorization": "Bearer tok"}
+	var mu sync.Mutex
+	requests, wrong := 0, map[string]int{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		for name, v := range want {
+			if got := r.Header.Values(name); len(got) != 1 || got[0] != v {
+				wrong[name+"="+strings.Join(got, ",")]++
+			}
+		}
+		mu.Unlock()
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+
+	inst, err := New(connector.Config{"endpoint_url": ts.URL, "transport": "streamable_http",
+		"headers":        map[string]any{"x-env": "plain", "X-Over": "plain"},
+		"secret_headers": "X-Env: secret\nx-over: secret\nauthorization: Basic abc",
+		"auth_token":     "tok"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Each call makes several requests, and each request used to merge in a new random order.
+	for range 10 {
+		if text, isErr, err := inst.(*Server).CallTool(ctx, "ping", []byte(`{}`)); err != nil || isErr || text != "pong" {
+			t.Fatalf("call: %q %v %v", text, isErr, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requests == 0 || len(wrong) != 0 {
+		t.Fatalf("over %d requests, wrong header values (name=values: count): %v", requests, wrong)
+	}
+}
+
+// secret_env values are secrets too: a malformed line is named by its number, never quoted.
+func TestSecretEnvMalformed(t *testing.T) {
+	_, err := New(connector.Config{"transport": "stdio", "command": "true",
+		"secret_env": "# tokens\nAPI_KEY=k\n\nsupersecretvalue"}, connector.Env{})
+	if err == nil || !strings.Contains(err.Error(), "secret environment") || !strings.Contains(err.Error(), "line 4") {
+		t.Fatalf("want a secret environment error naming the line: %v", err)
+	}
+	if strings.Contains(err.Error(), "supersecretvalue") {
+		t.Fatalf("the error must not quote the secret: %v", err)
+	}
+}
+
 func TestSecretHeadersMalformed(t *testing.T) {
 	_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
 		"secret_headers": "CF-Access-Client-Id: cid\nsupersecretvalue"}, connector.Env{})
