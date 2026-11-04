@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/net/http/httpguts"
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/googleid"
@@ -101,17 +103,38 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 		}
 		o.HTTPClient = c
 	}
-	// Canonical names, so the precedence (plain, then secret, then the bearer token) holds whatever
-	// case each field spells a header in.
-	for k, v := range cfg.KV("headers") {
-		o.Headers[http.CanonicalHeaderKey(k)] = v
-	}
-	secret, err := headerlines.Parse(cfg.String("secret_headers"))
-	if err != nil {
-		return nil, fmt.Errorf("mcp server: secret headers: %w", err)
-	}
-	for _, h := range secret {
-		o.Headers[http.CanonicalHeaderKey(h.Name)] = h.Value
+	// stdio sends no headers, so neither header field is read there. Elsewhere each one is checked
+	// here, so Test and save report it rather than the first request; canonical names, so the
+	// precedence (plain, then secret, then the bearer token) holds whatever case each field uses.
+	if o.Transport != mcpx.TransportStdio {
+		for k, v := range cfg.KV("headers") {
+			if !httpguts.ValidHeaderFieldName(k) {
+				return nil, fmt.Errorf("mcp server: header %q: not a valid header name", k)
+			}
+			if !httpguts.ValidHeaderFieldValue(v) {
+				return nil, fmt.Errorf("mcp server: header %q: the value contains a control character", k)
+			}
+			o.Headers[http.CanonicalHeaderKey(k)] = v
+		}
+		// The lines hold secrets, names included: name them by number only.
+		for i, line := range strings.Split(cfg.String("secret_headers"), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			h, err := headerlines.ParseLine(line)
+			switch {
+			case err != nil:
+			case !httpguts.ValidHeaderFieldName(h.Name):
+				err = errors.New("not a valid header name")
+			case h.Value == "" || !httpguts.ValidHeaderFieldValue(h.Value):
+				err = errors.New("the value is empty or contains a control character")
+			}
+			if err != nil {
+				return nil, fmt.Errorf("mcp server: secret headers: line %d: %w", i+1, err)
+			}
+			o.Headers[http.CanonicalHeaderKey(h.Name)] = h.Value
+		}
 	}
 	if t := cfg.String("auth_token"); t != "" {
 		o.Headers["Authorization"] = "Bearer " + t

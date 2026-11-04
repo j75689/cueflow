@@ -53,14 +53,19 @@ CF-Access-Client-Secret: <client secret>
 
 When the same header is set more than once, **Bearer token** wins over **Secret headers**, which wins over
 **Extra headers**. Names match regardless of case (`x-env` and `X-Env` are one header). The Google identity
-sets only `X-Serverless-Authorization`, so it can be combined with all three. A line without a `:` stops the
-connector with `mcp server: secret headers: line N: want "Header-Name: value"`; the error never quotes the line.
+sets only `X-Serverless-Authorization`, so it can be combined with all three. A Secret headers line without a `:`,
+with an invalid header name or with an empty value stops the connector at Test and save with
+`mcp server: secret headers: line N: ...`; the error never quotes the line. An Extra headers entry with an invalid
+name or a control character in its value stops it too, naming the header but not the value. On stdio neither field is
+read.
 
 **Upgrading.** Before Secret headers was added, an `mcp_server` connector with a bearer token and an Extra headers
 entry such as `authorization` (any case but `Authorization`) sent one or the other at random on each request; now the
 bearer token is always sent. Two Extra headers that differ only in case (`x-env` and `X-Env`) now send one value,
 but which one is not fixed, so keep one spelling per name. A malformed Secret environment (stdio) line is
 now reported as `mcp server: secret environment: line N: want KEY=VALUE`, without its value.
+A Secret headers line with an empty value or an invalid name, or an Extra headers entry with an invalid name, used to
+be saved and fail (or, for the empty value, be sent empty) on each request; now Test and save report it.
 
 ## Web search
 

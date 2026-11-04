@@ -270,3 +270,66 @@ func TestSecretHeadersMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A bad header fails at New, so Test and save show it instead of every request. A secret line is
+// named by its number only: a pasted secret may sit on either side of the colon.
+func TestSecretHeadersInvalid(t *testing.T) {
+	for _, line := range []string{
+		"X-Empty:",
+		"X-Empty:   ",
+		"Bad Name: s3cret",
+		"Bad(Name): s3cret",
+		"X-Ctl: s3\rcret",
+		"X-Ctl: s3\x00cret",
+		"X-Ctl: s3\x7fcret",
+	} {
+		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+			"secret_headers": "# token\nX-Ok: fine\n" + line}, connector.Env{})
+		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: secret headers: line 3: ") {
+			t.Errorf("%q: want a secret headers error naming line 3: %v", line, err)
+			continue
+		}
+		name, value, _ := strings.Cut(line, ":")
+		for _, part := range []string{name, strings.TrimSpace(value)} {
+			if part != "" && strings.Contains(err.Error(), part) {
+				t.Errorf("%q: the error quotes %q: %v", line, part, err)
+			}
+		}
+	}
+}
+
+func TestPlainHeadersInvalid(t *testing.T) {
+	for name, value := range map[string]string{"Bad Name": "s3cret", "X-Ctl": "s3cret\r\nX-Injected: 1", "": "s3cret"} {
+		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+			"headers": map[string]any{name: value}}, connector.Env{})
+		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: header ") {
+			t.Errorf("%q: want a header error: %v", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%q: the error quotes the value: %v", name, err)
+		}
+	}
+	// An empty plain value is still sent as it is.
+	inst, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+		"headers": map[string]any{"X-Empty": ""}}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := inst.(*Server).opts.Headers["X-Empty"]; !ok || v != "" {
+		t.Fatalf("headers: %v", inst.(*Server).opts.Headers)
+	}
+}
+
+// stdio sends no headers, so a header field it cannot use does not stop it.
+func TestStdioIgnoresHeaders(t *testing.T) {
+	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
+		"headers":        map[string]any{"Bad Name": "v"},
+		"secret_headers": "no colon\nX-Empty:"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := inst.(*Server).opts.Headers; len(h) != 0 {
+		t.Fatalf("headers: %v", h)
+	}
+}

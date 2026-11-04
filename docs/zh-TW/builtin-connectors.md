@@ -45,9 +45,9 @@ CF-Access-Client-Id: <client id>
 CF-Access-Client-Secret: <client secret>
 ```
 
-同一個標頭設了不只一次時，**Bearer token** 優先於 **Secret headers**，**Secret headers** 又優先於 **Extra headers**。標頭名稱不分大小寫（`x-env` 與 `X-Env` 是同一個）。Google 身分只設定 `X-Serverless-Authorization`，可以和上面三者並用。有一行沒有 `:` 時，connector 會以 `mcp server: secret headers: line N: want "Header-Name: value"` 失敗；錯誤訊息不會引用該行內容。
+同一個標頭設了不只一次時，**Bearer token** 優先於 **Secret headers**，**Secret headers** 又優先於 **Extra headers**。標頭名稱不分大小寫（`x-env` 與 `X-Env` 是同一個）。Google 身分只設定 `X-Serverless-Authorization`，可以和上面三者並用。Secret headers 有一行沒有 `:`、標頭名稱不合法或值是空的時，connector 會在測試與儲存時以 `mcp server: secret headers: line N: ...` 失敗；錯誤訊息不會引用該行內容。Extra headers 的名稱不合法或值含控制字元時也會失敗，錯誤訊息會指出標頭名稱，但不帶出值。stdio 不會讀取這兩個欄位。
 
-**升級須知。** 加入 Secret headers 之前，同時設了 Bearer token 與名為 `authorization`（`Authorization` 以外的任何大小寫）的 Extra headers 的 `mcp_server` connector，每個請求會隨機送出其中一個；現在一律送 Bearer token。兩個只差在大小寫的 Extra headers（`x-env` 與 `X-Env`）現在只送一個值，但送哪一個並不固定，所以每個名稱請只用一種寫法。stdio 的 Secret environment 有格式錯誤的行時，現在回報為 `mcp server: secret environment: line N: want KEY=VALUE`，不再帶出該行的值。
+**升級須知。** 加入 Secret headers 之前，同時設了 Bearer token 與名為 `authorization`（`Authorization` 以外的任何大小寫）的 Extra headers 的 `mcp_server` connector，每個請求會隨機送出其中一個；現在一律送 Bearer token。兩個只差在大小寫的 Extra headers（`x-env` 與 `X-Env`）現在只送一個值，但送哪一個並不固定，所以每個名稱請只用一種寫法。stdio 的 Secret environment 有格式錯誤的行時，現在回報為 `mcp server: secret environment: line N: want KEY=VALUE`，不再帶出該行的值。Secret headers 值是空的或名稱不合法、或 Extra headers 名稱不合法的設定，以前可以儲存，但每個請求都會失敗（空值則是照樣送出空的標頭）；現在測試與儲存時就會回報。
 
 ## 網頁搜尋
 
