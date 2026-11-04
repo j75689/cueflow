@@ -31,6 +31,37 @@ Credentials entered in the UI are encrypted per connector (AES-256-GCM, bound to
 over server environment variables. For environment variables or credential files in Docker, see
 `deploy/.env.example` and the commented `volumes:` example in `deploy/docker-compose.yml`.
 
+## MCP server headers
+
+The **MCP server** connector (`mcp_server`) sends these on every request over Streamable HTTP or SSE; stdio
+sends no headers.
+
+| Setting | Meaning |
+|---|---|
+| Bearer token | Sent as `Authorization: Bearer <token>`, stored encrypted |
+| Extra headers | Plain headers, stored as they are |
+| Secret headers | `Header-Name: value`, one per line, stored encrypted. Blank lines and lines starting with `#` are skipped |
+| Sign requests with CueFlow's Google identity | An ID token in `X-Serverless-Authorization`, for a private Cloud Run service (see [below](#calling-private-services)) |
+
+For a server behind Cloudflare Access, put the service token in **Secret headers**:
+
+```
+# Cloudflare Access service token
+CF-Access-Client-Id: <client id>
+CF-Access-Client-Secret: <client secret>
+```
+
+When the same header is set more than once, **Bearer token** wins over **Secret headers**, which wins over
+**Extra headers**. Names match regardless of case (`x-env` and `X-Env` are one header). The Google identity
+sets only `X-Serverless-Authorization`, so it can be combined with all three. A line without a `:` stops the
+connector with `mcp server: secret headers: line N: want "Header-Name: value"`; the error never quotes the line.
+
+**Upgrading.** Before Secret headers was added, an `mcp_server` connector with a bearer token and an Extra headers
+entry such as `authorization` (any case but `Authorization`) sent one or the other at random on each request; now the
+bearer token is always sent. Two Extra headers that differ only in case (`x-env` and `X-Env`) now send one value,
+but which one is not fixed, so keep one spelling per name. A malformed Secret environment (stdio) line is
+now reported as `mcp server: secret environment: line N: want KEY=VALUE`, without its value.
+
 ## Web search
 
 Agents without a search connector of their own use the first active one. The Docker Compose file includes

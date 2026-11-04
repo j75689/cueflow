@@ -26,6 +26,29 @@ CueFlow 對外的一切都是 connector：發布器、資料來源、搜尋引�
 
 在 UI 填的憑證會依 connector 分別加密保存（AES-256-GCM，綁定 connector 那一列資料），優先於伺服器環境變數。Docker 想改用環境變數或憑證檔，見 `deploy/.env.example` 與 `deploy/docker-compose.yml` 裡註解掉的 `volumes:` 範例。
 
+## MCP 伺服器的標頭
+
+**MCP server** connector（`mcp_server`）走 Streamable HTTP 或 SSE 時，每個請求都會帶上下列標頭；stdio 不送標頭。
+
+| 設定 | 說明 |
+|---|---|
+| Bearer token | 以 `Authorization: Bearer <token>` 送出，加密儲存 |
+| Extra headers | 一般標頭，以明文儲存 |
+| Secret headers | 每行一個 `Header-Name: value`，加密儲存。空白行與 `#` 開頭的行會略過 |
+| Sign requests with CueFlow's Google identity | 在 `X-Serverless-Authorization` 帶 ID token，給私有 Cloud Run 服務用（見[下方](#呼叫私有服務)） |
+
+伺服器在 Cloudflare Access 後面時，把 service token 填進 **Secret headers**：
+
+```
+# Cloudflare Access service token
+CF-Access-Client-Id: <client id>
+CF-Access-Client-Secret: <client secret>
+```
+
+同一個標頭設了不只一次時，**Bearer token** 優先於 **Secret headers**，**Secret headers** 又優先於 **Extra headers**。標頭名稱不分大小寫（`x-env` 與 `X-Env` 是同一個）。Google 身分只設定 `X-Serverless-Authorization`，可以和上面三者並用。有一行沒有 `:` 時，connector 會以 `mcp server: secret headers: line N: want "Header-Name: value"` 失敗；錯誤訊息不會引用該行內容。
+
+**升級須知。** 加入 Secret headers 之前，同時設了 Bearer token 與名為 `authorization`（`Authorization` 以外的任何大小寫）的 Extra headers 的 `mcp_server` connector，每個請求會隨機送出其中一個；現在一律送 Bearer token。兩個只差在大小寫的 Extra headers（`x-env` 與 `X-Env`）現在只送一個值，但送哪一個並不固定，所以每個名稱請只用一種寫法。stdio 的 Secret environment 有格式錯誤的行時，現在回報為 `mcp server: secret environment: line N: want KEY=VALUE`，不再帶出該行的值。
+
 ## 網頁搜尋
 
 沒有指定搜尋 connector 的 agent 會使用第一個啟用中的。Docker Compose 內含 SearXNG，見 [docker.md](docker.md#網頁搜尋)。
