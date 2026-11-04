@@ -255,6 +255,43 @@ func TestSecretEnvMalformed(t *testing.T) {
 	if strings.Contains(err.Error(), "supersecretvalue") {
 		t.Fatalf("the error must not quote the secret: %v", err)
 	}
+	// The number counts every line the user sees: leading blank lines, comments, CRLF.
+	for prefix, n := range map[string]int{
+		"\n\nAPI_KEY=k\n": 4,
+		"  \r\n# c\r\n  # indented\r\nAPI_KEY=k\r\n": 5,
+		"  # token\r\n \t \r\nAPI_KEY=k\r\n":         4,
+	} {
+		_, err := New(connector.Config{"transport": "stdio", "command": "true",
+			"secret_env": prefix + "supersecretvalue"}, connector.Env{})
+		want := fmt.Sprintf("mcp server: secret environment: line %d: want KEY=VALUE", n)
+		if err == nil || err.Error() != want {
+			t.Errorf("after %q: want %q: %v", prefix, want, err)
+		}
+	}
+	// The UI always sends a string, but an API client may not: a non-string fails like a bad line.
+	for _, v := range []any{123, true} {
+		_, err := New(connector.Config{"transport": "stdio", "command": "true", "secret_env": v}, connector.Env{})
+		if err == nil || err.Error() != "mcp server: secret environment: line 1: want KEY=VALUE" {
+			t.Errorf("%v: want a secret environment error naming line 1: %v", v, err)
+		}
+	}
+}
+
+// secret_env lines override env; keys are trimmed, values kept as typed after the '='.
+func TestSecretEnvMerge(t *testing.T) {
+	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
+		"env":        map[string]any{"A": "plain", "B": "kept"},
+		"secret_env": "\r\n# tokens\r\n A =  s3 cret\r\nC=x=y\r\n"}, connector.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := inst.(*Server).opts.Env
+	if len(e) != 3 || e["A"] != "  s3 cret" || e["B"] != "kept" || e["C"] != "x=y" {
+		t.Fatalf("env: %q", e)
+	}
+	if inst, err = New(connector.Config{"transport": "stdio", "command": "true", "secret_env": nil}, connector.Env{}); err != nil || len(inst.(*Server).opts.Env) != 0 {
+		t.Fatalf("nil secret_env: %v %v", err, inst)
+	}
 }
 
 func TestSecretHeadersMalformed(t *testing.T) {
