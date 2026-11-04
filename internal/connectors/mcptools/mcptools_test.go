@@ -309,6 +309,26 @@ func TestSecretHeadersInvalid(t *testing.T) {
 	}
 }
 
+// The UI always sends a string, but an API client may not: a non-string fails like a bad line
+// rather than leaving the server without its secret headers.
+func TestSecretHeadersNotAString(t *testing.T) {
+	for _, v := range []any{123, true} {
+		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",
+			"secret_headers": v}, connector.Env{})
+		if err == nil || !strings.HasPrefix(err.Error(), "mcp server: secret headers: line 1: ") {
+			t.Errorf("%v: want a secret headers error naming line 1: %v", v, err)
+			continue
+		}
+		if strings.Contains(err.Error(), fmt.Sprint(v)) {
+			t.Errorf("%v: the error quotes the value: %v", v, err)
+		}
+	}
+	// stdio does not read the field at all.
+	if _, err := New(connector.Config{"transport": "stdio", "command": "true", "secret_headers": 123}, connector.Env{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlainHeadersInvalid(t *testing.T) {
 	for name, value := range map[string]string{"Bad Name": "s3cret", "X-Ctl": "s3cret\r\nX-Injected: 1", "": "s3cret"} {
 		_, err := New(connector.Config{"endpoint_url": "https://mcp.example.com/mcp", "transport": "streamable_http",

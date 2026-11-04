@@ -118,8 +118,16 @@ func New(cfg connector.Config, env connector.Env) (connector.Instance, error) {
 			o.Headers[http.CanonicalHeaderKey(k)] = v
 		}
 		// The lines hold secrets, names included: name them by number only. The raw value, as
-		// cfg.String trims leading blank lines and the numbers must match what the user sees.
-		raw, _ := cfg["secret_headers"].(string)
+		// cfg.String trims leading blank lines and the numbers must match what the user sees. Any
+		// other type is printed, so it fails as a bad line instead of being dropped.
+		var raw string
+		switch v := cfg["secret_headers"].(type) {
+		case nil:
+		case string:
+			raw = v
+		default:
+			raw = fmt.Sprint(v)
+		}
 		for i, line := range strings.Split(raw, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
