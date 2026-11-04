@@ -307,16 +307,17 @@ func TestSecretEnvMerge(t *testing.T) {
 	}
 }
 
-// A line over bufio.Scanner's 64 KiB limit used to drop itself and every line after it.
+// A line of 64 KiB or more (bufio.Scanner's limit) used to drop itself and every line after it.
+// 256 KiB also catches a Scanner given a bigger buffer.
 func TestSecretEnvLongLine(t *testing.T) {
-	big := "BIG=" + strings.Repeat("s", 70<<10)
+	big := "BIG=" + strings.Repeat("s", 256<<10)
 	inst, err := New(connector.Config{"transport": "stdio", "command": "true",
 		"secret_env": big + "\nB=2"}, connector.Env{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e := inst.(*Server).opts.Env; len(e) != 2 || len(e["BIG"]) != 70<<10 || e["B"] != "2" {
-		t.Fatalf("want BIG (%d bytes) and B: got %d vars, BIG %d bytes, B %q", 70<<10, len(e), len(e["BIG"]), e["B"])
+	if e := inst.(*Server).opts.Env; len(e) != 2 || len(e["BIG"]) != 256<<10 || e["B"] != "2" {
+		t.Fatalf("want BIG (%d bytes) and B: got %d vars, BIG %d bytes, B %q", 256<<10, len(e), len(e["BIG"]), e["B"])
 	}
 	_, err = New(connector.Config{"transport": "stdio", "command": "true",
 		"secret_env": big + "\nnot-a-pair"}, connector.Env{})
