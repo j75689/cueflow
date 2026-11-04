@@ -54,18 +54,20 @@ CF-Access-Client-Secret: <client secret>
 When the same header is set more than once, **Bearer token** wins over **Secret headers**, which wins over
 **Extra headers**. Names match regardless of case (`x-env` and `X-Env` are one header). The Google identity
 sets only `X-Serverless-Authorization`, so it can be combined with all three. A Secret headers line without a `:`,
-with an invalid header name or with an empty value stops the connector at Test and save with
-`mcp server: secret headers: line N: ...`; the error never quotes the line. An Extra headers entry with an invalid
-name or a control character in its value stops it too, naming the header but not the value. On stdio neither field is
-read.
+with an invalid header name or with an empty value stops the connector when you Test it and whenever an agent loads
+its tools (the server is then left out of the agent's tools) with `mcp server: secret headers: line N: ...`; the error
+never quotes the line. An Extra headers entry with an invalid name or a control character in its value stops it too,
+naming the header but not the value. On stdio neither field is read, nor is the bearer token.
 
 **Upgrading.** Before Secret headers was added, an `mcp_server` connector with a bearer token and an Extra headers
 entry such as `authorization` (any case but `Authorization`) sent one or the other at random on each request; now the
 bearer token is always sent. Two Extra headers that differ only in case (`x-env` and `X-Env`) now send one value,
 but which one is not fixed, so keep one spelling per name. A malformed Secret environment (stdio) line is
 now reported as `mcp server: secret environment: line N: want KEY=VALUE`, without its value.
-A Secret headers line with an empty value or an invalid name, or an Extra headers entry with an invalid name, used to
-be saved and fail (or, for the empty value, be sent empty) on each request; now Test and save report it.
+A Secret headers line with an empty value or an invalid name, or an Extra headers entry with an empty or invalid name
+or a control character in its value, used to be saved and fail (or, for the empty secret value, be sent empty) on each
+request; now Test connection reports it and agents leave that server out of their tools. Saving still accepts it, so
+after upgrading, click **Test connection** on each Streamable HTTP/SSE MCP server connector.
 
 ## Web search
 
