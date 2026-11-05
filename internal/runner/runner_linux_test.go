@@ -60,8 +60,8 @@ func stubAgent(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "agent.sh")
 	script := "#!/bin/sh\n" +
-		"setsid sleep 600 </dev/null >/dev/null 2>&1 &\n" +
-		"setsid sh -c 'nohup sleep 600 </dev/null >/dev/null 2>&1 &'\n" +
+		"setsid sleep 600 &\n" +
+		"setsid sh -c 'nohup sleep 600 &'\n" +
 		"sleep 0.3\n"
 	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
