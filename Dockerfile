@@ -61,11 +61,12 @@ ENTRYPOINT ["/usr/local/bin/cueflow"]
 #    can clone, push a branch and open a pull request with the token it is given (GH_TOKEN), and
 #    nothing else of the host: the work directory and the runner credentials are volumes.
 #    RUNNER_EXTRA_PACKAGES adds Debian packages (space-separated) for agents that need a tool or two.
+#    tini is PID 1: it reaps the orphans agents leave behind, which would otherwise stay zombies.
 FROM agents AS runner
 ARG RUNNER_EXTRA_PACKAGES=""
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git gh openssh-client ${RUNNER_EXTRA_PACKAGES} \
+ && apt-get install -y --no-install-recommends git gh openssh-client tini ${RUNNER_EXTRA_PACKAGES} \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system credential.helper '!gh auth git-credential' \
  && git config --system --add safe.directory '*' \
@@ -74,7 +75,7 @@ ENV CUEFLOW_RUNNER_CONFIG=/config/runner.json
 WORKDIR /work
 USER nonroot:nonroot
 HEALTHCHECK NONE
-ENTRYPOINT ["/usr/local/bin/cueflow", "runner"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]
 CMD ["run"]
 
 # 5. slim (default, last stage): distroless, no Node.js and no external agents.

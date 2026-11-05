@@ -72,6 +72,7 @@ jobs:
       - run: docker build --target agents -t cueflow:agents .
       - run: docker build --target runner --build-arg RUNNER_EXTRA_PACKAGES=jq -t cueflow:runner .
       - run: docker run --rm --entrypoint jq cueflow:runner --version
+      - run: scripts/check-runner-init.sh cueflow:runner
       # The web and Go stages cross-compile for arm64 (the published agents and runner images); this
       # checks that path without emulation.
       - run: docker buildx build --platform linux/arm64 --target build --output type=cacheonly .
