@@ -43,6 +43,41 @@ started as `cueflow runner run`) is for [deploy/runner](../deploy/runner/README.
 Each release also publishes all three, as `ghcr.io/j75689/cueflow:<version>` / `:latest` (slim, amd64 only),
 `:<version>-agents` / `:agents` and `:<version>-runner` / `:runner` (both also arm64); the tags and how to build a runner with your own tools are in [runner-image.md](runner-image.md).
 
+## Without PostgreSQL (SQLite)
+
+On a small machine CueFlow can keep everything in one SQLite file instead of PostgreSQL, in single mode
+only (see `DATABASE_URL` in [configuration.md](configuration.md#core)). A compose file for it, say
+`deploy/docker-compose.sqlite.yml`; add any other variable of `docker-compose.yml`'s `cueflow` service you use:
+
+```yaml
+name: cueflow
+services:
+  cueflow:
+    image: ghcr.io/j75689/cueflow:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:///data/cueflow.db
+      CUEFLOW_SECRET_KEY: ${CUEFLOW_SECRET_KEY:?set CUEFLOW_SECRET_KEY in .env}
+      CUEFLOW_PUBLIC_URL: ${CUEFLOW_PUBLIC_URL:-http://localhost:3000}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+```
+
+```bash
+cd deploy
+mkdir -p data && sudo chown 65532:65532 data   # the image runs as user nonroot, uid 65532
+docker compose -f docker-compose.sqlite.yml up -d
+```
+
+CueFlow creates and migrates `deploy/data/cueflow.db` on start; SQLite keeps `cueflow.db-wal` and
+`cueflow.db-shm` beside it, so back up the whole directory, with CueFlow stopped. Media stays in the file
+too unless `CUEFLOW_MEDIA_STORAGE` says otherwise. Run one CueFlow per file: no second instance or replica
+on it. To move an existing PostgreSQL install onto SQLite, see
+[moving an install](configuration.md#moving-an-install-to-sqlite).
+
 ## Web search
 
 The compose file includes SearXNG (set `SEARXNG_SECRET` in `deploy/.env`). Add a *SearXNG* connector with URL
@@ -68,6 +103,7 @@ Ports are bound to localhost on purpose. To review from your phone, use an SSH t
 
 ## Data
 
-The databases live in Docker volumes; `docker compose down -v` deletes them. Connector credentials are
+The databases live in Docker volumes; `docker compose down -v` deletes them (a SQLite file lives in
+`deploy/data`, which it leaves alone). Connector credentials are
 encrypted with `CUEFLOW_SECRET_KEY`: keep a copy of it outside the machine, or a restored database is
 unreadable ([rotating the key](configuration.md#rotating-the-secret-key)).

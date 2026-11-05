@@ -58,7 +58,8 @@ CueFlow is at <http://localhost:3000> (every port is bound to `127.0.0.1`). Then
 > `http://mock-publisher:4010/mcp` and token `dev-token`.
 
 Image variants (with Node and the ACP adapters for Claude Code and Codex), web search, remote access:
-[docs/docker.md](docs/docker.md). Back up `CUEFLOW_SECRET_KEY`: without it stored credentials are unreadable.
+[docs/docker.md](docs/docker.md). On a small machine CueFlow can run on one SQLite file instead of PostgreSQL
+([docs/docker.md](docs/docker.md#without-postgresql-sqlite)); `cueflow copy-db` moves an existing install onto it. Back up `CUEFLOW_SECRET_KEY`: without it stored credentials are unreadable.
 
 ### Google Cloud Run
 
