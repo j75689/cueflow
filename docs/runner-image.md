@@ -146,7 +146,9 @@ the group (started with `setsid`, with `nohup` from a shell the agent detached, 
 dev server or a test cluster) is not in it. So the runner also marks every agent with `CUEFLOW_RUNNER_JOB=<job id>` in
 its environment, which everything it starts inherits. After the group is stopped, the runner stops every process of
 its own user that still carries that marker, with the same SIGTERM, 5 seconds, SIGKILL, and logs
-`msg="leftover processes stopped" job=<id> count=<n> commands=<names>` when there were any. When the runner itself
+`msg="leftover processes stopped" job=<id> count=<n> commands=<names>` when there were any. A process still running
+10 seconds after its SIGKILL (stuck in the kernel, in D state) is left alone: the runner logs
+`msg="could not stop leftover processes"` with its pid and name, and the job ends anyway. When the runner itself
 stops, it does the same for any job it could not clean up.
 
 - This works on Linux only, where the runner reads `/proc`. On macOS and other platforms, a job's processes are

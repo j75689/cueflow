@@ -48,31 +48,49 @@ func Find(ids []string) ([]Proc, error) {
 	return out, nil
 }
 
+// kill sends a signal; tests replace it.
+var kill = syscall.Kill
+
 // Stop ends every process Find(ids) reports: SIGTERM, then a look every 200 ms for up to grace (a process that
-// turned up meanwhile gets its SIGTERM too), then SIGKILL until none is left. The list is read again before every
-// signal, so a pid is never signalled from a stale list. It returns each process it signalled, once.
+// turned up meanwhile gets its SIGTERM too), then SIGKILL until none is left, for up to killFor. The list is read
+// again before every signal, so a pid is never signalled from a stale list. It returns each process it stopped,
+// once, and an *AliveError with those still running if it gave up.
 func Stop(ids []string, grace time.Duration) ([]Proc, error) {
 	seen := map[int]bool{}
-	var stopped []Proc
+	var signalled []Proc
 	signal := func(procs []Proc, sig syscall.Signal) {
 		for _, p := range procs {
 			if !seen[p.PID] {
 				seen[p.PID] = true
-				stopped = append(stopped, p)
+				signalled = append(signalled, p)
 			} else if sig == syscall.SIGTERM {
 				continue
 			}
-			_ = syscall.Kill(p.PID, sig)
+			_ = kill(p.PID, sig)
 		}
 	}
 	deadline := time.Now().Add(grace)
+	giveUp := deadline.Add(killFor)
 	for {
 		procs, err := Find(ids)
 		if err != nil {
-			return stopped, err
+			return signalled, err
 		}
 		if len(procs) == 0 {
-			return stopped, nil
+			return signalled, nil
+		}
+		if time.Now().After(giveUp) {
+			alive := map[int]bool{}
+			for _, p := range procs {
+				alive[p.PID] = true
+			}
+			var stopped []Proc
+			for _, p := range signalled {
+				if !alive[p.PID] {
+					stopped = append(stopped, p)
+				}
+			}
+			return stopped, &AliveError{Procs: procs}
 		}
 		if time.Now().Before(deadline) || len(seen) == 0 {
 			signal(procs, syscall.SIGTERM)

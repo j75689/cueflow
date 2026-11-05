@@ -661,14 +661,17 @@ func (r *Runner) started() []string {
 	return slices.Collect(maps.Keys(r.jobs))
 }
 
+// stopLeftovers is procsweep.Stop; tests replace it.
+var stopLeftovers = procsweep.Stop
+
 // sweep stops the processes of jobs ids that outlived their agent: those that left its process group (setsid,
-// nohup in a detached shell, daemons) and so were not stopped with it. A job stays listed if that failed, for
-// the sweep at shutdown. Other platforms than Linux keep to the process group.
+// nohup in a detached shell, daemons) and so were not stopped with it. A job stays listed if that failed (some
+// did not die even of SIGKILL), for the sweep at shutdown. Other platforms than Linux keep to the process group.
 func (r *Runner) sweep(ids ...string) {
 	if len(ids) == 0 {
 		return
 	}
-	stopped, err := procsweep.Stop(ids, 5*time.Second)
+	stopped, err := stopLeftovers(ids, 5*time.Second)
 	byJob := map[string][]string{}
 	for _, p := range stopped {
 		byJob[p.Job] = append(byJob[p.Job], p.Comm)

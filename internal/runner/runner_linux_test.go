@@ -137,3 +137,31 @@ func TestShutdownStopsListedJobs(t *testing.T) {
 		}
 	}
 }
+
+// A job whose leftovers do not all die is logged with what was stopped and what is still running, and stays
+// listed so the shutdown sweep tries again.
+func TestSweepKeepsJobWithSurvivors(t *testing.T) {
+	const id = "runner-test-survivor"
+	stopLeftovers = func([]string, time.Duration) ([]procsweep.Proc, error) {
+		return []procsweep.Proc{{PID: 100, Job: id, Comm: "sleep"}},
+			&procsweep.AliveError{Procs: []procsweep.Proc{{PID: 101, Job: id, Comm: "kube-apiserver"}}}
+	}
+	t.Cleanup(func() { stopLeftovers = procsweep.Stop })
+	var logs syncBuffer
+	r := New(&Config{}, slog.New(slog.NewTextHandler(&logs, nil)))
+	r.jobs[id] = true
+	r.sweep(id)
+
+	for _, want := range []string{
+		`msg="leftover processes stopped" job=` + id + ` count=1 commands=sleep`,
+		`level=WARN msg="could not stop leftover processes" jobs=` + id,
+		`101 (kube-apiserver)`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log has no %q:\n%s", want, logs.String())
+		}
+	}
+	if left := r.started(); len(left) != 1 || left[0] != id {
+		t.Errorf("listed jobs = %v, want [%s] for the shutdown sweep", left, id)
+	}
+}

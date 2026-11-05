@@ -135,7 +135,7 @@ docker compose up -d --force-recreate
 
 ## 任務留下的程序
 
-任務結束時，Runner 會結束 agent 的 process group：先 SIGTERM，5 秒後 SIGKILL。離開了這個 group 的程序（用 `setsid` 啟動、在 agent 分離出去的 shell 裡用 `nohup` 啟動，或自行 daemonize 的工具，例如 dev server、測試用叢集）不在其中。所以 Runner 也會在每個 agent 的環境變數裡加上 `CUEFLOW_RUNNER_JOB=<job id>`，agent 啟動的所有程序都會繼承它。結束 process group 之後，Runner 會找出同一使用者底下仍帶著這個標記的程序，同樣 SIGTERM、5 秒、SIGKILL，有找到時記一行 `msg="leftover processes stopped" job=<id> count=<n> commands=<名稱>`。Runner 本身停止時，也會對還沒清乾淨的任務再做一次。
+任務結束時，Runner 會結束 agent 的 process group：先 SIGTERM，5 秒後 SIGKILL。離開了這個 group 的程序（用 `setsid` 啟動、在 agent 分離出去的 shell 裡用 `nohup` 啟動，或自行 daemonize 的工具，例如 dev server、測試用叢集）不在其中。所以 Runner 也會在每個 agent 的環境變數裡加上 `CUEFLOW_RUNNER_JOB=<job id>`，agent 啟動的所有程序都會繼承它。結束 process group 之後，Runner 會找出同一使用者底下仍帶著這個標記的程序，同樣 SIGTERM、5 秒、SIGKILL，有找到時記一行 `msg="leftover processes stopped" job=<id> count=<n> commands=<名稱>`。送出 SIGKILL 後 10 秒仍在執行的程序（卡在 kernel 裡、處於 D 狀態）就不再處理：Runner 記一行 `msg="could not stop leftover processes"`，附上它的 pid 和名稱，任務照樣結束。Runner 本身停止時，也會對還沒清乾淨的任務再做一次。
 
 - 只在 Linux 上有效，Runner 讀的是 `/proc`。macOS 等其他平台照舊只結束 process group，離開 group 的程序會繼續執行。
 - 清掉或換掉自己環境變數的程序（`env -i`、會重設環境的 daemon）沒有標記，會漏掉。

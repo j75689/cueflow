@@ -7,6 +7,8 @@ package procsweep
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -28,3 +30,18 @@ type Proc struct {
 
 // poll is how often Stop looks again while it waits.
 const poll = 200 * time.Millisecond
+
+// killFor is how long Stop keeps sending SIGKILL after the grace period before it gives up on processes that do
+// not die (stuck in the kernel, in D state).
+var killFor = 10 * time.Second
+
+// AliveError is returned by Stop for the processes still running when it gave up.
+type AliveError struct{ Procs []Proc }
+
+func (e *AliveError) Error() string {
+	alive := make([]string, len(e.Procs))
+	for i, p := range e.Procs {
+		alive[i] = fmt.Sprintf("%d (%s)", p.PID, p.Comm)
+	}
+	return fmt.Sprintf("procsweep: still running after %s of SIGKILL: %s", killFor, strings.Join(alive, ", "))
+}

@@ -1,8 +1,11 @@
 package procsweep
 
 import (
+	"errors"
+	"fmt"
 	"os/exec"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -77,5 +80,37 @@ func TestStopKillsAfterGrace(t *testing.T) {
 	}
 	if got := pids(t, "procsweep-other"); !slices.Equal(got, []int{other.Process.Pid}) {
 		t.Errorf("another job's process was touched: Find = %v, want [%d]", got, other.Process.Pid)
+	}
+}
+
+// A process that survives SIGKILL (here: SIGKILL is not sent, as if the process were stuck in the kernel) makes
+// Stop give up killFor after the grace period and report it; one that did die is reported as stopped.
+func TestStopGivesUpOnSurvivors(t *testing.T) {
+	survivor := start(t, "procsweep-survivor", "trap '' TERM; exec sleep 600")
+	dies := start(t, "procsweep-survivor", "exec sleep 600")
+	time.Sleep(100 * time.Millisecond)
+	kill = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGKILL {
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	killFor = time.Second
+	t.Cleanup(func() { kill, killFor = syscall.Kill, 10*time.Second })
+
+	began := time.Now()
+	stopped, err := Stop([]string{"procsweep-survivor"}, 500*time.Millisecond)
+	if took := time.Since(began); took < 1500*time.Millisecond || took > 5*time.Second {
+		t.Errorf("Stop returned after %s, want soon after grace + killFor (1.5s)", took)
+	}
+	var alive *AliveError
+	if !errors.As(err, &alive) || len(alive.Procs) != 1 || alive.Procs[0].PID != survivor.Process.Pid {
+		t.Fatalf("Stop error = %v, want an *AliveError with the survivor (pid %d)", err, survivor.Process.Pid)
+	}
+	if want := fmt.Sprintf("%d (sleep)", survivor.Process.Pid); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name %s", err, want)
+	}
+	if len(stopped) != 1 || stopped[0].PID != dies.Process.Pid {
+		t.Errorf("Stop reported stopped %+v, want only the sleep (pid %d)", stopped, dies.Process.Pid)
 	}
 }
