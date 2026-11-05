@@ -246,21 +246,19 @@ func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun 
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	var ids []uuid.UUID
-	for _, id := range old {
-		used, err := s.mediaInUse(ctx, id)
-		if err != nil {
-			return 0, err
-		}
-		if !used {
-			ids = append(ids, id)
-		}
-	}
-	if dryRun {
-		return len(ids), nil
-	}
 	n := 0
-	for _, id := range ids {
+	for _, id := range old {
+		if dryRun {
+			used, err := s.mediaInUse(ctx, id)
+			if err != nil {
+				return 0, err
+			}
+			if !used {
+				n++
+			}
+			continue
+		}
+		// DeleteMedia checks the use itself, so each item is checked once.
 		switch err := s.DeleteMedia(ctx, id); {
 		case err == nil:
 			n++
