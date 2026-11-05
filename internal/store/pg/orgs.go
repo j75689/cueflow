@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
@@ -24,9 +23,8 @@ func scanOrg(row pgx.Row) (*store.Org, error) {
 }
 
 func dupOrgSlug(err error) error {
-	var pg *pgconn.PgError
-	if asPg(err, &pg) && pg.Code == "23505" {
-		return store.Invalid("another org already uses this slug")
+	if errors.Is(mapErr(err), domain.ErrConflict) {
+		return store.InvalidBecause(domain.ErrConflict, "another org already uses this slug")
 	}
 	return err
 }
@@ -127,9 +125,8 @@ func (s *Store) DeleteOrg(ctx context.Context, id uuid.UUID) error {
 	}
 	tag, err := s.pool.Exec(ctx, "DELETE FROM orgs WHERE id=$1", id)
 	if err != nil {
-		var pg *pgconn.PgError
-		if asPg(err, &pg) && pg.Code == "23503" {
-			return store.Invalid("the org still has agents, tasks, schedules, deliverables or archived content; delete them first")
+		if errors.Is(mapErr(err), domain.ErrReferenced) {
+			return store.InvalidBecause(domain.ErrReferenced, "the org still has agents, tasks, schedules, deliverables or archived content; delete them first")
 		}
 		return err
 	}

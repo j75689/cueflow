@@ -2,11 +2,11 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
@@ -58,9 +58,8 @@ func (s *Store) normalizeRuntime(ctx context.Context, a *store.Agent) error {
 }
 
 func dupSlug(err error) error {
-	var pg *pgconn.PgError
-	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
-		return store.Invalid("another agent in this org already uses this slug")
+	if errors.Is(mapErr(err), domain.ErrConflict) {
+		return store.InvalidBecause(domain.ErrConflict, "another agent in this org already uses this slug")
 	}
 	return err
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/domain"
@@ -117,8 +116,7 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 	})
 	if err != nil {
 		_ = s.dropBytes(ctx, kind, id)
-		var pg *pgconn.PgError
-		if asPg(err, &pg) && pg.Code == "23503" {
+		if errors.Is(mapErr(err), domain.ErrReferenced) {
 			return nil, domain.ErrNotFound // no such task
 		}
 		return nil, err

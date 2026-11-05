@@ -73,6 +73,20 @@ func CleanLabels(in []string) []string { return runnerLabels(in) }
 // Invalid is a ValidationError for a caller error.
 func Invalid(msg string) error { return &ValidationError{Msg: msg} }
 
+// InvalidBecause is Invalid(msg) that also matches cause (a domain error such as
+// domain.ErrConflict) with errors.Is; its message is msg alone.
+func InvalidBecause(cause error, msg string) error {
+	return &causedError{err: &ValidationError{Msg: msg}, cause: cause}
+}
+
+type causedError struct {
+	err   *ValidationError
+	cause error
+}
+
+func (e *causedError) Error() string   { return e.err.Error() }
+func (e *causedError) Unwrap() []error { return []error{e.err, e.cause} }
+
 // ValidTaskFileName checks a file name: valid UTF-8, 1–200 characters, "/"-separated parts that are
 // neither empty nor "." or "..", no backslashes or control characters.
 func ValidTaskFileName(name string) error {
