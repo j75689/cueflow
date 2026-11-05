@@ -20,6 +20,7 @@ import (
 
 	"github.com/j75689/cueflow/internal/deliverable"
 	deliverablesqlite "github.com/j75689/cueflow/internal/deliverable/sqlite"
+	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
 	storesqlite "github.com/j75689/cueflow/internal/store/sqlite"
 )
@@ -51,8 +52,14 @@ func TestCopyDB(t *testing.T) {
 	if code := e.do("POST", "/deliverables", map[string]any{"kind": "document", "title": "notes", "payload": json.RawMessage(payload)}, nil); code != 201 {
 		t.Fatalf("create deliverable: %d", code)
 	}
+	// A connector with a sealed secret, and an agent listing it in a uuid[] column.
+	notify, err := e.store.CreateConnector(ctx, "Notify", "telegram", true, map[string]any{"bot_token": "s3cret", "chat_id": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	def, _ := e.store.DefaultOrg(ctx)
-	writer, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: def.ID, Name: "Writer", Slug: "writer", Capabilities: []string{"research", "memory"}, IsActive: true})
+	writer, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: def.ID, Name: "Writer", Slug: "writer", Capabilities: []string{"research", "memory"},
+		SourceConnectorIDs: []uuid.UUID{notify.ID}, IsActive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +116,8 @@ func TestCopyDB(t *testing.T) {
 		}
 	}
 
-	lite, err := storesqlite.Open(ctx, to, nil)
+	box, _ := secret.New(make([]byte, 32)) // setup's key
+	lite, err := storesqlite.Open(ctx, to, box)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +179,13 @@ func TestCopyDB(t *testing.T) {
 	if files, _, err := lite.ListTaskFiles(ctx, parent.ID, 10); err != nil || len(files) != 1 || files[0].Name != "notes.md" || string(files[0].Head) != "# notes" {
 		t.Errorf("task files in the copy: %+v %v", files, err)
 	}
+	// The secret opens with the install's key; the agent still lists the connector.
+	if _, cfg, err := lite.ConnectorSettings(ctx, notify.ID); err != nil || cfg["bot_token"] != "s3cret" {
+		t.Errorf("connector secret in the copy: %v %v", cfg["bot_token"], err)
+	}
+	if got, err := lite.GetAgent(ctx, writer.ID); err != nil || len(got.SourceConnectorIDs) != 1 || got.SourceConnectorIDs[0] != notify.ID {
+		t.Errorf("agent source connectors in the copy: %+v %v", got, err)
+	}
 	// The payload is stored as the SQLite store stores it, so the in-use check finds the media.
 	mediaID := uuid.MustParse(m.ID)
 	if used, err := liteDS.MediaInUse(ctx, mediaID); err != nil || !used {
@@ -201,7 +216,7 @@ func TestCopyDB(t *testing.T) {
 		refuseAt(name, path, "sqlite://"+path, want)
 	}
 	lite.Close()
-	refuse("into the copy", copyPath, "target is not empty (connectors has 1 row(s))")
+	refuse("into the copy", copyPath, "target is not empty (connectors has 2 row(s))")
 
 	stale := filepath.Join(dir, "stale.db")
 	staleDB, err := storesqlite.Open(ctx, "sqlite://"+stale, nil)
