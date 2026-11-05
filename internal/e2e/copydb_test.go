@@ -2,8 +2,11 @@ package e2e
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,7 +94,8 @@ func TestCopyDB(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	to := "sqlite://" + filepath.Join(dir, "copy.db")
+	copyPath := filepath.Join(dir, "copy.db")
+	to := "sqlite://" + copyPath
 	out, err := exec.Command(bin, "copy-db", "--from", from, "--to", to).CombinedOutput()
 	if err != nil {
 		t.Fatalf("copy-db: %v\n%s", err, out)
@@ -109,7 +113,6 @@ func TestCopyDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lite.Close()
 	if err := storesqlite.Migrate(ctx, lite); err != nil {
 		t.Fatalf("migrate the copy: %v", err)
 	}
@@ -179,22 +182,25 @@ func TestCopyDB(t *testing.T) {
 		t.Errorf("stored payload:\n%s %v\nwant\n%s", stored, err, want)
 	}
 
-	// Refusals exit non-zero and leave the target as it was.
-	refuse := func(name, to, want string) {
+	// Refusals exit non-zero and leave the target as it was: the same bytes in the file, its -wal and
+	// its -shm, or still no file.
+	refuse := func(name, path, want string) {
 		t.Helper()
-		out, err := exec.Command(bin, "copy-db", "--from", from, "--to", to).CombinedOutput()
+		before := fileHashes(t, path)
+		out, err := exec.Command(bin, "copy-db", "--from", from, "--to", "sqlite://"+path).CombinedOutput()
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() == 0 || !strings.Contains(string(out), want) {
 			t.Errorf("%s: %v, want a non-zero exit saying %q:\n%s", name, err, want, out)
 		}
+		if after := fileHashes(t, path); !reflect.DeepEqual(after, before) {
+			t.Errorf("%s: the target changed:\nbefore %v\nafter  %v", name, before, after)
+		}
 	}
-	refuse("into the copy", to, "target is not empty (connectors has 1 row(s))")
-	if n, _ := liteDB.Count(ctx, "connectors", nil); n != 1 {
-		t.Errorf("connectors in the refused target: %d", n)
-	}
+	lite.Close()
+	refuse("into the copy", copyPath, "target is not empty (connectors has 1 row(s))")
 
-	stale := "sqlite://" + filepath.Join(dir, "stale.db")
-	staleDB, err := storesqlite.Open(ctx, stale, nil)
+	stale := filepath.Join(dir, "stale.db")
+	staleDB, err := storesqlite.Open(ctx, "sqlite://"+stale, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,21 +213,77 @@ func TestCopyDB(t *testing.T) {
 	}
 	refuse("into a target at another migration", stale, "target at 0026_older")
 
-	// A source one migration behind: nothing is created in the new file.
-	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)`); err != nil {
-		t.Fatal(err)
-	}
-	fresh := filepath.Join(dir, "fresh.db")
-	refuse("from a source at another migration", "sqlite://"+fresh, "source is at migration 0026_")
-	freshDB, err := storesqlite.Open(ctx, "sqlite://"+fresh, nil)
+	// A SQLite file of something else, in rollback-journal mode: opening it as the store would
+	// switch it to WAL.
+	foreign := filepath.Join(dir, "foreign.db")
+	foreignDB, err := storesqlite.Open(ctx, "sqlite://"+foreign, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer freshDB.Close()
-	var tables int
-	if err := freshDB.Reader().QueryRow(ctx, `SELECT count(*) FROM sqlite_master`).Scan(&tables); err != nil || tables != 0 {
-		t.Errorf("tables in the refused new file: %d %v", tables, err)
+	for _, q := range []string{`CREATE TABLE notes (body TEXT)`, `INSERT INTO notes VALUES ('keep')`} {
+		if _, err := foreignDB.Writer().Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
 	}
+	foreignDB.Close()
+	// Header bytes 18 and 19 are 2 in WAL mode and 1 in rollback-journal mode (sqlite.org/fileformat.html).
+	header, err := os.ReadFile(foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header[18] != 2 || header[19] != 2 {
+		t.Fatalf("foreign file header bytes 18-19: %v, want WAL mode", header[18:20])
+	}
+	header[18], header[19] = 1, 1
+	if err := os.WriteFile(foreign, header, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refuse("into a foreign SQLite file", foreign, "not a cueflow database")
+
+	text := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(text, []byte("not a database, but long enough to be read as one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refuse("into a text file", text, "file is not a database")
+
+	// A source at another migration than this cueflow's, ahead or behind: refused before the target
+	// is created or touched.
+	fresh := filepath.Join(dir, "fresh.db")
+	empty := filepath.Join(dir, "empty.db")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ('0028_future')`); err != nil {
+		t.Fatal(err)
+	}
+	refuse("from a source ahead into a new file", fresh, "source is at migration 0028_future")
+	refuse("from a source ahead into an empty file", empty, "source is at migration 0028_future")
+	refuse("from a source ahead into the copy", copyPath, "source is at migration 0028_future")
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version >= '0027'`); err != nil {
+		t.Fatal(err)
+	}
+	refuse("from a source behind into a new file", fresh, "source is at migration 0026_")
+	refuse("from a source behind into an empty file", empty, "source is at migration 0026_")
+	refuse("from a source behind into a foreign SQLite file", foreign, "source is at migration 0026_")
+}
+
+// fileHashes is the sha256 of the SQLite file path and of its -wal and -shm, "absent" for a missing
+// one.
+func fileHashes(t *testing.T, path string) map[string]string {
+	t.Helper()
+	hashes := map[string]string{}
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		b, err := os.ReadFile(name)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			hashes[name] = "absent"
+		case err != nil:
+			t.Fatal(err)
+		default:
+			hashes[name] = fmt.Sprintf("%x", sha256.Sum256(b))
+		}
+	}
+	return hashes
 }
 
 // buildCueflow builds the cueflow command into t's temporary directory.

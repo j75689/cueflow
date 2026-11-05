@@ -33,6 +33,30 @@ func dsn(url, extra string) string {
 	return name + sep + extra
 }
 
+// Path is the file url names (sqlite:///abs/path, sqlite:rel/path or a file: URI).
+func Path(url string) string {
+	name, _, _ := strings.Cut(strings.TrimPrefix(dsn(url, ""), "file:"), "?")
+	if rest, ok := strings.CutPrefix(name, "//"); ok {
+		return rest // file:///abs/path
+	}
+	return name
+}
+
+// OpenReadOnly opens the existing database file url names for reading only. Unlike Open it sets no
+// pragma and treats the file as immutable, so it writes nothing: not the file, nor a -wal or -shm
+// beside it. It ignores what a -wal file holds, so the file must not be in use.
+func OpenReadOnly(ctx context.Context, url string) (*Store, error) {
+	p, err := sql.Open("sqlite", dsn(url, "mode=ro&immutable=1"))
+	if err != nil {
+		return nil, err
+	}
+	if err := p.PingContext(ctx); err != nil {
+		p.Close()
+		return nil, fmt.Errorf("sqlite: open %s: %w", url, err)
+	}
+	return &Store{r: db{p}, w: db{p}, rp: p, wp: p}, nil
+}
+
 // Open opens the database file url names, creating it if needed, and returns the store over it,
 // sealing connector secrets with box. Migrate before use.
 func Open(ctx context.Context, url string, box *secret.Box) (*Store, error) {

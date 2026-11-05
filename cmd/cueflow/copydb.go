@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -44,8 +45,9 @@ func copyDBCmd(args []string, out io.Writer) error {
 
 // copyDB copies every table of the SQLite baseline from PostgreSQL into the SQLite file, in the
 // baseline's CREATE order, one write transaction per table, all read from one snapshot of the source.
-// It refuses, before writing, a target that holds data or a source at another migration than the
-// target, and fails if any table's row count differs afterwards.
+// It refuses, before writing, a source at another migration than this cueflow's, and a target that
+// holds data or is at another migration than the source; it fails if any table's row count differs
+// afterwards.
 func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	tables, err := baselineTables()
 	if err != nil {
@@ -66,15 +68,27 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	if err := tx.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&srcVersion); err != nil {
 		return fmt.Errorf("source: read schema_migrations (is it a cueflow database?): %w", err)
 	}
+	if err := checkSource(srcVersion); err != nil {
+		return err
+	}
+	if err := checkTarget(ctx, to, tables, srcVersion); err != nil {
+		return err
+	}
 
 	dst, err := storesqlite.Open(ctx, to, nil) // connector secrets are copied sealed, as they are
 	if err != nil {
 		return err
 	}
 	defer dst.Close()
-	if err := checkTarget(ctx, dst, tables, srcVersion); err != nil {
+	if err := fill(ctx, tx, dst, tables, out); err != nil {
 		return err
 	}
+	fmt.Fprintf(out, "done: %d tables, row counts match\n", len(tables))
+	return nil
+}
+
+// fill migrates the checked target and copies the tables into it.
+func fill(ctx context.Context, tx pgx.Tx, dst *storesqlite.Store, tables []string, out io.Writer) error {
 	// A new file gets the schema; one checked above is at the source's migration already.
 	if err := storesqlite.Migrate(ctx, dst); err != nil {
 		return fmt.Errorf("target: migrate: %w", err)
@@ -82,6 +96,7 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	// Match every table's columns before the first row, so a source missing one fails here.
 	plans := make([]tablePlan, len(tables))
 	for i, table := range tables {
+		var err error
 		if plans[i], err = planTable(ctx, tx, dst, table); err != nil {
 			return err
 		}
@@ -113,7 +128,6 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	if len(differ) > 0 {
 		return fmt.Errorf("row counts differ after the copy: %s", strings.Join(differ, "; "))
 	}
-	fmt.Fprintf(out, "done: %d tables, row counts match\n", len(tables))
 	return nil
 }
 
@@ -137,11 +151,10 @@ func baselineTables() ([]string, error) {
 	return tables, nil
 }
 
-// checkTarget refuses a source that isn't at this cueflow's last migration, and a target that holds
-// data (anything but the default org its migration creates) or is at another migration. Versions
-// compare by their NNNN prefix: the backends name the same migration differently
-// (0027_auto_recover, 0027_baseline).
-func checkTarget(ctx context.Context, dst *storesqlite.Store, tables []string, srcVersion string) error {
+// checkSource refuses a source that isn't at this cueflow's last migration. Versions compare by
+// their NNNN prefix: the backends name the same migration differently (0027_auto_recover,
+// 0027_baseline).
+func checkSource(srcVersion string) error {
 	names, err := fs.Glob(storesqlite.Migrations, "*.sql")
 	if err != nil || len(names) == 0 {
 		return fmt.Errorf("sqlite migrations: %v %v", names, err)
@@ -150,31 +163,52 @@ func checkTarget(ctx context.Context, dst *storesqlite.Store, tables []string, s
 	if prefix(srcVersion) != prefix(last) {
 		return fmt.Errorf("source is at migration %s, this cueflow at %s: migrate the source with this version first (DATABASE_URL=<source> cueflow migrate), or copy with the version the source runs", srcVersion, last)
 	}
+	return nil
+}
+
+// checkTarget refuses an existing target that holds data (anything but the default org its
+// migration creates), is at another migration than the source, or is in use. It only reads the
+// file, read-only, and leaves a missing one missing.
+func checkTarget(ctx context.Context, to string, tables []string, srcVersion string) error {
+	path := storesqlite.Path(to)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	// The read-only inspection doesn't see what a -wal file holds.
+	if wal, err := os.Stat(path + "-wal"); err == nil && wal.Size() > 0 {
+		return fmt.Errorf("target has a non-empty %s-wal: stop what uses it, or copy into a new file", path)
+	}
+	dst, err := storesqlite.OpenReadOnly(ctx, to)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
 	r := dst.Reader()
 	var objects int
 	if err := r.QueryRow(ctx, `SELECT count(*) FROM sqlite_master`).Scan(&objects); err != nil {
 		return fmt.Errorf("target: %w", err)
 	}
-	if objects > 0 {
-		var dstVersion string
-		if err := r.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&dstVersion); err != nil {
-			return fmt.Errorf("target is not empty and not a cueflow database (%v); copy into a new file", err)
+	if objects == 0 {
+		return nil
+	}
+	var dstVersion string
+	if err := r.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&dstVersion); err != nil {
+		return fmt.Errorf("target is not empty and not a cueflow database (%v); copy into a new file", err)
+	}
+	if prefix(dstVersion) != prefix(srcVersion) {
+		return fmt.Errorf("source is at migration %s, target at %s; copy into a new file", srcVersion, dstVersion)
+	}
+	for _, table := range tables {
+		q := `SELECT count(*) FROM "` + table + `"`
+		if table == "orgs" {
+			q += ` WHERE slug <> 'default'`
 		}
-		if prefix(dstVersion) != prefix(srcVersion) {
-			return fmt.Errorf("source is at migration %s, target at %s; copy into a new file", srcVersion, dstVersion)
+		var n int
+		if err := r.QueryRow(ctx, q).Scan(&n); err != nil {
+			return fmt.Errorf("target: %w", err)
 		}
-		for _, table := range tables {
-			q := `SELECT count(*) FROM "` + table + `"`
-			if table == "orgs" {
-				q += ` WHERE slug <> 'default'`
-			}
-			var n int
-			if err := r.QueryRow(ctx, q).Scan(&n); err != nil {
-				return fmt.Errorf("target: %w", err)
-			}
-			if n > 0 {
-				return fmt.Errorf("target is not empty (%s has %d row(s)); copy into a new file", table, n)
-			}
+		if n > 0 {
+			return fmt.Errorf("target is not empty (%s has %d row(s)); copy into a new file", table, n)
 		}
 	}
 	return nil

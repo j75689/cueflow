@@ -111,3 +111,16 @@ func TestNextSeqUsesIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestPath(t *testing.T) {
+	for url, want := range map[string]string{
+		"sqlite:///data/cueflow.db":       "/data/cueflow.db",
+		"sqlite:data/cueflow.db":          "data/cueflow.db",
+		"file:/data/cueflow.db?_pragma=x": "/data/cueflow.db",
+		"file:///data/cueflow.db":         "/data/cueflow.db",
+	} {
+		if got := Path(url); got != want {
+			t.Errorf("Path(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
