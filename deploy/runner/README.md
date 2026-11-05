@@ -70,7 +70,7 @@ repositories and permissions the work needs and the container has nothing else i
 | Claude Code settings | `claude-settings.json` is mounted read-only as its managed settings: no `Co-Authored-By` on commits and no footer on pull requests. Edit it and `docker compose up -d --force-recreate` |
 | Credentials | only `.env`: the Claude token and `GH_TOKEN` (`gh` and `git push` use it; `.env` is never copied into the image) |
 | Files | `/work` (volume) and `/config` (volume); the root file system is read-only and the home directory is a tmpfs |
-| Process | non-root, no capabilities, no new privileges, 4 GB memory, 512 processes |
+| Process | non-root, no capabilities, no new privileges, 4 GB memory, 512 processes; a job's leftover processes are stopped when it ends and tini reaps the rest ([details](../../docs/runner-image.md#processes-a-job-leaves-behind)) |
 | Network | outbound only (CueFlow, GitHub, Anthropic); nothing listens, except, when the runner has headers, its tool server proxy on `127.0.0.1` |
 
 `docker compose down -v` also removes `/work` and the registration; `docker compose down` keeps both. What the agent can

@@ -35,6 +35,9 @@ func command(launch connector.RuntimeLaunch, cwd string) *exec.Cmd {
 	cmd := procenv.Command(launch.Command, launch.Args, launch.Env...)
 	cmd.Dir = cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A process the agent started outside its group (setsid, nohup) can keep holding its stderr; without a
+	// delay Wait, and so Close, would wait for that process to exit too.
+	cmd.WaitDelay = time.Second
 	return cmd
 }
 

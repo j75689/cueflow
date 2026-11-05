@@ -35,6 +35,7 @@ import (
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/acpagent"
 	"github.com/j75689/cueflow/internal/headerlines"
+	"github.com/j75689/cueflow/internal/procsweep"
 	"github.com/j75689/cueflow/internal/runnerapi"
 )
 
@@ -449,13 +450,19 @@ type Runner struct {
 	cfg   *Config
 	log   *slog.Logger
 	proxy *mcpProxy // set while Loop runs, when cfg has headers
+	mu    sync.Mutex
+	jobs  map[string]bool // ids of the jobs whose processes may still be running (see sweep)
 }
 
 // New returns a runner for cfg (used by `cueflow runner run` and tests).
-func New(cfg *Config, log *slog.Logger) *Runner { return &Runner{cfg: cfg, log: log} }
+func New(cfg *Config, log *slog.Logger) *Runner {
+	return &Runner{cfg: cfg, log: log, jobs: map[string]bool{}}
+}
 
-// Loop claims and runs jobs until ctx ends, then waits for running jobs to wind down.
+// Loop claims and runs jobs until ctx ends, then waits for running jobs to wind down and stops whatever they
+// left behind.
 func (r *Runner) Loop(ctx context.Context) error {
+	defer func() { r.sweep(r.started()...) }() // last: after the jobs below wound down
 	if len(r.cfg.Headers) > 0 {
 		p, err := startMCPProxy(r.cfg, r.log)
 		if err != nil {
@@ -556,6 +563,7 @@ func (r *Runner) runJob(ctx context.Context, job runnerapi.Job) {
 	go r.report(jobCtx, cancel, job.ID, sk, done)
 
 	res := r.execute(jobCtx, job, sk)
+	r.sweep(job.ID)
 	close(done)
 	// Final flush and completion use their own context: ctx may already be canceled by Ctrl-C.
 	fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -613,6 +621,10 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 	}
 	launch := rt.Launch()
 	launch.Timeout = time.Duration(job.TimeoutSeconds) * time.Second
+	launch.Env = append(launch.Env, procsweep.Marker(job.ID)) // last, so nothing set before can replace it
+	r.mu.Lock()
+	r.jobs[job.ID] = true
+	r.mu.Unlock()
 	allowWeb, auth := job.AllowWeb && !r.cfg.DenyWeb, ""
 	if o, ok := inst.(interface{ AuthMethod() string }); ok {
 		auth = o.AuthMethod()
@@ -640,6 +652,44 @@ func (r *Runner) execute(ctx context.Context, job runnerapi.Job, sk *sink) acpdr
 		MCPURL: mcpURL, Prompt: job.Prompt, Sink: sk, CredentialHint: hint,
 		Model: cmp.Or(r.cfg.Models[job.Preset], job.Model),
 	})
+}
+
+// started lists the jobs whose processes may still be running.
+func (r *Runner) started() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Collect(maps.Keys(r.jobs))
+}
+
+// stopLeftovers is procsweep.Stop; tests replace it.
+var stopLeftovers = procsweep.Stop
+
+// sweep stops the processes of jobs ids that outlived their agent: those that left its process group (setsid,
+// nohup in a detached shell, daemons) and so were not stopped with it. A job stays listed if that failed (some
+// did not die even of SIGKILL), for the sweep at shutdown. Other platforms than Linux keep to the process group.
+func (r *Runner) sweep(ids ...string) {
+	if len(ids) == 0 {
+		return
+	}
+	stopped, err := stopLeftovers(ids, 5*time.Second)
+	byJob := map[string][]string{}
+	for _, p := range stopped {
+		byJob[p.Job] = append(byJob[p.Job], p.Comm)
+	}
+	for _, id := range ids {
+		if comms := byJob[id]; len(comms) > 0 {
+			r.log.Info("leftover processes stopped", "job", id, "count", len(comms), "commands", strings.Join(comms, ","))
+		}
+	}
+	if err != nil && !errors.Is(err, procsweep.ErrUnsupported) {
+		r.log.Warn("could not stop leftover processes", "jobs", strings.Join(ids, ","), "err", err)
+		return
+	}
+	r.mu.Lock()
+	for _, id := range ids {
+		delete(r.jobs, id)
+	}
+	r.mu.Unlock()
 }
 
 // agentEnv is what is added to an agent's environment: the runner's env and, when the agent reaches its tool
