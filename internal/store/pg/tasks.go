@@ -449,10 +449,10 @@ func (s *Store) TaskDepth(ctx context.Context, id uuid.UUID) (int, error) {
 // orgClaimLockSpace is the first key of ClaimTodo's per-org advisory locks; the second is the org's.
 const orgClaimLockSpace = 0x6f7267 // "org"
 
-// LockOrgClaims takes ClaimTodo's transaction advisory lock of each org, one at a time in key order, so
+// lockOrgClaims takes ClaimTodo's transaction advisory lock of each org, one at a time in key order, so
 // two claimers never deadlock. Two orgs whose keys collide share a lock, which only makes their claimers
-// take turns. Exported so a test can stand in for a claimer.
-func LockOrgClaims(ctx context.Context, tx pgx.Tx, orgs []uuid.UUID) error {
+// take turns.
+func lockOrgClaims(ctx context.Context, tx pgx.Tx, orgs []uuid.UUID) error {
 	keys := make([]int32, 0, len(orgs))
 	for _, id := range orgs {
 		h := fnv.New32a()
@@ -480,7 +480,7 @@ const claimable = `(t.retry_at IS NULL OR t.retry_at <= NOW())`
 // ClaimTodo leases up to limit TODO tasks assigned to active agents, marking them IN_PROGRESS. Each org
 // gets no more than its agent_concurrency (orgDefault when unset) minus the tasks the crew already works
 // for it, counted across every instance. Claimers take a transaction advisory lock per org they claim
-// for (LockOrgClaims) and count after taking it, so two instances never claim
+// for (lockOrgClaims) and count after taking it, so two instances never claim
 // past an org's limit together: the second waits for the first to commit and then sees its claims. An
 // advisory lock, not the org's row, so creating a task (which bumps the org's task number) never waits
 // on a claim.
@@ -502,7 +502,7 @@ func (s *Store) ClaimTodo(ctx context.Context, lease time.Duration, limit, orgDe
 	if err != nil || len(orgs) == 0 {
 		return nil, err
 	}
-	if err := LockOrgClaims(ctx, tx, orgs); err != nil {
+	if err := lockOrgClaims(ctx, tx, orgs); err != nil {
 		return nil, err
 	}
 	// A task an inactive agent still works holds its slot until the run ends, so running counts every agent.
