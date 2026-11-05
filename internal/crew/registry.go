@@ -27,7 +27,7 @@ type Capability struct {
 
 // Deps is what module code gets of the crew: the store, connectors, events and the log.
 type Deps struct {
-	Store  *store.Store
+	Store  store.Backend
 	Hub    *hub.Hub
 	Broker *events.Broker
 	Logger *slog.Logger

@@ -16,14 +16,14 @@ import (
 )
 
 type Hub struct {
-	store  *store.Store
+	store  store.Backend
 	logger *slog.Logger
 	http   *http.Client
 }
 
 // New builds a hub whose connectors share one HTTP client; httpTimeout bounds each of its requests
 // (CUEFLOW_CONNECTOR_HTTP_TIMEOUT).
-func New(st *store.Store, logger *slog.Logger, httpTimeout time.Duration) *Hub {
+func New(st store.Backend, logger *slog.Logger, httpTimeout time.Duration) *Hub {
 	return &Hub{store: st, logger: logger, http: &http.Client{Timeout: httpTimeout}}
 }
 

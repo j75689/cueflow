@@ -224,7 +224,7 @@ func (m *Module) resolvePublisher(ctx context.Context, chosen *uuid.UUID) (uuid.
 
 // MediaFor resolves media URLs for publishers: absolute URLs, and loaders for the media CueFlow
 // stores itself (for publishers whose service cannot fetch CueFlow's URLs).
-func MediaFor(st *Store, mediaBase string, raw []string) ([]string, []connector.MediaFile) {
+func MediaFor(st Store, mediaBase string, raw []string) ([]string, []connector.MediaFile) {
 	urls := make([]string, 0, len(raw))
 	files := make([]connector.MediaFile, 0, len(raw))
 	for _, u := range raw {

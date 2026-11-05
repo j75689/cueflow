@@ -34,7 +34,7 @@ type Dispatcher interface{ Wake() }
 // Module mounts deliverables on the core: REST, /meta constants, /stats, a task's deliverables,
 // the MCP listing tool and (through tools.go) the agents' capability.
 type Module struct {
-	Store      *Store
+	Store      Store
 	Hub        *hub.Hub
 	Broker     *events.Broker
 	Dispatcher Dispatcher

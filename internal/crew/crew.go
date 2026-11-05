@@ -29,7 +29,7 @@ import (
 )
 
 type Crew struct {
-	store   *store.Store
+	store   store.Backend
 	hub     *hub.Hub
 	broker  *events.Broker
 	logger  *slog.Logger
@@ -81,7 +81,7 @@ type Crew struct {
 	wg      sync.WaitGroup
 }
 
-func New(st *store.Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
+func New(st store.Backend, h *hub.Hub, b *events.Broker, logger *slog.Logger, allowPrivateFetch bool) *Crew {
 	return &Crew{store: st, hub: h, broker: b, logger: logger.With("component", "crew"),
 		fetcher: NewFetcher(allowPrivateFetch), OrgConcurrency: 3, ContextHandOffAt: config.DefaultContextHandOffAt,
 		Lease: 2 * time.Minute, Every: 2 * time.Second, RecoverBackoff: defaultRecoverBackoff, DeliveryLimit: 30 * time.Minute,

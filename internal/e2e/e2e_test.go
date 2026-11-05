@@ -25,23 +25,25 @@ import (
 	"github.com/j75689/cueflow/internal/connector"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
+	contentpg "github.com/j75689/cueflow/internal/content/pg"
 	"github.com/j75689/cueflow/internal/crew"
-	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/deliverable"
+	deliverablepg "github.com/j75689/cueflow/internal/deliverable/pg"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/publishermock"
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
+	storepg "github.com/j75689/cueflow/internal/store/pg"
 )
 
 type env struct {
 	t         *testing.T
 	pool      *pgxpool.Pool
-	store     *store.Store
-	cs        *content.Store
-	ds        *deliverable.Store
+	store     store.Backend
+	cs        content.Store
+	ds        deliverable.Store
 	deliverer *deliverable.Worker
 	crew      *crew.Crew
 	sched     *scheduler.Scheduler
@@ -59,7 +61,7 @@ func setup(t *testing.T) *env {
 	// CUEFLOW_TEST_DATABASE_SESSION_URL runs the suite the way a transaction-mode pooler is used:
 	// the URL above is the pooler, this one the session connection for the migration.
 	sessionURL := os.Getenv("CUEFLOW_TEST_DATABASE_SESSION_URL")
-	pool, err := db.OpenWith(ctx, url, db.Options{TxPooler: sessionURL != ""})
+	pool, err := storepg.OpenWith(ctx, url, storepg.Options{TxPooler: sessionURL != ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,24 +70,24 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	if sessionURL != "" {
-		err = db.MigrateSession(ctx, sessionURL)
+		err = storepg.MigrateSession(ctx, sessionURL)
 	} else {
-		err = db.Migrate(ctx, pool)
+		err = storepg.Migrate(ctx, pool)
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
 	box, _ := secret.New(key)
-	st := store.New(pool, box)
-	cs := content.NewStore(st)
+	st := storepg.New(pool, box)
+	cs := contentpg.New(st)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broker := events.NewBroker()
 	h := hub.New(st, logger, config.DefaultConnectorHTTPTimeout)
 	sched := scheduler.New(st, logger)
 	module := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: "http://localhost:3000"}
 	module.Attach()
-	ds := deliverable.NewStore(st)
+	ds := deliverablepg.New(st)
 	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
 	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
 	dmodule.Attach()
@@ -170,12 +172,12 @@ func TestSecretKeyRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withKeys := func(primary []byte, previous ...[]byte) *store.Store {
+	withKeys := func(primary []byte, previous ...[]byte) store.Backend {
 		box, err := secret.New(primary, previous...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return store.New(e.pool, box)
+		return storepg.New(e.pool, box)
 	}
 
 	// Step 1: new primary + old previous key -> everything still readable.
