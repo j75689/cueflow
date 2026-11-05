@@ -48,6 +48,21 @@ func TestTxRollsBackOnPanic(t *testing.T) {
 	}
 }
 
+// The text primary keys refuse NULL, as in PostgreSQL.
+func TestPrimaryKeysRefuseNull(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	for _, q := range []string{
+		"INSERT INTO clock (name, next_run_at) VALUES (NULL, 'x')",
+		"INSERT INTO orgs (id, slug, name) VALUES (NULL, 'n', 'n')",
+		"INSERT INTO schema_migrations (version, applied_at) VALUES (NULL, 'x')",
+	} {
+		if _, err := s.Writer().Exec(ctx, q); err == nil || !strings.Contains(err.Error(), "NOT NULL") {
+			t.Errorf("%s: %v", q, err)
+		}
+	}
+}
+
 // The max(seq) + 1 on insert reads an index, not the whole table.
 func TestNextSeqUsesIndex(t *testing.T) {
 	s := openTest(t)

@@ -8,7 +8,7 @@
 -- defaults below keep the columns' PostgreSQL defaults for rows written without them.
 
 CREATE TABLE connectors (
-    id               TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id               TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     name             TEXT NOT NULL,
     kind             TEXT NOT NULL,
     type             TEXT NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE connectors (
 CREATE INDEX idx_connectors_kind ON connectors (kind);
 
 CREATE TABLE orgs (
-    id                TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     name              TEXT NOT NULL,
     slug              TEXT NOT NULL UNIQUE,
     next_task_number  INTEGER NOT NULL DEFAULT 1,
@@ -39,7 +39,7 @@ CREATE TABLE orgs (
 INSERT INTO orgs (name, slug) VALUES ('Default', 'default');
 
 CREATE TABLE agents (
-    id                   TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                   TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     name                 TEXT NOT NULL,
     slug                 TEXT NOT NULL,
     avatar               TEXT NOT NULL DEFAULT '🤖',
@@ -66,7 +66,7 @@ CREATE TABLE agents (
 CREATE INDEX idx_agents_org ON agents (org_id);
 
 CREATE TABLE agent_memories (
-    id         TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id         TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     agent_id   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     content    TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now'))
@@ -74,7 +74,7 @@ CREATE TABLE agent_memories (
 CREATE INDEX idx_agent_memories_agent ON agent_memories (agent_id, created_at DESC);
 
 CREATE TABLE schedules (
-    id                     TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                     TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     name                   TEXT NOT NULL,
     cron_expr              TEXT NOT NULL,
     timezone               TEXT NOT NULL DEFAULT 'UTC',
@@ -96,7 +96,7 @@ CREATE TABLE schedules (
 CREATE INDEX idx_schedules_org ON schedules (org_id);
 
 CREATE TABLE tasks (
-    id                     TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                     TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     number                 INTEGER NOT NULL,
     title                  TEXT NOT NULL,
     description            TEXT NOT NULL DEFAULT '',
@@ -133,7 +133,7 @@ CREATE INDEX idx_tasks_parent ON tasks (parent_id);
 CREATE INDEX idx_tasks_status ON tasks (status, position);
 
 CREATE TABLE task_messages (
-    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id          TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     seq         INTEGER NOT NULL, -- PostgreSQL's BIGSERIAL: the store writes max(seq) + 1
     task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     author_type TEXT NOT NULL,
@@ -147,7 +147,7 @@ CREATE INDEX idx_task_messages_task ON task_messages (task_id, seq);
 CREATE INDEX idx_task_messages_seq ON task_messages (seq); -- the max(seq) + 1 on insert
 
 CREATE TABLE agent_runs (
-    id                 TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                 TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     task_id            TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id           TEXT REFERENCES agents(id) ON DELETE SET NULL,
     status             TEXT NOT NULL DEFAULT 'RUNNING',
@@ -173,7 +173,7 @@ CREATE INDEX idx_agent_runs_started ON agent_runs (started_at);
 CREATE INDEX idx_agent_runs_task ON agent_runs (task_id, started_at DESC);
 
 CREATE TABLE agent_tokens (
-    id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id           TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     agent_id     TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     token_hash   BLOB NOT NULL UNIQUE,
@@ -183,7 +183,7 @@ CREATE TABLE agent_tokens (
 CREATE INDEX idx_agent_tokens_agent ON agent_tokens (agent_id);
 
 CREATE TABLE run_tokens (
-    token_hash BLOB PRIMARY KEY,
+    token_hash BLOB NOT NULL PRIMARY KEY,
     task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     outcome    TEXT,
@@ -194,7 +194,7 @@ CREATE TABLE run_tokens (
 CREATE INDEX idx_run_tokens_expires ON run_tokens (expires_at);
 
 CREATE TABLE tool_approvals (
-    id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id           TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
     connector_id TEXT REFERENCES connectors(id) ON DELETE SET NULL,
@@ -213,7 +213,7 @@ CREATE TABLE tool_approvals (
 CREATE INDEX idx_tool_approvals_task ON tool_approvals (task_id, created_at);
 
 CREATE TABLE media (
-    id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id           TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     mime_type    TEXT NOT NULL,
     data         BLOB,
     size_bytes   INTEGER NOT NULL,
@@ -227,12 +227,12 @@ CREATE TABLE media (
 CREATE INDEX idx_media_created ON media (created_at DESC);
 
 CREATE TABLE clock (
-    name        TEXT PRIMARY KEY,
+    name        TEXT NOT NULL PRIMARY KEY,
     next_run_at TEXT NOT NULL
 );
 
 CREATE TABLE runners (
-    id              TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id              TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     name            TEXT NOT NULL,
     labels          TEXT NOT NULL DEFAULT '[]',
     org_ids         TEXT NOT NULL DEFAULT '[]',
@@ -246,7 +246,7 @@ CREATE TABLE runners (
 );
 
 CREATE TABLE runner_registrations (
-    id         TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id         TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     token_hash BLOB NOT NULL UNIQUE,
     labels     TEXT NOT NULL DEFAULT '[]',
     org_ids    TEXT NOT NULL DEFAULT '[]',
@@ -255,7 +255,7 @@ CREATE TABLE runner_registrations (
 );
 
 CREATE TABLE runner_jobs (
-    id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id           TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     org_id       TEXT NOT NULL REFERENCES orgs(id),
     task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
@@ -274,7 +274,7 @@ CREATE INDEX idx_runner_jobs_queue ON runner_jobs (created_at) WHERE status = 'q
 CREATE INDEX idx_runner_jobs_task ON runner_jobs (task_id, created_at DESC);
 
 CREATE TABLE task_files (
-    id         TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id         TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     mime_type  TEXT NOT NULL,
@@ -288,7 +288,7 @@ CREATE TABLE task_files (
 );
 
 CREATE TABLE deliverables (
-    id                  TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id                  TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     org_id              TEXT NOT NULL REFERENCES orgs(id),
     task_id             TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     kind                TEXT NOT NULL,
@@ -314,7 +314,7 @@ CREATE INDEX idx_deliverables_org_status ON deliverables (org_id, status);
 CREATE INDEX idx_deliverables_task ON deliverables (task_id);
 
 CREATE TABLE deliverable_audit_logs (
-    id             TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id             TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     seq            INTEGER NOT NULL, -- PostgreSQL's BIGSERIAL: the store writes max(seq) + 1
     deliverable_id TEXT NOT NULL REFERENCES deliverables(id) ON DELETE CASCADE,
     action         TEXT NOT NULL,
@@ -329,7 +329,7 @@ CREATE INDEX idx_deliverable_audit_logs_item ON deliverable_audit_logs (delivera
 CREATE INDEX idx_deliverable_audit_logs_seq ON deliverable_audit_logs (seq); -- the max(seq) + 1 on insert
 
 CREATE TABLE source_items (
-    id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
+    id           TEXT NOT NULL PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
     external_id  TEXT NOT NULL,
     title        TEXT NOT NULL DEFAULT '',

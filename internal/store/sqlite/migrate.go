@@ -20,7 +20,7 @@ var Migrations, _ = fs.Sub(migrations, "migrations")
 // owns the file, and its write connection already lets one writer in at a time.
 func Migrate(ctx context.Context, s *Store) error {
 	if _, err := s.w.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		version TEXT NOT NULL PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return err
 	}
 	names, err := fs.Glob(migrations, "migrations/*.sql")
