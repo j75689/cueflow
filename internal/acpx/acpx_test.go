@@ -47,3 +47,30 @@ func TestCloseDoesNotWaitForStderrHolder(t *testing.T) {
 		t.Fatal("Close still waiting after 10s")
 	}
 }
+
+// When nothing else holds the agent's stdio, Close returns as soon as the agent exits: WaitDelay adds nothing.
+// The bound, 500 ms, is half of WaitDelay and far above the few ms this takes, also under -race.
+func TestCloseAddsNoDelayOnNormalExit(t *testing.T) {
+	for _, c := range []struct {
+		name, script string
+		exits        bool // by itself, before Close
+	}{
+		{"exits by itself", "exit 0", true},
+		{"stopped by Close", "exec sleep 600", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			began := time.Now()
+			p, err := Start(connector.RuntimeLaunch{Command: "sh", Args: []string{"-c", c.script}}, t.TempDir(), RejectingClient{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.exits {
+				<-p.Exited()
+			}
+			p.Close(time.Second)
+			if took := time.Since(began); took > 500*time.Millisecond {
+				t.Errorf("Close returned %s after Start, want under 500ms", took)
+			}
+		})
+	}
+}
