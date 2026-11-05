@@ -162,7 +162,7 @@ func checkSource(srcVersion string) error {
 	}
 	last := strings.TrimSuffix(slices.Max(names), ".sql")
 	if prefix(srcVersion) != prefix(last) {
-		return fmt.Errorf("source is at migration %s, this cueflow at %s: migrate the source with this version first (DATABASE_URL=<source> cueflow migrate), or copy with the version the source runs", srcVersion, last)
+		return fmt.Errorf("source is at migration %s, this cueflow at %s: migrate the source with this version first (CUEFLOW_SECRET_KEY=<the install's key> DATABASE_URL=<source> cueflow migrate, or start this version on it once), or copy with the version the source runs", srcVersion, last)
 	}
 	return nil
 }
