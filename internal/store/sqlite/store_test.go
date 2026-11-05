@@ -22,6 +22,39 @@ func openTest(t *testing.T) *Store {
 	return s
 }
 
+// Migrating a file a second time applies nothing: it keeps the version and the rows written in between
+// (a reopened single-mode install migrates on every start).
+func TestMigrateReopen(t *testing.T) {
+	ctx := context.Background()
+	url := "sqlite://" + filepath.Join(t.TempDir(), "cueflow.db")
+	for i := range 2 {
+		s, err := Open(ctx, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := Migrate(ctx, s); err != nil {
+			s.Close()
+			t.Fatalf("migrate #%d: %v", i+1, err)
+		}
+		if i == 0 {
+			if _, err := s.Writer().Exec(ctx, "INSERT INTO clock (name, next_run_at) VALUES ('kept', 'x')"); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+			continue
+		}
+		defer s.Close()
+		var version string
+		var kept int
+		if err := s.Reader().QueryRow(ctx, "SELECT max(version) FROM schema_migrations").Scan(&version); err != nil || version != "0027_baseline" {
+			t.Errorf("version after reopening: %q %v, want 0027_baseline", version, err)
+		}
+		if err := s.Reader().QueryRow(ctx, "SELECT count(*) FROM clock WHERE name = 'kept'").Scan(&kept); err != nil || kept != 1 {
+			t.Errorf("row written before reopening: %d %v", kept, err)
+		}
+	}
+}
+
 // A panic inside Tx must not leave the one write connection in its transaction.
 func TestTxRollsBackOnPanic(t *testing.T) {
 	s := openTest(t)
