@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/blob"
@@ -37,10 +36,8 @@ import (
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
-	contentpg "github.com/j75689/cueflow/internal/content/pg"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/deliverable"
-	deliverablepg "github.com/j75689/cueflow/internal/deliverable/pg"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/events/pg"
 	"github.com/j75689/cueflow/internal/events/pubsub"
@@ -51,7 +48,6 @@ import (
 	"github.com/j75689/cueflow/internal/mcpx"
 	"github.com/j75689/cueflow/internal/runner"
 	"github.com/j75689/cueflow/internal/scheduler"
-	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
 	storepg "github.com/j75689/cueflow/internal/store/pg"
 	"github.com/j75689/cueflow/internal/version"
@@ -109,26 +105,12 @@ func migrate() error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	pool, err := openDB(ctx, cfg, 0)
+	_, _, _, closeDB, err := openBackend(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	return migrateDB(ctx, cfg, pool)
-}
-
-// openDB opens the main pool: for a transaction-mode pooler when a session URL is set.
-func openDB(ctx context.Context, cfg *config.Config, maxConns int) (*pgxpool.Pool, error) {
-	return storepg.OpenWith(ctx, cfg.DatabaseURL, storepg.Options{MaxConns: maxConns, TxPooler: cfg.DatabaseSessionURL != ""})
-}
-
-// migrateDB migrates through the session URL when there is one (the migration lock needs a session).
-func migrateDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
-	if cfg.DatabaseSessionURL != "" {
-		return storepg.MigrateSession(ctx, cfg.DatabaseSessionURL)
-	}
-	return storepg.Migrate(ctx, pool)
+	closeDB()
+	return nil
 }
 
 // dropEmptyCredentialEnv unsets credential variables that are present but empty. docker compose
@@ -158,32 +140,24 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := connectWithRetry(ctx, cfg, logger)
+	if err := waitForDB(ctx, cfg, logger); err != nil {
+		return err
+	}
+	st, ds, cs, closeDB, err := openBackend(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	if err := migrateDB(ctx, cfg, pool); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-
-	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
-	if err != nil {
-		return err
-	}
-	if box.HasPrevious() {
+	defer closeDB()
+	if len(cfg.PreviousSecretKeys) > 0 {
 		logger.Info("secret key rotation in progress: previous keys accepted for reading; run `cueflow rotate-key`, then remove CUEFLOW_SECRET_KEY_PREVIOUS")
 	}
-	st := storepg.New(pool, box)
 	blobs, err := blob.Parse(cfg.MediaStorage)
 	if err != nil {
 		return err
 	}
 	st.SetBlobs(blobs)
-	st.SetMediaUse(deliverablepg.New(st)) // whether or not the module is mounted: its rows stay
 	// "Everything running is stale" is only true when this is the one process. In the cloud, other
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
-	cs := contentpg.New(st)
 	broker := events.NewBroker()
 	closeEvents := func() {}
 	if cfg.Events == "pubsub" {
@@ -194,9 +168,9 @@ func serve() error {
 		closeEvents = subscriptionCloser(t, cfg.PubSubDeleteTimeout, logger)
 		defer closeEvents() // a startup error after this point
 		broker.Use(t, logger)
-	} else {
-		broker.Use(&pg.Transport{Pool: pool, ListenURL: cfg.DatabaseSessionURL}, logger)
-	}
+	} else if pgStore, ok := st.(*storepg.Store); ok {
+		broker.Use(&pg.Transport{Pool: pgStore.Pool(), ListenURL: cfg.DatabaseSessionURL}, logger)
+	} // SQLite is one process: the broker needs no transport to reach other instances
 	go broker.Run(ctx)
 	h := hub.New(st, logger, cfg.ConnectorHTTPTimeout)
 	sched := scheduler.New(st, logger)
@@ -216,7 +190,6 @@ func serve() error {
 	}
 	if cfg.Enabled("deliverables") {
 		// Typed items any agent can produce, reviewed by a human, then acted on.
-		ds := deliverablepg.New(st)
 		deliverer := deliverable.NewWorker(ds, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
 		deliverableModule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
 		deliverableModule.Attach()
@@ -362,25 +335,6 @@ func subscriptionCloser(t *pubsub.Transport, timeout time.Duration, logger *slog
 	}
 }
 
-// connectWithRetry waits for PostgreSQL (it may still be starting under docker compose).
-func connectWithRetry(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
-	var lastErr error
-	for attempt := 1; attempt <= 30; attempt++ {
-		pool, err := openDB(ctx, cfg, cfg.DBMaxConns)
-		if err == nil {
-			return pool, nil
-		}
-		lastErr = err
-		logger.Warn("waiting for database", "attempt", attempt, "err", err)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-	return nil, fmt.Errorf("database unavailable: %w", lastErr)
-}
-
 func healthcheck() error {
 	addr := os.Getenv("CUEFLOW_ADDR")
 	if addr == "" {
@@ -425,19 +379,12 @@ func rotateKey(dryRun bool) error {
 		return err
 	}
 	ctx := context.Background()
-	pool, err := openDB(ctx, cfg, 0)
+	st, _, _, closeDB, err := openBackend(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	if err := migrateDB(ctx, cfg, pool); err != nil {
-		return err
-	}
-	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
-	if err != nil {
-		return err
-	}
-	rep, err := storepg.New(pool, box).ReencryptConnectorSecrets(ctx, dryRun)
+	defer closeDB()
+	rep, err := st.ReencryptConnectorSecrets(ctx, dryRun)
 	verb := "re-encrypted"
 	if dryRun {
 		verb = "would re-encrypt"
@@ -449,7 +396,7 @@ func rotateKey(dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	if !dryRun && box.HasPrevious() {
+	if !dryRun && len(cfg.PreviousSecretKeys) > 0 {
 		fmt.Println("done: remove CUEFLOW_SECRET_KEY_PREVIOUS and restart CueFlow")
 	}
 	return nil
@@ -467,22 +414,16 @@ func mediaCmd(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	pool, err := openDB(ctx, cfg, 0)
+	st, _, _, closeDB, err := openBackend(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	box, err := secret.New(cfg.SecretKey, cfg.PreviousSecretKeys...)
-	if err != nil {
-		return err
-	}
-	st := storepg.New(pool, box)
+	defer closeDB()
 	cur, err := blob.Parse(cfg.MediaStorage)
 	if err != nil {
 		return err
 	}
 	st.SetBlobs(cur) // rows already moved elsewhere stay readable only through the configured backend
-	st.SetMediaUse(deliverablepg.New(st))
 
 	switch args[0] {
 	case "migrate":
