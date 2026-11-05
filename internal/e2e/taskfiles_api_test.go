@@ -231,3 +231,42 @@ func TestTaskFilesAPI(t *testing.T) {
 		t.Fatalf("the parent's file should still be there: %d", code)
 	}
 }
+
+// At the listing's cap of 500, a task's own files fill it first and its subtask's take what is left.
+func TestTaskFilesAPISubtaskFilesCapped(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	parent, _ := e.store.CreateTask(ctx, store.NewTask{Title: "Parent"})
+	child, _ := e.store.CreateTask(ctx, store.NewTask{Title: "Child", ParentID: &parent.ID, CreatedBy: "agent"})
+	for i := range 495 {
+		if _, err := e.store.WriteTaskFile(ctx, parent.ID, fmt.Sprintf("z%03d.txt", i), "", []byte("own"), "human"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 10 {
+		if _, err := e.store.WriteTaskFile(ctx, child.ID, fmt.Sprintf("a%02d.txt", i), "", []byte("child's"), "reader"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var list struct {
+		Files []struct {
+			Name         string
+			Own, Subtask bool
+			TaskNumber   int64 `json:"task_number"`
+		} `json:"files"`
+		Total int `json:"total"`
+	}
+	if code := e.do("GET", "/tasks/"+parent.ID.String()+"/files", nil, &list); code != 200 || list.Total != 505 || len(list.Files) != 500 {
+		t.Fatalf("list: %d, %d of %d", code, len(list.Files), list.Total)
+	}
+	for i, f := range list.Files[:495] {
+		if !f.Own || f.Subtask {
+			t.Fatalf("file %d should be the parent's own: %+v", i, f)
+		}
+	}
+	for i, f := range list.Files[495:] {
+		if f.Name != fmt.Sprintf("a%02d.txt", i) || f.Own || !f.Subtask || f.TaskNumber != child.Number {
+			t.Fatalf("file %d should be the subtask's a%02d.txt: %+v", 495+i, i, f)
+		}
+	}
+}

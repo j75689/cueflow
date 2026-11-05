@@ -281,3 +281,42 @@ func TestBriefSubtaskFilesLast(t *testing.T) {
 	})
 	e.crew.RunPending(ctx, 10)
 }
+
+// At list_files' cap of 100, a task's own files fill it first and its subtask's take what is left.
+func TestListFilesSubtaskFilesCapped(t *testing.T) {
+	e, team := crewSetup(t)
+	ctx := context.Background()
+	var task store.Task
+	if code := e.do("POST", "/tasks", map[string]any{"title": "Many files", "assignee_agent_id": team["writer"].ID}, &task); code != 201 {
+		t.Fatalf("create task: %d", code)
+	}
+	child, err := e.store.CreateTask(ctx, store.NewTask{Title: "Child", Status: store.TaskBacklog, ParentID: &task.ID, CreatedBy: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 95 {
+		if _, err := e.store.WriteTaskFile(ctx, task.ID, fmt.Sprintf("z%02d.txt", i), "", []byte("own"), "human"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 10 {
+		if _, err := e.store.WriteTaskFile(ctx, child.ID, fmt.Sprintf("a%02d.txt", i), "", []byte("child's"), "human"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fromChild := fmt.Sprintf(", from subtask #%d)", child.Number)
+	setScript(t, func(t *testing.T, req llm.Request) llm.Message {
+		res := toolResults(req)
+		if len(res) == 0 {
+			return calls("list_files", map[string]any{})
+		}
+		l := res[0].Content
+		if strings.Count(l, "- z") != 95 || strings.Count(l, fromChild) != 5 || !strings.Contains(l, "- a04.txt (") ||
+			strings.Contains(l, "- a05.txt") || strings.Index(l, "- a00.txt") < strings.Index(l, "- z94.txt") ||
+			!strings.HasSuffix(l, "(5 more not listed)\n") {
+			t.Errorf("list_files should fill its cap with the task's own files first: %q", l)
+		}
+		return calls("complete_task", map[string]any{"summary": "ok"})
+	})
+	e.crew.RunPending(ctx, 10)
+}
