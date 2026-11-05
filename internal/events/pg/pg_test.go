@@ -43,7 +43,7 @@ func notifyAcross(t *testing.T, url, listenURL string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listenURL != "" { // as db.OpenWith does for a transaction pooler
+	if listenURL != "" { // as store/pg.OpenWith does for a transaction pooler
 		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
 		cfg.ConnConfig.StatementCacheCapacity = 0
 	}

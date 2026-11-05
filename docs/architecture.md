@@ -73,9 +73,9 @@ flowchart TB
 | `cmd/cueflow` | Entry point: load config, connect to the DB, run migrations, wire all components, graceful shutdown; subcommands `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
 | `cmd/mock-publisher-mcp` | A publisher MCP server that posts nowhere, for development and demos (`internal/publishermock`) |
 | `internal/config` | Load settings from environment variables (`CUEFLOW_*`, `DATABASE_URL`) |
-| `internal/db` | Connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) |
-| `internal/domain` | The errors every layer shares (`ErrNotFound`, `ErrVersionConflict`, `TransitionError`) |
-| `internal/store` | All PostgreSQL access; status changes and audit entries are written in the same transaction |
+| `internal/domain` | The errors every layer shares (`ErrNotFound`, `ErrVersionConflict`, `ErrConflict`, `ErrReferenced`, `TransitionError`) |
+| `internal/store` | The storage contract: domain types, the per-domain interfaces (`TaskStore`, `AgentStore`, ...) aggregated in `Backend`, and pure helpers; consumers hold a `Backend` |
+| `internal/store/pg` | The PostgreSQL backend: connection pool, embedded SQL migrations (an advisory lock prevents concurrent migrations from multiple instances) and every query; status changes and audit entries are written in the same transaction, and no transaction stays open across a blob-store call |
 | `internal/secret` | AES-256-GCM encryption of connector secret fields |
 | `internal/connector` | Plugin registry, config schema, the five kind interfaces, the publisher authorization wrapper |
 | `internal/connectors/*` | Built-in plugin implementations |
@@ -84,8 +84,8 @@ flowchart TB
 | `internal/guard` | Publish authorization (a grant and an agent marker carried on the context) |
 | `internal/llm` | Provider-neutral chat types used by the tool loops; LLM connectors translate to their wire formats |
 | `internal/crew` | Agent team runner: task claiming, tool loop, delegation, schedules, memory; the capability/tool registry modules add to |
-| `internal/content` | The social content module on deliverables: the `post` kind (platform rules as validation, publishing through a publisher connector as its action), source items, publisher accounts and the drafting tools; mounted on the core through `api.Module` and the crew registry |
-| `internal/deliverable` | The deliverables module: typed items (kinds with payload validation) any agent can produce, one review state machine with an audit log, and a worker that, after approval, runs the kind's own action (a post is published) or an action connector, under a grant |
+| `internal/content` | The social content module on deliverables: the `post` kind (platform rules as validation, publishing through a publisher connector as its action), source items, publisher accounts and the drafting tools; mounted on the core through `api.Module` and the crew registry. Its queries are in `internal/content/pg` |
+| `internal/deliverable` | The deliverables module: typed items (kinds with payload validation) any agent can produce, one review state machine with an audit log, and a worker that, after approval, runs the kind's own action (a post is published) or an action connector, under a grant. Its queries are in `internal/deliverable/pg` |
 | `internal/scheduler` | cron: spawns scheduled tasks and fires the cron rows and periodic jobs modules register |
 | `internal/events` | Pub/sub for live SSE updates, fanned out through PostgreSQL `LISTEN/NOTIFY` |
 | `internal/jobs` | Background work requests ("run this task", "fire this schedule", plus the kinds modules register): in-process locally, Cloud Tasks in cloud mode (`internal/jobs/cloudtasks`) |
@@ -221,7 +221,7 @@ erDiagram
 | `tasks` / `task_messages` / `agent_runs` | Board tasks, threads, and per-run turn and token counts |
 | `schedules` | cron settings that create tasks |
 
-Migrations live in `internal/db/migrations/` and are applied automatically at startup. `posts`, `pipelines`,
+Migrations live in `internal/store/pg/migrations/` and are applied automatically at startup. `posts`, `pipelines`,
 `pipeline_runs` and `audit_logs` are left over from the earlier posts path: nothing reads or writes them, they
 only keep the history of installations that used it.
 
@@ -368,4 +368,4 @@ Not covered by automated tests (they need a real project): the Cloud Tasks and C
 | Give agents a new tool | Core tools in `internal/crew/tools.go`; a module registers its own with `crew.RegisterCapability` / `crew.RegisterTool` (see `internal/content/tools.go`). Never add a tool that can publish |
 | Add a default role | `internal/crew/defaults.go` |
 | Change the agents' working rules | `internal/crew/prompt.go` (all agents) or edit one role's instructions in the UI |
-| Add a table | `internal/db/migrations/000N_*.sql` |
+| Add a table | `internal/store/pg/migrations/000N_*.sql` |

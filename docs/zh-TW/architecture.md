@@ -72,9 +72,9 @@ flowchart TB
 | `cmd/cueflow` | 進入點：載入設定、連線 DB、跑 migration、組裝所有元件、優雅關機；子命令 `migrate` / `genkey` / `healthcheck` / `rotate-key` / `runner` / `media` / `mcp-bridge` |
 | `cmd/mock-publisher-mcp` | 不會真的發文的發布器 MCP 伺服器，給開發與示範用（`internal/publishermock`） |
 | `internal/config` | 從環境變數載入設定（`CUEFLOW_*`、`DATABASE_URL`） |
-| `internal/db` | 連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate） |
-| `internal/domain` | 各層共用的錯誤（`ErrNotFound`、`ErrVersionConflict`、`TransitionError`） |
-| `internal/store` | 所有 PostgreSQL 存取；交易內同時寫狀態與稽核紀錄 |
+| `internal/domain` | 各層共用的錯誤（`ErrNotFound`、`ErrVersionConflict`、`ErrConflict`、`ErrReferenced`、`TransitionError`） |
+| `internal/store` | 儲存契約：領域型別、依領域切分的介面（`TaskStore`、`AgentStore`…，彙整為 `Backend`）與純函式；使用端持有 `Backend` |
+| `internal/store/pg` | PostgreSQL 後端：連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate）與所有查詢；交易內同時寫狀態與稽核紀錄，交易開著時不呼叫 blob 儲存 |
 | `internal/secret` | AES-256-GCM 加解密 connector 機密欄位 |
 | `internal/connector` | 插件註冊表、設定 schema、五種 kind 介面、發布器授權包裝 |
 | `internal/connectors/*` | 內建插件實作 |
@@ -217,7 +217,7 @@ erDiagram
 | `tasks` / `task_messages` / `agent_runs` | 看板任務、對話串、每次 agent 執行的回合數與 token 用量 |
 | `schedules` | 定時建立任務的 cron 設定 |
 
-Migration 檔在 `internal/db/migrations/`，啟動時自動套用。`posts`、`pipelines`、`pipeline_runs`、`audit_logs` 是早期貼文流程留下的資料表：沒有任何程式讀寫，只保留用過那條路的安裝的歷史。
+Migration 檔在 `internal/store/pg/migrations/`，啟動時自動套用。`posts`、`pipelines`、`pipeline_runs`、`audit_logs` 是早期貼文流程留下的資料表：沒有任何程式讀寫，只保留用過那條路的安裝的歷史。
 
 ## 5. Deliverable 的生命週期與核准後的動作
 
@@ -359,4 +359,4 @@ flowchart LR
 | 給 agent 新工具 | 核心工具在 `internal/crew/tools.go`；模組用 `crew.RegisterCapability` / `crew.RegisterTool` 登記自己的（見 `internal/content/tools.go`）。不要給任何能發布的工具 |
 | 新增預設角色 | `internal/crew/defaults.go` |
 | 改 agent 的工作守則 | `internal/crew/prompt.go`（全體）或在 UI 編輯單一角色的 instructions |
-| 新增資料表 | `internal/db/migrations/000N_*.sql` |
+| 新增資料表 | `internal/store/pg/migrations/000N_*.sql` |
