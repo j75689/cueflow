@@ -212,8 +212,8 @@ func kindIDs() []string {
 	return ids
 }
 
-// validatePayload checks that payload is a JSON object the kind accepts.
-func validatePayload(kind string, payload json.RawMessage) (json.RawMessage, error) {
+// ValidatePayload checks that payload is a JSON object the kind accepts.
+func ValidatePayload(kind string, payload json.RawMessage) (json.RawMessage, error) {
 	k, ok := KindByID(strings.TrimSpace(kind))
 	if !ok {
 		return nil, fmt.Errorf("unknown deliverable kind %q (registered: %s)", kind, strings.Join(kindIDs(), ", "))

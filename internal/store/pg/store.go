@@ -1,10 +1,13 @@
-// Package store is the PostgreSQL persistence layer.
+// Package pg is the PostgreSQL backend of package store: the pool, the embedded migrations and
+// every query.
 package pg
 
 import (
 	"context"
 	"errors"
+
 	"github.com/j75689/cueflow/internal/blob"
+	"github.com/j75689/cueflow/internal/store"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -21,6 +24,8 @@ type Store struct {
 	blobs blob.Store
 }
 
+var _ store.Backend = (*Store)(nil)
+
 func New(pool *pgxpool.Pool, box *secret.Box) *Store {
 	return &Store{pool: pool, box: box}
 }
@@ -31,6 +36,9 @@ func (s *Store) SetBlobs(b blob.Store) { s.blobs = b }
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+// Close closes the pool.
+func (s *Store) Close() { s.pool.Close() }
 
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -45,17 +53,6 @@ func NotFound(err error) error {
 	}
 	return err
 }
-
-// CronValidator is injected by the scheduler so the store does not depend on the cron library.
-type CronValidator func(expr, tz string) error
-
-// ValidationError is a caller error (bad input) as opposed to a storage failure.
-type ValidationError struct{ Msg string }
-
-func (e *ValidationError) Error() string { return e.Msg }
-
-// Invalid is a ValidationError for a caller error.
-func Invalid(msg string) error { return &ValidationError{Msg: msg} }
 
 func asPg(err error, target **pgconn.PgError) bool { return errors.As(err, target) }
 

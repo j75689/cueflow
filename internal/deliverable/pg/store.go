@@ -12,16 +12,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/j75689/cueflow/internal/deliverable"
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
+	storepg "github.com/j75689/cueflow/internal/store/pg"
 )
 
 // Store runs the module's queries on the core store's pool.
 type Store struct {
-	*store.Store
+	*storepg.Store
 }
 
-func NewStore(s *store.Store) *Store { return &Store{Store: s} }
+var _ deliverable.Store = (*Store)(nil)
+
+func New(s *storepg.Store) *Store { return &Store{Store: s} }
+
+func init() {
+	deliverable.NewStore = func(s store.Backend) deliverable.Store { return New(s.(*storepg.Store)) }
+}
 
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -32,15 +40,15 @@ type querier interface {
 const columns = `id, org_id, task_id, kind, title, payload, status, review_note, error_message, action_connector_id,
 	external_ids, result, attempts, lease_until, version, created_by, acted_at, created_at, updated_at`
 
-func scan(row pgx.Row) (*Deliverable, error) {
-	var d Deliverable
+func scan(row pgx.Row) (*deliverable.Deliverable, error) {
+	var d deliverable.Deliverable
 	var status, createdBy string
 	var ext []byte
 	if err := row.Scan(&d.ID, &d.OrgID, &d.TaskID, &d.Kind, &d.Title, &d.Payload, &status, &d.ReviewNote, &d.ErrorMessage,
 		&d.ActionConnectorID, &ext, &d.Result, &d.Attempts, &d.LeaseUntil, &d.Version, &createdBy, &d.ActedAt, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, err
 	}
-	d.Status, d.CreatedBy = Status(status), Actor(createdBy)
+	d.Status, d.CreatedBy = deliverable.Status(status), deliverable.Actor(createdBy)
 	d.ExternalIDs = map[string]string{}
 	_ = json.Unmarshal(ext, &d.ExternalIDs)
 	if len(d.Payload) == 0 {
@@ -52,28 +60,17 @@ func scan(row pgx.Row) (*Deliverable, error) {
 	return &d, nil
 }
 
-func (s *Store) Get(ctx context.Context, id uuid.UUID) (*Deliverable, error) {
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (*deliverable.Deliverable, error) {
 	d, err := scan(s.Pool().QueryRow(ctx, "SELECT "+columns+" FROM deliverables WHERE id=$1", id))
-	return d, store.NotFound(err)
+	return d, storepg.NotFound(err)
 }
 
-func getForUpdate(ctx context.Context, q querier, id uuid.UUID) (*Deliverable, error) {
+func getForUpdate(ctx context.Context, q querier, id uuid.UUID) (*deliverable.Deliverable, error) {
 	d, err := scan(q.QueryRow(ctx, "SELECT "+columns+" FROM deliverables WHERE id=$1 FOR UPDATE", id))
-	return d, store.NotFound(err)
+	return d, storepg.NotFound(err)
 }
 
-// Filter selects deliverables for List.
-type Filter struct {
-	OrgID    *uuid.UUID
-	TaskID   *uuid.UUID
-	Kind     string
-	Statuses []Status
-	Query    string
-	Limit    int
-	Offset   int
-}
-
-func (s *Store) List(ctx context.Context, f Filter) ([]*Deliverable, int, error) {
+func (s *Store) List(ctx context.Context, f deliverable.Filter) ([]*deliverable.Deliverable, int, error) {
 	where := []string{"TRUE"}
 	var args []any
 	add := func(cond string, v any) {
@@ -114,7 +111,7 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Deliverable, int, error)
 		return nil, 0, err
 	}
 	defer rows.Close()
-	out := []*Deliverable{}
+	out := []*deliverable.Deliverable{}
 	for rows.Next() {
 		d, err := scan(rows)
 		if err != nil {
@@ -125,24 +122,13 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Deliverable, int, error)
 	return out, total, rows.Err()
 }
 
-// New is the input for Create.
-type New struct {
-	// OrgID may be left empty: it then comes from the task, else the default org.
-	OrgID             uuid.UUID
-	TaskID            *uuid.UUID
-	Kind              string
-	Title             string
-	Payload           json.RawMessage
-	ActionConnectorID *uuid.UUID
-}
-
 // Create stores a new item as DRAFT (or PENDING_REVIEW when submit is set) with its first audit entry.
-func (s *Store) Create(ctx context.Context, in New, actor Actor, submit bool) (*Deliverable, error) {
-	payload, err := validatePayload(in.Kind, in.Payload)
+func (s *Store) Create(ctx context.Context, in deliverable.New, actor deliverable.Actor, submit bool) (*deliverable.Deliverable, error) {
+	payload, err := deliverable.ValidatePayload(in.Kind, in.Payload)
 	if err != nil {
 		return nil, store.Invalid(err.Error())
 	}
-	var out *Deliverable
+	var out *deliverable.Deliverable
 	err = pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		var org *uuid.UUID
 		if in.OrgID != uuid.Nil {
@@ -155,11 +141,11 @@ func (s *Store) Create(ctx context.Context, in New, actor Actor, submit bool) (*
 		if err != nil {
 			return err
 		}
-		if err := insertAudit(ctx, tx, d.ID, ActionCreated, actor, "", StatusDraft, "", nil); err != nil {
+		if err := insertAudit(ctx, tx, d.ID, deliverable.ActionCreated, actor, "", deliverable.StatusDraft, "", nil); err != nil {
 			return err
 		}
 		if submit {
-			if d, err = transition(ctx, tx, d, StatusPendingReview, ActionSubmitted, actor, "", nil); err != nil {
+			if d, err = transition(ctx, tx, d, deliverable.StatusPendingReview, deliverable.ActionSubmitted, actor, "", nil); err != nil {
 				return err
 			}
 		}
@@ -169,16 +155,9 @@ func (s *Store) Create(ctx context.Context, in New, actor Actor, submit bool) (*
 	return out, err
 }
 
-// Patch carries edits; nil fields are left unchanged.
-type Patch struct {
-	Title             *string
-	Payload           json.RawMessage
-	ActionConnectorID **uuid.UUID
-}
-
 // Update applies an edit with optimistic locking and records the diff in the audit log.
-func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch Patch, actor Actor, note string) (*Deliverable, error) {
-	var out *Deliverable
+func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch deliverable.Patch, actor deliverable.Actor, note string) (*deliverable.Deliverable, error) {
+	var out *deliverable.Deliverable
 	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		cur, err := getForUpdate(ctx, tx, id)
 		if err != nil {
@@ -197,7 +176,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch Pat
 			diff["title"] = map[string]any{"before": cur.Title, "after": next.Title}
 		}
 		if len(patch.Payload) > 0 {
-			payload, err := validatePayload(cur.Kind, patch.Payload)
+			payload, err := deliverable.ValidatePayload(cur.Kind, patch.Payload)
 			if err != nil {
 				return store.Invalid(err.Error())
 			}
@@ -219,28 +198,15 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch Pat
 		if err != nil {
 			return err
 		}
-		return insertAudit(ctx, tx, id, ActionEdited, actor, cur.Status, cur.Status, note, diff)
+		return insertAudit(ctx, tx, id, deliverable.ActionEdited, actor, cur.Status, cur.Status, note, diff)
 	})
 	return out, err
 }
 
-// TransitionOpts sets extra columns as part of a status change.
-type TransitionOpts struct {
-	ReviewNote        *string
-	ActionConnectorID **uuid.UUID
-	ErrorMessage      *string
-	ExternalIDs       map[string]string
-	Result            map[string]any
-	ActedAt           *time.Time
-	// Check, when set, vets the current row after the state machine has allowed the move and before it is
-	// made; its error aborts the transition.
-	Check func(ctx context.Context, cur *Deliverable) error
-}
-
 // Transition moves an item to a new status if the state machine allows it, atomically with its
 // audit entry.
-func (s *Store) Transition(ctx context.Context, id uuid.UUID, to Status, action Action, actor Actor, note string, opts *TransitionOpts) (*Deliverable, error) {
-	var out *Deliverable
+func (s *Store) Transition(ctx context.Context, id uuid.UUID, to deliverable.Status, action deliverable.Action, actor deliverable.Actor, note string, opts *deliverable.TransitionOpts) (*deliverable.Deliverable, error) {
+	var out *deliverable.Deliverable
 	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		cur, err := getForUpdate(ctx, tx, id)
 		if err != nil {
@@ -252,8 +218,8 @@ func (s *Store) Transition(ctx context.Context, id uuid.UUID, to Status, action 
 	return out, err
 }
 
-func transition(ctx context.Context, tx querier, cur *Deliverable, to Status, action Action, actor Actor, note string, opts *TransitionOpts) (*Deliverable, error) {
-	if err := CheckTransition(cur.Status, to); err != nil {
+func transition(ctx context.Context, tx querier, cur *deliverable.Deliverable, to deliverable.Status, action deliverable.Action, actor deliverable.Actor, note string, opts *deliverable.TransitionOpts) (*deliverable.Deliverable, error) {
+	if err := deliverable.CheckTransition(cur.Status, to); err != nil {
 		return nil, err
 	}
 	if opts != nil && opts.Check != nil {
@@ -267,7 +233,7 @@ func transition(ctx context.Context, tx querier, cur *Deliverable, to Status, ac
 		args = append(args, v)
 		sets = append(sets, fmt.Sprintf("%s=$%d", col, len(args)))
 	}
-	if to == StatusQueued {
+	if to == deliverable.StatusQueued {
 		sets = append(sets, "lease_until=NULL")
 	}
 	if opts != nil {
@@ -317,7 +283,7 @@ func (s *Store) Remove(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-func insertAudit(ctx context.Context, q querier, id uuid.UUID, action Action, actor Actor, from, to Status, note string, diff map[string]any) error {
+func insertAudit(ctx context.Context, q querier, id uuid.UUID, action deliverable.Action, actor deliverable.Actor, from, to deliverable.Status, note string, diff map[string]any) error {
 	var raw []byte
 	if diff != nil {
 		var err error
@@ -331,7 +297,7 @@ func insertAudit(ctx context.Context, q querier, id uuid.UUID, action Action, ac
 }
 
 // AddAudit records an entry that is not a status change (the worker's "started via X", say).
-func (s *Store) AddAudit(ctx context.Context, id uuid.UUID, action Action, actor Actor, note string) error {
+func (s *Store) AddAudit(ctx context.Context, id uuid.UUID, action deliverable.Action, actor deliverable.Actor, note string) error {
 	d, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -339,22 +305,22 @@ func (s *Store) AddAudit(ctx context.Context, id uuid.UUID, action Action, actor
 	return insertAudit(ctx, s.Pool(), id, action, actor, d.Status, d.Status, note, nil)
 }
 
-func (s *Store) AuditLogs(ctx context.Context, id uuid.UUID) ([]AuditLog, error) {
+func (s *Store) AuditLogs(ctx context.Context, id uuid.UUID) ([]deliverable.AuditLog, error) {
 	rows, err := s.Pool().Query(ctx, `SELECT id, deliverable_id, action, actor, from_status, to_status, note, payload_diff, created_at
 		FROM deliverable_audit_logs WHERE deliverable_id=$1 ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []AuditLog{}
+	out := []deliverable.AuditLog{}
 	for rows.Next() {
-		var a AuditLog
+		var a deliverable.AuditLog
 		var action, actor, from, to string
 		var diff []byte
 		if err := rows.Scan(&a.ID, &a.DeliverableID, &action, &actor, &from, &to, &a.Note, &diff, &a.CreatedAt); err != nil {
 			return nil, err
 		}
-		a.Action, a.Actor, a.FromStatus, a.ToStatus = Action(action), Actor(actor), Status(from), Status(to)
+		a.Action, a.Actor, a.FromStatus, a.ToStatus = deliverable.Action(action), deliverable.Actor(actor), deliverable.Status(from), deliverable.Status(to)
 		if len(diff) > 0 {
 			a.PayloadDiff = diff
 		}
@@ -363,37 +329,29 @@ func (s *Store) AuditLogs(ctx context.Context, id uuid.UUID) ([]AuditLog, error)
 	return out, rows.Err()
 }
 
-// Ref is what a task shows of its deliverables.
-type Ref struct {
-	ID     uuid.UUID `json:"id"`
-	Kind   string    `json:"kind"`
-	Title  string    `json:"title"`
-	Status Status    `json:"status"`
-}
-
-func (s *Store) ForTask(ctx context.Context, taskID uuid.UUID) ([]Ref, error) {
+func (s *Store) ForTask(ctx context.Context, taskID uuid.UUID) ([]deliverable.Ref, error) {
 	rows, err := s.Pool().Query(ctx, `SELECT id, kind, title, status FROM deliverables WHERE task_id=$1 ORDER BY created_at`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Ref{}
+	out := []deliverable.Ref{}
 	for rows.Next() {
-		var r Ref
+		var r deliverable.Ref
 		var st string
 		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &st); err != nil {
 			return nil, err
 		}
-		r.Status = Status(st)
+		r.Status = deliverable.Status(st)
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
 // CountByStatus counts an org's deliverables per status.
-func (s *Store) CountByStatus(ctx context.Context, org uuid.UUID) (map[Status]int, error) {
-	out := map[Status]int{}
-	for _, st := range AllStatuses {
+func (s *Store) CountByStatus(ctx context.Context, org uuid.UUID) (map[deliverable.Status]int, error) {
+	out := map[deliverable.Status]int{}
+	for _, st := range deliverable.AllStatuses {
 		out[st] = 0
 	}
 	rows, err := s.Pool().Query(ctx, "SELECT status, count(*) FROM deliverables WHERE org_id=$1 GROUP BY status", org)
@@ -407,7 +365,7 @@ func (s *Store) CountByStatus(ctx context.Context, org uuid.UUID) (map[Status]in
 		if err := rows.Scan(&st, &n); err != nil {
 			return nil, err
 		}
-		out[Status(st)] = n
+		out[deliverable.Status(st)] = n
 	}
 	return out, rows.Err()
 }
@@ -415,14 +373,14 @@ func (s *Store) CountByStatus(ctx context.Context, org uuid.UUID) (map[Status]in
 // --- worker support ---
 
 // QueueApproved moves every APPROVED item to QUEUED and returns them as they were before the move.
-func (s *Store) QueueApproved(ctx context.Context) ([]*Deliverable, error) {
-	var queued []*Deliverable
+func (s *Store) QueueApproved(ctx context.Context) ([]*deliverable.Deliverable, error) {
+	var queued []*deliverable.Deliverable
 	err := pgx.BeginFunc(ctx, s.Pool(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+columns+` FROM deliverables WHERE status='APPROVED' ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100`)
 		if err != nil {
 			return err
 		}
-		var items []*Deliverable
+		var items []*deliverable.Deliverable
 		for rows.Next() {
 			d, err := scan(rows)
 			if err != nil {
@@ -436,7 +394,7 @@ func (s *Store) QueueApproved(ctx context.Context) ([]*Deliverable, error) {
 			return err
 		}
 		for _, d := range items {
-			if _, err := transition(ctx, tx, d, StatusQueued, ActionQueued, ActorWorker, "", nil); err != nil {
+			if _, err := transition(ctx, tx, d, deliverable.StatusQueued, deliverable.ActionQueued, deliverable.ActorWorker, "", nil); err != nil {
 				return err
 			}
 			queued = append(queued, d)
@@ -447,7 +405,7 @@ func (s *Store) QueueApproved(ctx context.Context) ([]*Deliverable, error) {
 }
 
 // ClaimQueued leases up to limit unleased QUEUED items.
-func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int) ([]*Deliverable, error) {
+func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int) ([]*deliverable.Deliverable, error) {
 	rows, err := s.Pool().Query(ctx, `UPDATE deliverables SET lease_until = NOW() + make_interval(secs => $1),
 		attempts = attempts + 1, updated_at = NOW()
 		WHERE id IN (SELECT id FROM deliverables WHERE status='QUEUED' AND lease_until IS NULL
@@ -457,7 +415,7 @@ func (s *Store) ClaimQueued(ctx context.Context, lease time.Duration, limit int)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Deliverable
+	var out []*deliverable.Deliverable
 	for rows.Next() {
 		d, err := scan(rows)
 		if err != nil {

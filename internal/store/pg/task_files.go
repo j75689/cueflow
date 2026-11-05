@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -16,54 +14,14 @@ import (
 
 	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
 
-// TaskFile is a file in a task's working storage. Its bytes live where media bytes do (the shared
-// byte layer in blobbed.go), but in their own table: the public /media/{id} route never sees them.
-type TaskFile struct {
-	ID        uuid.UUID `json:"id"`
-	TaskID    uuid.UUID `json:"task_id"`
-	Name      string    `json:"name"`
-	MimeType  string    `json:"mime_type"`
-	SizeBytes int64     `json:"size_bytes"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-const (
-	// MaxTaskFileBytes caps one task file.
-	MaxTaskFileBytes = 8 << 20
-	maxTaskFileName  = 200
-)
-
-// taskFileColumns and scanDest keep every query that loads a TaskFile reading the same columns.
+// taskFileColumns and taskFileDest keep every query that loads a TaskFile reading the same columns.
 const taskFileColumns = `id, task_id, name, mime_type, size_bytes, created_by, created_at, updated_at`
 
-func (f *TaskFile) scanDest(kind *string) []any {
+func taskFileDest(f *store.TaskFile, kind *string) []any {
 	return []any{&f.ID, &f.TaskID, &f.Name, &f.MimeType, &f.SizeBytes, &f.CreatedBy, &f.CreatedAt, &f.UpdatedAt, kind}
-}
-
-// ValidTaskFileName checks a file name: valid UTF-8, 1–200 characters, "/"-separated parts that are
-// neither empty nor "." or "..", no backslashes or control characters.
-func ValidTaskFileName(name string) error {
-	if !utf8.ValidString(name) {
-		return Invalid("a file name must be valid UTF-8")
-	}
-	if n := utf8.RuneCountInString(name); n == 0 || n > maxTaskFileName {
-		return Invalid(fmt.Sprintf("a file name must be 1 to %d characters", maxTaskFileName))
-	}
-	for _, r := range name {
-		if r == '\\' || unicode.IsControl(r) {
-			return Invalid("a file name can't contain backslashes or control characters")
-		}
-	}
-	for _, part := range strings.Split(name, "/") {
-		if part == "" || part == "." || part == ".." {
-			return Invalid(`a file name can't start or end with "/", or contain "//", "." or ".." parts`)
-		}
-	}
-	return nil
 }
 
 // maxShortField is the size of the mime_type and created_by columns.
@@ -76,16 +34,13 @@ const maxShortField = 64
 // sees either the old file or the new one, never new bytes with old metadata, and a failed write
 // leaves the old file untouched. The old bytes are deleted after the commit. A file's id therefore
 // changes when it is replaced; refer to files by task and name.
-func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*TaskFile, error) {
+func (s *Store) WriteTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*store.TaskFile, error) {
 	return s.writeTaskFile(ctx, taskID, name, mimeType, data, createdBy, true)
 }
 
-// ErrTaskFileExists is returned by CreateTaskFile when the task already has a file of that name.
-var ErrTaskFileExists = errors.New("the task already has a file of that name")
-
 // CreateTaskFile is WriteTaskFile that never replaces: if the task has a file of that name it
 // returns ErrTaskFileExists and writes nothing.
-func (s *Store) CreateTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*TaskFile, error) {
+func (s *Store) CreateTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string) (*store.TaskFile, error) {
 	return s.writeTaskFile(ctx, taskID, name, mimeType, data, createdBy, false)
 }
 
@@ -96,12 +51,12 @@ func (s *Store) CountTaskFiles(ctx context.Context, taskID uuid.UUID, prefix str
 	return n, err
 }
 
-func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string, replace bool) (*TaskFile, error) {
-	if err := ValidTaskFileName(name); err != nil {
+func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeType string, data []byte, createdBy string, replace bool) (*store.TaskFile, error) {
+	if err := store.ValidTaskFileName(name); err != nil {
 		return nil, err
 	}
-	if len(data) > MaxTaskFileBytes {
-		return nil, Invalid(fmt.Sprintf("a task file can be at most %d MB", MaxTaskFileBytes>>20))
+	if len(data) > store.MaxTaskFileBytes {
+		return nil, store.Invalid(fmt.Sprintf("a task file can be at most %d MB", store.MaxTaskFileBytes>>20))
 	}
 	if mimeType == "" {
 		mimeType = "text/plain; charset=utf-8"
@@ -111,7 +66,7 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 	}
 	for field, v := range map[string]string{"MIME type": mimeType, "author": createdBy} {
 		if !utf8.ValidString(v) || utf8.RuneCountInString(v) > maxShortField {
-			return nil, Invalid(fmt.Sprintf("a file's %s must be valid UTF-8 of at most %d characters", field, maxShortField))
+			return nil, store.Invalid(fmt.Sprintf("a file's %s must be valid UTF-8 of at most %d characters", field, maxShortField))
 		}
 	}
 	if !replace {
@@ -121,7 +76,7 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 			return nil, err
 		}
 		if exists {
-			return nil, ErrTaskFileExists
+			return nil, store.ErrTaskFileExists
 		}
 	}
 	id := uuid.New()
@@ -129,7 +84,7 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 	if err != nil {
 		return nil, err
 	}
-	f := &TaskFile{}
+	f := &store.TaskFile{}
 	var old *storedBytes
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var prev storedBytes
@@ -141,7 +96,7 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 			return err
 		}
 		if old != nil && !replace {
-			return ErrTaskFileExists
+			return store.ErrTaskFileExists
 		}
 		onConflict := `DO UPDATE SET id=EXCLUDED.id, mime_type=EXCLUDED.mime_type,
 				size_bytes=EXCLUDED.size_bytes, data=EXCLUDED.data, storage=EXCLUDED.storage,
@@ -154,9 +109,9 @@ func (s *Store) writeTaskFile(ctx context.Context, taskID uuid.UUID, name, mimeT
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 			ON CONFLICT (task_id, name) `+onConflict+`
 			RETURNING `+taskFileColumns+`, storage`,
-			id, taskID, name, mimeType, len(data), row, kind, createdBy).Scan(f.scanDest(&stored)...)
+			id, taskID, name, mimeType, len(data), row, kind, createdBy).Scan(taskFileDest(f, &stored)...)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrTaskFileExists
+			return store.ErrTaskFileExists
 		}
 		return err
 	})
@@ -182,24 +137,11 @@ const lineageSQL = `WITH RECURSIVE lineage AS (
 	UNION ALL SELECT t.id, t.parent_id, l.depth+1 FROM tasks t JOIN lineage l ON t.id=l.parent_id WHERE l.depth < 20
 ) `
 
-// TaskFileHeadBytes is how much of each file ListTaskFiles returns in Head.
-const TaskFileHeadBytes = 400
-
-// ListedTaskFile is a file as ListTaskFiles returns it: with the number of the task it belongs to
-// and the start of its bytes, so a listing never has to open the files.
-type ListedTaskFile struct {
-	TaskFile
-	TaskNumber int64 `json:"task_number"`
-	// Subtask is true for a file of a direct subtask, which is read only by naming that task.
-	Subtask bool   `json:"subtask"`
-	Head    []byte `json:"-"`
-}
-
 // ListTaskFiles returns up to limit of the files taskID can read: first its own and its ancestors',
 // by name, where a name that several of them have resolves to the nearest one, as OpenTaskFile does;
 // then every file of its direct subtasks, by name and task number, even where the name is taken
 // above. TaskID and TaskNumber tell whose it is. total is how many there are in all.
-func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) (files []*ListedTaskFile, total int, err error) {
+func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) (files []*store.ListedTaskFile, total int, err error) {
 	head := `CASE WHEN f.storage = 'db' THEN substring(f.data FROM 1 FOR $3) END`
 	rows, err := s.pool.Query(ctx, lineageSQL+`SELECT *, count(*) OVER () FROM (
 			SELECT * FROM (
@@ -210,20 +152,20 @@ func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) 
 			UNION ALL
 			SELECT `+qualify("f", taskFileColumns)+`, f.storage, t.number, `+head+`, true
 			FROM task_files f JOIN tasks t ON t.id = f.task_id WHERE t.parent_id = $1
-		) visible ORDER BY subtask, name, number LIMIT $2`, taskID, limit, TaskFileHeadBytes)
+		) visible ORDER BY subtask, name, number LIMIT $2`, taskID, limit, store.TaskFileHeadBytes)
 	if err != nil {
 		return nil, 0, err
 	}
 	type pending struct {
-		f    *ListedTaskFile
+		f    *store.ListedTaskFile
 		kind string
 	}
 	var blobs []pending
-	files = []*ListedTaskFile{}
+	files = []*store.ListedTaskFile{}
 	for rows.Next() {
-		f := &ListedTaskFile{}
+		f := &store.ListedTaskFile{}
 		var kind string
-		if err := rows.Scan(append(f.scanDest(&kind), &f.TaskNumber, &f.Head, &f.Subtask, &total)...); err != nil {
+		if err := rows.Scan(append(taskFileDest(&f.TaskFile, &kind), &f.TaskNumber, &f.Head, &f.Subtask, &total)...); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
@@ -242,7 +184,7 @@ func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) 
 		if err != nil {
 			continue
 		}
-		head := make([]byte, TaskFileHeadBytes)
+		head := make([]byte, store.TaskFileHeadBytes)
 		n, _ := io.ReadFull(rc, head)
 		rc.Close()
 		p.f.Head = head[:n]
@@ -261,13 +203,9 @@ func (s *Store) AncestorTaskFile(ctx context.Context, taskID uuid.UUID, name str
 	return number, err == nil, err
 }
 
-// ErrTaskFileNotReadable is returned for a file of a task that is not taskID, one of its ancestors
-// or one of its direct subtasks.
-var ErrTaskFileNotReadable = errors.New("that task's files can't be read from this task")
-
 // OpenTaskFile opens the file name as taskID sees it (see findTaskFile). The caller closes the
 // stream; it is seekable, for reading a range.
-func (s *Store) OpenTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*TaskFile, io.ReadSeekCloser, error) {
+func (s *Store) OpenTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*store.TaskFile, io.ReadSeekCloser, error) {
 	f, kind, err := s.findTaskFile(ctx, taskID, owner, name)
 	if err != nil {
 		return nil, nil, err
@@ -309,13 +247,13 @@ func qualify(alias, cols string) string {
 // (uuid.Nil) that is its own file, else the nearest ancestor's; a subtask's file is never picked. With
 // one it is owner's file, if owner is taskID, an ancestor or a direct subtask (else
 // ErrTaskFileNotReadable, and nothing is read).
-func (s *Store) findTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*TaskFile, string, error) {
-	f := &TaskFile{}
+func (s *Store) findTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*store.TaskFile, string, error) {
+	f := &store.TaskFile{}
 	var kind string
 	if owner == uuid.Nil {
 		err := s.pool.QueryRow(ctx, lineageSQL+`SELECT `+qualify("f", taskFileColumns)+`, f.storage
 			FROM task_files f JOIN lineage l ON l.id = f.task_id WHERE f.name=$2 ORDER BY l.depth LIMIT 1`,
-			taskID, name).Scan(f.scanDest(&kind)...)
+			taskID, name).Scan(taskFileDest(f, &kind)...)
 		if err != nil {
 			return nil, "", NotFound(err)
 		}
@@ -327,10 +265,10 @@ func (s *Store) findTaskFile(ctx context.Context, taskID, owner uuid.UUID, name 
 		return nil, "", err
 	}
 	if !readable {
-		return nil, "", ErrTaskFileNotReadable
+		return nil, "", store.ErrTaskFileNotReadable
 	}
 	err := s.pool.QueryRow(ctx, `SELECT `+taskFileColumns+`, storage FROM task_files WHERE task_id=$1 AND name=$2`,
-		owner, name).Scan(f.scanDest(&kind)...)
+		owner, name).Scan(taskFileDest(f, &kind)...)
 	if err != nil {
 		return nil, "", NotFound(err)
 	}
@@ -351,7 +289,7 @@ func (s *Store) SubtasksWithFile(ctx context.Context, taskID uuid.UUID, name str
 // ReadTaskFileRange returns up to limit bytes of the file name as taskID sees it (see findTaskFile),
 // starting at byte offset, plus the file. Only that range is read: a substring of the row for bytes
 // in the database, a seek on a blob.
-func (s *Store) ReadTaskFileRange(ctx context.Context, taskID, owner uuid.UUID, name string, offset, limit int64) (*TaskFile, []byte, error) {
+func (s *Store) ReadTaskFileRange(ctx context.Context, taskID, owner uuid.UUID, name string, offset, limit int64) (*store.TaskFile, []byte, error) {
 	f, kind, err := s.findTaskFile(ctx, taskID, owner, name)
 	if err != nil {
 		return nil, nil, err

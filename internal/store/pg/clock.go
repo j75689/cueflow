@@ -9,14 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/j75689/cueflow/internal/store"
 )
-
-// NextFunc computes the next activation of a cron expression after t.
-type NextFunc func(expr, tz string, t time.Time) (time.Time, error)
-
-// ClockTables are the tables ClaimDue may read: rows with cron_expr, timezone, is_active and
-// next_run_at columns. Modules append theirs.
-var ClockTables = []string{"schedules"}
 
 // ClaimDue is the external clock's heart: it returns the ids of active rows of a clock table
 // whose next_run_at has passed and moves each to its following activation, atomically, so that two
@@ -25,8 +20,8 @@ var ClockTables = []string{"schedules"}
 // A row with no next_run_at (new, or its cron/timezone/active flag was just edited) is only
 // scheduled, never fired. An activation more than grace overdue (the clock was down) is skipped:
 // a missed daily post is better dropped than published at a random hour.
-func (s *Store) ClaimDue(ctx context.Context, table string, now time.Time, grace time.Duration, next NextFunc) ([]uuid.UUID, error) {
-	if !slices.Contains(ClockTables, table) {
+func (s *Store) ClaimDue(ctx context.Context, table string, now time.Time, grace time.Duration, next store.NextFunc) ([]uuid.UUID, error) {
+	if !slices.Contains(store.ClockTables, table) {
 		return nil, errors.New("store: ClaimDue: unknown table")
 	}
 	var fired []uuid.UUID
@@ -109,28 +104,19 @@ func (s *Store) TodoTaskCount(ctx context.Context) (int, error) {
 
 // --- per-run MCP credentials ---
 
-// RunToken is the database record behind a per-run MCP URL.
-type RunToken struct {
-	TaskID, AgentID uuid.UUID
-	// RunID is the agent run the token serves (see HoldsClaim); nil for tokens from before it was kept.
-	RunID *uuid.UUID
-	// Outcome is what a terminal tool call decided ({"kind","text"}); nil while the run is open.
-	Outcome json.RawMessage
-}
-
 // CreateRunToken registers a run's MCP credential. The caller puts the returned plain token in the URL.
 func (s *Store) CreateRunToken(ctx context.Context, taskID, agentID uuid.UUID, runID *uuid.UUID, ttl time.Duration) (string, error) {
-	plain, hash := NewToken("cfm_")
+	plain, hash := store.NewToken("cfm_")
 	_, err := s.pool.Exec(ctx, `INSERT INTO run_tokens (token_hash, task_id, agent_id, run_id, expires_at)
 		VALUES ($1,$2,$3,$4, NOW() + make_interval(secs => $5))`, hash, taskID, agentID, runID, ttl.Seconds())
 	return plain, err
 }
 
 // RunTokenByPlain resolves a token from an MCP URL; it is ErrNotFound once expired or deleted.
-func (s *Store) RunTokenByPlain(ctx context.Context, plain string) (*RunToken, error) {
-	t := &RunToken{}
+func (s *Store) RunTokenByPlain(ctx context.Context, plain string) (*store.RunToken, error) {
+	t := &store.RunToken{}
 	err := s.pool.QueryRow(ctx, `SELECT task_id, agent_id, run_id, outcome FROM run_tokens
-		WHERE token_hash=$1 AND expires_at > NOW()`, HashToken(plain)).Scan(&t.TaskID, &t.AgentID, &t.RunID, &t.Outcome)
+		WHERE token_hash=$1 AND expires_at > NOW()`, store.HashToken(plain)).Scan(&t.TaskID, &t.AgentID, &t.RunID, &t.Outcome)
 	if err != nil {
 		return nil, NotFound(err)
 	}
@@ -143,13 +129,13 @@ func (s *Store) SetRunTokenOutcome(ctx context.Context, plain string, outcome an
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `UPDATE run_tokens SET outcome=$2 WHERE token_hash=$1 AND outcome IS NULL`, HashToken(plain), raw)
+	_, err = s.pool.Exec(ctx, `UPDATE run_tokens SET outcome=$2 WHERE token_hash=$1 AND outcome IS NULL`, store.HashToken(plain), raw)
 	return err
 }
 
 // DeleteRunToken ends a run's credential.
 func (s *Store) DeleteRunToken(ctx context.Context, plain string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM run_tokens WHERE token_hash=$1`, HashToken(plain))
+	_, err := s.pool.Exec(ctx, `DELETE FROM run_tokens WHERE token_hash=$1`, store.HashToken(plain))
 	return err
 }
 

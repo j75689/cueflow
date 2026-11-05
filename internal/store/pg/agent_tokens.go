@@ -8,49 +8,35 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
 
-// AgentTokenPrefix marks credentials that act as an agent over MCP.
-const AgentTokenPrefix = "cfa_"
-
-// ExternalRuntimeType is the runtime connector type for agents that drive their own work: the
-// server never starts them; they claim tasks over MCP.
-const ExternalRuntimeType = "external"
-
-type AgentToken struct {
-	ID         uuid.UUID  `json:"id"`
-	AgentID    uuid.UUID  `json:"agent_id"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-}
-
 // CreateAgentToken returns the new credential in plain text, once.
-func (s *Store) CreateAgentToken(ctx context.Context, agentID uuid.UUID, name string) (*AgentToken, string, error) {
+func (s *Store) CreateAgentToken(ctx context.Context, agentID uuid.UUID, name string) (*store.AgentToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
-		return nil, "", Invalid("a token name (1-64 characters) is required")
+		return nil, "", store.Invalid("a token name (1-64 characters) is required")
 	}
 	if _, err := s.GetAgent(ctx, agentID); err != nil {
 		return nil, "", err
 	}
-	plain, hash := NewToken(AgentTokenPrefix)
-	t := &AgentToken{AgentID: agentID, Name: name}
+	plain, hash := store.NewToken(store.AgentTokenPrefix)
+	t := &store.AgentToken{AgentID: agentID, Name: name}
 	err := s.pool.QueryRow(ctx, `INSERT INTO agent_tokens (agent_id, name, token_hash) VALUES ($1,$2,$3)
 		RETURNING id, created_at`, agentID, name, hash).Scan(&t.ID, &t.CreatedAt)
 	return t, plain, err
 }
 
-func (s *Store) ListAgentTokens(ctx context.Context, agentID uuid.UUID) ([]*AgentToken, error) {
+func (s *Store) ListAgentTokens(ctx context.Context, agentID uuid.UUID) ([]*store.AgentToken, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, agent_id, name, created_at, last_used_at FROM agent_tokens
 		WHERE agent_id=$1 ORDER BY created_at`, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*AgentToken{}
+	out := []*store.AgentToken{}
 	for rows.Next() {
-		t := &AgentToken{}
+		t := &store.AgentToken{}
 		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.CreatedAt, &t.LastUsedAt); err != nil {
 			return nil, err
 		}
@@ -72,13 +58,13 @@ func (s *Store) RevokeAgentToken(ctx context.Context, agentID, id uuid.UUID) err
 }
 
 // AgentByToken resolves a cfa_ credential to its (active) agent.
-func (s *Store) AgentByToken(ctx context.Context, plain string) (*Agent, error) {
-	if !strings.HasPrefix(plain, AgentTokenPrefix) {
+func (s *Store) AgentByToken(ctx context.Context, plain string) (*store.Agent, error) {
+	if !strings.HasPrefix(plain, store.AgentTokenPrefix) {
 		return nil, domain.ErrNotFound
 	}
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `UPDATE agent_tokens t SET last_used_at=NOW() FROM agents a
-		WHERE t.token_hash=$1 AND a.id=t.agent_id AND a.is_active RETURNING t.agent_id`, HashToken(plain)).Scan(&id)
+		WHERE t.token_hash=$1 AND a.id=t.agent_id AND a.is_active RETURNING t.agent_id`, store.HashToken(plain)).Scan(&id)
 	if err != nil {
 		return nil, NotFound(err)
 	}
@@ -88,7 +74,7 @@ func (s *Store) AgentByToken(ctx context.Context, plain string) (*Agent, error) 
 // ClaimTaskForAgent moves a TODO task assigned to the agent to IN_PROGRESS for a self-driving
 // agent, reserving it for lease. taskID nil takes the agent's most urgent TODO task. It returns
 // nil when there is nothing to claim, else the task and the id its run is to have (see Claim).
-func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID *uuid.UUID, lease time.Duration) (*Task, uuid.UUID, error) {
+func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID *uuid.UUID, lease time.Duration) (*store.Task, uuid.UUID, error) {
 	var id, runID uuid.UUID
 	err := s.pool.QueryRow(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() + make_interval(secs => $3), retry_at = NULL,
 		attempts = attempts + 1, run_id = gen_random_uuid(), started_at = COALESCE(started_at, NOW()), updated_at = NOW(), version = version + 1
@@ -108,11 +94,11 @@ func (s *Store) ClaimTaskForAgent(ctx context.Context, agentID uuid.UUID, taskID
 }
 
 // RunningAgentRun is the open run of a task for an agent, if any.
-func (s *Store) RunningAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*AgentRun, error) {
-	var r AgentRun
+func (s *Store) RunningAgentRun(ctx context.Context, taskID, agentID uuid.UUID) (*store.AgentRun, error) {
+	var r store.AgentRun
 	err := s.pool.QueryRow(ctx, `SELECT `+agentRunColumns+` FROM agent_runs
 		WHERE task_id=$1 AND agent_id=$2 AND status='RUNNING' ORDER BY started_at DESC LIMIT 1`, taskID, agentID).
-		Scan(r.scanDest()...)
+		Scan(agentRunDest(&r)...)
 	if err != nil {
 		return nil, NotFound(err)
 	}

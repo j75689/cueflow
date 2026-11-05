@@ -2,9 +2,6 @@ package pg
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -14,125 +11,51 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
-
-// Token prefixes: a registration token is traded once for a runner token.
-const (
-	RegistrationTokenPrefix = "cfreg_"
-	RunnerTokenPrefix       = "cfr_"
-)
-
-// RunnerOnlineWindow is how recently a runner must have polled to count as online.
-const RunnerOnlineWindow = 90 * time.Second
-
-// RunnerLease is how long a claimed job stays reserved without a heartbeat.
-const RunnerLease = 2 * time.Minute
-
-// Job states.
-const (
-	JobQueued  = "queued"
-	JobRunning = "running"
-	JobDone    = "done"
-	JobFailed  = "failed"
-	// JobCanceling: the server wants the runner to stop; the runner still reports its last events
-	// and completes the job.
-	JobCanceling = "canceling"
-	JobCanceled  = "canceled"
-	JobExpired   = "expired"
-)
-
-// JobFinished reports whether a runner job is over.
-func JobFinished(status string) bool {
-	return status != JobQueued && status != JobRunning && status != JobCanceling
-}
-
-// NewToken returns a random token with prefix and its SHA-256 (the only thing stored).
-func NewToken(prefix string) (plain string, hash []byte) {
-	b := make([]byte, 24)
-	_, _ = rand.Read(b)
-	plain = prefix + hex.EncodeToString(b)
-	return plain, HashToken(plain)
-}
-
-func HashToken(plain string) []byte {
-	h := sha256.Sum256([]byte(plain))
-	return h[:]
-}
-
-type Runner struct {
-	ID             uuid.UUID   `json:"id"`
-	Name           string      `json:"name"`
-	Labels         []string    `json:"labels"`
-	OrgIDs         []uuid.UUID `json:"org_ids"`
-	IsActive       bool        `json:"is_active"`
-	MaxConcurrency int         `json:"max_concurrency"`
-	Version        string      `json:"version"`
-	Platform       string      `json:"platform"`
-	LastSeenAt     *time.Time  `json:"last_seen_at"`
-	CreatedAt      time.Time   `json:"created_at"`
-	// Online and RunningJobs are filled by ListRunners.
-	Online      bool `json:"online"`
-	RunningJobs int  `json:"running_jobs"`
-}
 
 const runnerCols = `id, name, labels, org_ids, is_active, max_concurrency, version, platform, last_seen_at, created_at`
 
-func (r *Runner) fix() {
+func fixRunner(r *store.Runner) {
 	if r.Labels == nil {
 		r.Labels = []string{}
 	}
 	if r.OrgIDs == nil {
 		r.OrgIDs = []uuid.UUID{}
 	}
-	r.Online = r.IsActive && r.LastSeenAt != nil && time.Since(*r.LastSeenAt) < RunnerOnlineWindow
+	r.Online = r.IsActive && r.LastSeenAt != nil && time.Since(*r.LastSeenAt) < store.RunnerOnlineWindow
 }
 
-func scanRunner(row pgx.Row) (*Runner, error) {
-	r := &Runner{}
+func scanRunner(row pgx.Row) (*store.Runner, error) {
+	r := &store.Runner{}
 	err := row.Scan(&r.ID, &r.Name, &r.Labels, &r.OrgIDs, &r.IsActive, &r.MaxConcurrency, &r.Version, &r.Platform,
 		&r.LastSeenAt, &r.CreatedAt)
 	if err != nil {
 		return nil, NotFound(err)
 	}
-	r.fix()
+	fixRunner(r)
 	return r, nil
 }
 
-func runnerLabels(in []string) []string {
-	out := []string{}
-	seen := map[string]bool{}
-	for _, l := range in {
-		l = strings.ToLower(strings.TrimSpace(l))
-		if l != "" && !seen[l] {
-			seen[l] = true
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// CleanLabels normalizes runner labels the way the store keeps them.
-func CleanLabels(in []string) []string { return runnerLabels(in) }
-
 // CreateRegistration makes a one-time token a new runner trades for its own credential.
 func (s *Store) CreateRegistration(ctx context.Context, labels []string, orgIDs []uuid.UUID, ttl time.Duration) (string, time.Time, error) {
-	plain, hash := NewToken(RegistrationTokenPrefix)
+	plain, hash := store.NewToken(store.RegistrationTokenPrefix)
 	if orgIDs == nil {
 		orgIDs = []uuid.UUID{}
 	}
 	exp := time.Now().Add(ttl)
 	_, err := s.pool.Exec(ctx, `INSERT INTO runner_registrations (token_hash, labels, org_ids, expires_at) VALUES ($1,$2,$3,$4)`,
-		hash, runnerLabels(labels), orgIDs, exp)
+		hash, store.CleanLabels(labels), orgIDs, exp)
 	return plain, exp, err
 }
 
 // RegisterRunner consumes a registration token and creates the runner. It returns the runner's
 // token (shown once). The labels and orgs the admin chose at registration are applied; labels the
 // runner asks for are only honored when the registration left them empty.
-func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, platform string, wantLabels []string, concurrency int) (*Runner, string, error) {
+func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, platform string, wantLabels []string, concurrency int) (*store.Runner, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
-		return nil, "", Invalid("a runner name (1-64 characters) is required")
+		return nil, "", store.Invalid("a runner name (1-64 characters) is required")
 	}
 	if concurrency < 1 {
 		concurrency = 1
@@ -146,7 +69,7 @@ func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, pla
 	var orgIDs []uuid.UUID
 	err = tx.QueryRow(ctx, `UPDATE runner_registrations SET used_at=NOW()
 		WHERE token_hash=$1 AND used_at IS NULL AND expires_at > NOW() RETURNING labels, org_ids`,
-		HashToken(regToken)).Scan(&labels, &orgIDs)
+		store.HashToken(regToken)).Scan(&labels, &orgIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", domain.ErrNotFound
 	}
@@ -154,12 +77,12 @@ func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, pla
 		return nil, "", err
 	}
 	if len(labels) == 0 {
-		labels = runnerLabels(wantLabels)
+		labels = store.CleanLabels(wantLabels)
 	}
 	if orgIDs == nil {
 		orgIDs = []uuid.UUID{}
 	}
-	plain, hash := NewToken(RunnerTokenPrefix)
+	plain, hash := store.NewToken(store.RunnerTokenPrefix)
 	r, err := scanRunner(tx.QueryRow(ctx, `INSERT INTO runners (name, labels, org_ids, token_hash, max_concurrency, version, platform, last_seen_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING `+runnerCols, name, labels, orgIDs, hash, concurrency, version, platform))
 	if err != nil {
@@ -169,19 +92,19 @@ func (s *Store) RegisterRunner(ctx context.Context, regToken, name, version, pla
 }
 
 // RunnerByToken authenticates a runner and records that it is alive.
-func (s *Store) RunnerByToken(ctx context.Context, plain string) (*Runner, error) {
-	if !strings.HasPrefix(plain, RunnerTokenPrefix) {
+func (s *Store) RunnerByToken(ctx context.Context, plain string) (*store.Runner, error) {
+	if !strings.HasPrefix(plain, store.RunnerTokenPrefix) {
 		return nil, domain.ErrNotFound
 	}
 	return scanRunner(s.pool.QueryRow(ctx, `UPDATE runners SET last_seen_at=NOW()
-		WHERE token_hash=$1 AND is_active RETURNING `+runnerCols, HashToken(plain)))
+		WHERE token_hash=$1 AND is_active RETURNING `+runnerCols, store.HashToken(plain)))
 }
 
-func (s *Store) GetRunner(ctx context.Context, id uuid.UUID) (*Runner, error) {
+func (s *Store) GetRunner(ctx context.Context, id uuid.UUID) (*store.Runner, error) {
 	return scanRunner(s.pool.QueryRow(ctx, `SELECT `+runnerCols+` FROM runners WHERE id=$1`, id))
 }
 
-func (s *Store) ListRunners(ctx context.Context) ([]*Runner, error) {
+func (s *Store) ListRunners(ctx context.Context) ([]*store.Runner, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+runnerCols+`,
 		(SELECT COUNT(*) FROM runner_jobs j WHERE j.runner_id = runners.id AND j.status='running')
 		FROM runners ORDER BY created_at`)
@@ -189,27 +112,20 @@ func (s *Store) ListRunners(ctx context.Context) ([]*Runner, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*Runner{}
+	out := []*store.Runner{}
 	for rows.Next() {
-		r := &Runner{}
+		r := &store.Runner{}
 		if err := rows.Scan(&r.ID, &r.Name, &r.Labels, &r.OrgIDs, &r.IsActive, &r.MaxConcurrency, &r.Version, &r.Platform,
 			&r.LastSeenAt, &r.CreatedAt, &r.RunningJobs); err != nil {
 			return nil, err
 		}
-		r.fix()
+		fixRunner(r)
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-type RunnerPatch struct {
-	Name     *string
-	Labels   *[]string
-	OrgIDs   *[]uuid.UUID
-	IsActive *bool
-}
-
-func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (*Runner, error) {
+func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p store.RunnerPatch) (*store.Runner, error) {
 	r, err := s.GetRunner(ctx, id)
 	if err != nil {
 		return nil, err
@@ -217,12 +133,12 @@ func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (
 	if p.Name != nil {
 		n := strings.TrimSpace(*p.Name)
 		if n == "" || len(n) > 64 {
-			return nil, Invalid("a runner name (1-64 characters) is required")
+			return nil, store.Invalid("a runner name (1-64 characters) is required")
 		}
 		r.Name = n
 	}
 	if p.Labels != nil {
-		r.Labels = runnerLabels(*p.Labels)
+		r.Labels = store.CleanLabels(*p.Labels)
 	}
 	if p.OrgIDs != nil {
 		r.OrgIDs = *p.OrgIDs
@@ -237,18 +153,15 @@ func (s *Store) UpdateRunner(ctx context.Context, id uuid.UUID, p RunnerPatch) (
 		WHERE id=$1 RETURNING `+runnerCols, id, r.Name, r.Labels, r.OrgIDs, r.IsActive))
 }
 
-// MaxRunnerConcurrency is the most jobs a runner is given at once, whatever it reports.
-const MaxRunnerConcurrency = 16
-
 // ReportRunner stores the version and concurrency a runner sent with a claim. A blank version or a zero
 // concurrency (a runner from before these fields) keeps what is stored; concurrency is clamped to
 // 1..MaxRunnerConcurrency. It returns the runner as stored and whether anything changed.
-func (s *Store) ReportRunner(ctx context.Context, r *Runner, version string, concurrency int) (*Runner, bool, error) {
+func (s *Store) ReportRunner(ctx context.Context, r *store.Runner, version string, concurrency int) (*store.Runner, bool, error) {
 	if len(version) > 32 { // the column's width; a claim must not fail over it
 		version = version[:32]
 	}
 	if concurrency != 0 {
-		concurrency = max(1, min(concurrency, MaxRunnerConcurrency))
+		concurrency = max(1, min(concurrency, store.MaxRunnerConcurrency))
 	}
 	out, err := scanRunner(s.pool.QueryRow(ctx, `UPDATE runners
 		SET version = COALESCE(NULLIF($2, ''), version), max_concurrency = COALESCE(NULLIF($3, 0), max_concurrency)
@@ -285,31 +198,13 @@ func (s *Store) DeleteRunner(ctx context.Context, id uuid.UUID) error {
 
 // --- jobs ---
 
-type RunnerJob struct {
-	ID         uuid.UUID       `json:"id"`
-	OrgID      uuid.UUID       `json:"org_id"`
-	TaskID     uuid.UUID       `json:"task_id"`
-	AgentRunID *uuid.UUID      `json:"agent_run_id"`
-	Labels     []string        `json:"labels"`
-	LabelMatch string          `json:"label_match"`
-	Status     string          `json:"status"`
-	RunnerID   *uuid.UUID      `json:"runner_id"`
-	RunnerName string          `json:"runner_name"`
-	LeaseUntil *time.Time      `json:"lease_until"`
-	Payload    json.RawMessage `json:"-"`
-	Result     json.RawMessage `json:"result"`
-	CreatedAt  time.Time       `json:"created_at"`
-	StartedAt  *time.Time      `json:"started_at"`
-	FinishedAt *time.Time      `json:"finished_at"`
-}
-
 const jobCols = `j.id, j.org_id, j.task_id, j.agent_run_id, j.labels, j.label_match, j.status, j.runner_id, COALESCE(r.name,''), j.lease_until,
 	j.payload, j.result, j.created_at, j.started_at, j.finished_at`
 
 const jobFrom = ` FROM runner_jobs j LEFT JOIN runners r ON r.id = j.runner_id`
 
-func scanJob(row pgx.Row) (*RunnerJob, error) {
-	j := &RunnerJob{}
+func scanJob(row pgx.Row) (*store.RunnerJob, error) {
+	j := &store.RunnerJob{}
 	err := row.Scan(&j.ID, &j.OrgID, &j.TaskID, &j.AgentRunID, &j.Labels, &j.LabelMatch, &j.Status, &j.RunnerID, &j.RunnerName, &j.LeaseUntil,
 		&j.Payload, &j.Result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
 	if err != nil {
@@ -321,23 +216,7 @@ func scanJob(row pgx.Row) (*RunnerJob, error) {
 	return j, nil
 }
 
-type NewRunnerJob struct {
-	OrgID      uuid.UUID
-	TaskID     uuid.UUID
-	AgentRunID *uuid.UUID
-	Labels     []string
-	// LabelMatch is LabelMatchAll (blank) or LabelMatchAny.
-	LabelMatch string
-	Payload    any
-}
-
-// How a runner job's labels match a runner's (runner_jobs.label_match).
-const (
-	LabelMatchAll = "all" // the runner has every label
-	LabelMatchAny = "any" // the runner has at least one
-)
-
-func (s *Store) CreateRunnerJob(ctx context.Context, in NewRunnerJob) (*RunnerJob, error) {
+func (s *Store) CreateRunnerJob(ctx context.Context, in store.NewRunnerJob) (*store.RunnerJob, error) {
 	raw, err := json.Marshal(in.Payload)
 	if err != nil {
 		return nil, err
@@ -345,36 +224,36 @@ func (s *Store) CreateRunnerJob(ctx context.Context, in NewRunnerJob) (*RunnerJo
 	match := in.LabelMatch
 	switch match {
 	case "":
-		match = LabelMatchAll
-	case LabelMatchAll, LabelMatchAny:
+		match = store.LabelMatchAll
+	case store.LabelMatchAll, store.LabelMatchAny:
 	default:
-		return nil, Invalid("label_match must be all or any")
+		return nil, store.Invalid("label_match must be all or any")
 	}
 	var id uuid.UUID
 	err = s.pool.QueryRow(ctx, `INSERT INTO runner_jobs (org_id, task_id, agent_run_id, labels, label_match, payload)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, in.OrgID, in.TaskID, in.AgentRunID, runnerLabels(in.Labels), match, raw).Scan(&id)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, in.OrgID, in.TaskID, in.AgentRunID, store.CleanLabels(in.Labels), match, raw).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
 	return s.GetRunnerJob(ctx, id)
 }
 
-func (s *Store) GetRunnerJob(ctx context.Context, id uuid.UUID) (*RunnerJob, error) {
+func (s *Store) GetRunnerJob(ctx context.Context, id uuid.UUID) (*store.RunnerJob, error) {
 	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.id=$1`, id))
 }
 
 // RunnerJobForRun is the newest runner job of an agent run.
-func (s *Store) RunnerJobForRun(ctx context.Context, runID uuid.UUID) (*RunnerJob, error) {
+func (s *Store) RunnerJobForRun(ctx context.Context, runID uuid.UUID) (*store.RunnerJob, error) {
 	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.agent_run_id=$1 ORDER BY j.created_at DESC LIMIT 1`, runID))
 }
 
-func (s *Store) ListTaskRunnerJobs(ctx context.Context, taskID uuid.UUID) ([]*RunnerJob, error) {
+func (s *Store) ListTaskRunnerJobs(ctx context.Context, taskID uuid.UUID) ([]*store.RunnerJob, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+jobCols+jobFrom+` WHERE j.task_id=$1 ORDER BY j.created_at DESC`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*RunnerJob{}
+	out := []*store.RunnerJob{}
 	for rows.Next() {
 		j, err := scanJob(rows)
 		if err != nil {
@@ -389,7 +268,7 @@ func (s *Store) ListTaskRunnerJobs(ctx context.Context, taskID uuid.UUID) ([]*Ru
 // one with them for a label_match 'any' job; a job with no labels fits any runner; the job's org is one
 // it serves) and reserves it. It returns nil when there is nothing to do or the
 // runner is at its concurrency limit.
-func (s *Store) ClaimRunnerJob(ctx context.Context, r *Runner) (*RunnerJob, error) {
+func (s *Store) ClaimRunnerJob(ctx context.Context, r *store.Runner) (*store.RunnerJob, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -413,7 +292,7 @@ func (s *Store) ClaimRunnerJob(ctx context.Context, r *Runner) (*RunnerJob, erro
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE runner_jobs SET status='running', runner_id=$2, started_at=NOW(),
-		lease_until=NOW() + make_interval(secs => $3) WHERE id=$1`, id, r.ID, RunnerLease.Seconds()); err != nil {
+		lease_until=NOW() + make_interval(secs => $3) WHERE id=$1`, id, r.ID, store.RunnerLease.Seconds()); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -428,7 +307,7 @@ func (s *Store) HeartbeatRunnerJob(ctx context.Context, id, runnerID uuid.UUID) 
 	var status string
 	err := s.pool.QueryRow(ctx, `UPDATE runner_jobs SET lease_until = CASE WHEN status='running'
 			THEN NOW() + make_interval(secs => $3) ELSE lease_until END
-		WHERE id=$1 AND runner_id=$2 RETURNING status`, id, runnerID, RunnerLease.Seconds()).Scan(&status)
+		WHERE id=$1 AND runner_id=$2 RETURNING status`, id, runnerID, store.RunnerLease.Seconds()).Scan(&status)
 	return status, NotFound(err)
 }
 
