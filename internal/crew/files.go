@@ -18,7 +18,8 @@ import (
 
 // Task files are an agent's working storage for one task (store.TaskFile): notes, findings, drafts
 // too long for the thread. Every agent has the tools. A run writes only its own task's files and
-// reads its ancestors' too, so a subtask can use what the task that delegated it saved.
+// reads its ancestors' too, so a subtask can use what the task that delegated it saved, and its
+// direct subtasks' (by naming the subtask), so a task can use what it delegated.
 
 const (
 	// briefFiles caps the files listed in the brief; the rest are counted and list_files shows them.
@@ -35,13 +36,15 @@ var fileTools = []tool{
 		"Names may use folders, e.g. notes/plan.md.",
 		schema: Obj(map[string]any{"name": Str("File name, e.g. notes.md or findings/hooks.md"),
 			"content": Str("The whole text of the file")}, "name", "content"), run: toolWriteFile},
-	{name: "read_file", description: fmt.Sprintf("Read a file of this task or of a task above it. Returns up to %d characters "+
-		"from offset (a character position, default 0) and says how many characters the file has in all; call again with a "+
-		"larger offset for the rest.", PageChars),
+	{name: "read_file", description: fmt.Sprintf("Read a file of this task, of a task above it, or (with task) of one of its "+
+		"direct subtasks. Returns up to %d characters from offset (a character position, default 0) and says how many "+
+		"characters the file has in all; call again with a larger offset for the rest.", PageChars),
 		schema: Obj(map[string]any{"name": Str("File name, as listed under Files"),
+			"task":   Integer("Number of the task the file belongs to; needed for a file of a subtask (shown as \"from subtask #N\")."),
 			"offset": Integer("First character to return (default 0)"),
 			"limit":  Integer(fmt.Sprintf("Characters to return (default and maximum %d)", PageChars))}, "name"), run: toolReadFile},
-	{name: "list_files", description: fmt.Sprintf("List the files this task can read: its own and those of the tasks above it (at most %d, by name).", listFilesMax),
+	{name: "list_files", description: fmt.Sprintf("List the files this task can read: its own, those of the tasks above it and those "+
+		"of its direct subtasks (at most %d, by name).", listFilesMax),
 		schema: Obj(map[string]any{}), run: toolListFiles},
 }
 
@@ -73,8 +76,8 @@ func toolWriteFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string,
 
 func toolReadFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string, error) {
 	var a struct {
-		Name          string
-		Offset, Limit int
+		Name                string
+		Task, Offset, Limit int
 	}
 	if err := DecodeArgs(raw, &a); err != nil {
 		return "", err
@@ -82,8 +85,33 @@ func toolReadFile(ctx context.Context, e *runEnv, raw json.RawMessage) (string, 
 	if strings.TrimSpace(a.Name) == "" {
 		return "", errors.New("name is required")
 	}
-	f, rc, err := e.c.store.OpenTaskFile(ctx, e.task.ID, a.Name)
+	owner := uuid.Nil
+	if a.Task != 0 {
+		t, err := e.c.store.GetTaskByNumber(ctx, e.task.OrgID, int64(a.Task))
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", fmt.Errorf("there is no task #%d", a.Task)
+		}
+		if err != nil {
+			return "", err
+		}
+		owner = t.ID
+	}
+	f, rc, err := e.c.store.OpenTaskFile(ctx, e.task.ID, owner, a.Name)
+	if errors.Is(err, store.ErrTaskFileNotReadable) {
+		return "", fmt.Errorf("task #%d is not this task, a task above it or one of its direct subtasks; nothing was read", a.Task)
+	}
 	if errors.Is(err, domain.ErrNotFound) {
+		if owner != uuid.Nil {
+			return "", fmt.Errorf("task #%d has no file named %q", a.Task, a.Name)
+		}
+		if subs, _ := e.c.store.SubtasksWithFile(ctx, e.task.ID, a.Name); len(subs) > 0 {
+			nums := make([]string, len(subs))
+			for i, n := range subs {
+				nums[i] = fmt.Sprintf("#%d", n)
+			}
+			return "", fmt.Errorf("there is no file named %q in this task or above it; subtask %s has one: "+
+				"call read_file with task set to that number", a.Name, strings.Join(nums, ", "))
+		}
 		return "", fmt.Errorf("there is no file named %q; %s", a.Name, fileNames(ctx, e))
 	}
 	if err != nil {
@@ -144,13 +172,15 @@ func (c *Crew) filesBrief(ctx context.Context, task *store.Task) string {
 	return "\n## Files\nRead them with read_file; save your own with write_file.\n" + lines
 }
 
-// fileLines renders one line per file, "- name (size, from task #N): first line", then how many
-// were left out.
+// fileLines renders one line per file, "- name (size, from task #N): first line" (or "from subtask
+// #N" for a direct subtask's), then how many were left out.
 func fileLines(taskID uuid.UUID, files []*store.ListedTaskFile, total int, more string) (string, error) {
 	var b strings.Builder
 	for _, f := range files {
 		fmt.Fprintf(&b, "- %s (%s", f.Name, humanBytes(f.SizeBytes))
-		if f.TaskID != taskID {
+		if f.Subtask {
+			fmt.Fprintf(&b, ", from subtask #%d", f.TaskNumber)
+		} else if f.TaskID != taskID {
 			fmt.Fprintf(&b, ", from task #%d", f.TaskNumber)
 		}
 		b.WriteString(")")
@@ -185,6 +215,9 @@ func ownerNote(ctx context.Context, e *runEnv, f *store.TaskFile) string {
 		return ""
 	}
 	if t, err := e.c.store.GetTask(ctx, f.TaskID); err == nil {
+		if t.ParentID != nil && *t.ParentID == e.task.ID {
+			return fmt.Sprintf(" (from subtask #%d)", t.Number)
+		}
 		return fmt.Sprintf(" (from task #%d)", t.Number)
 	}
 	return " (from a task above this one)"

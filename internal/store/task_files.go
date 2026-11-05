@@ -189,20 +189,28 @@ const TaskFileHeadBytes = 400
 // and the start of its bytes, so a listing never has to open the files.
 type ListedTaskFile struct {
 	TaskFile
-	TaskNumber int64  `json:"task_number"`
-	Head       []byte `json:"-"`
+	TaskNumber int64 `json:"task_number"`
+	// Subtask is true for a file of a direct subtask, which is read only by naming that task.
+	Subtask bool   `json:"subtask"`
+	Head    []byte `json:"-"`
 }
 
-// ListTaskFiles returns up to limit of the files taskID can read, by name: its own and its
-// ancestors'. A name that several of them have resolves to the nearest one, as OpenTaskFile does;
-// TaskID and TaskNumber tell whose it is. total is how many there are in all.
+// ListTaskFiles returns up to limit of the files taskID can read: first its own and its ancestors',
+// by name, where a name that several of them have resolves to the nearest one, as OpenTaskFile does;
+// then every file of its direct subtasks, by name and task number, even where the name is taken
+// above. TaskID and TaskNumber tell whose it is. total is how many there are in all.
 func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) (files []*ListedTaskFile, total int, err error) {
+	head := `CASE WHEN f.storage = 'db' THEN substring(f.data FROM 1 FOR $3) END`
 	rows, err := s.pool.Query(ctx, lineageSQL+`SELECT *, count(*) OVER () FROM (
-			SELECT DISTINCT ON (f.name) `+qualify("f", taskFileColumns)+`, f.storage, t.number,
-				CASE WHEN f.storage = 'db' THEN substring(f.data FROM 1 FOR $3) END
-			FROM task_files f JOIN lineage l ON l.id = f.task_id JOIN tasks t ON t.id = f.task_id
-			ORDER BY f.name, l.depth
-		) visible ORDER BY name LIMIT $2`, taskID, limit, TaskFileHeadBytes)
+			SELECT * FROM (
+				SELECT DISTINCT ON (f.name) `+qualify("f", taskFileColumns)+`, f.storage, t.number, `+head+`, false AS subtask
+				FROM task_files f JOIN lineage l ON l.id = f.task_id JOIN tasks t ON t.id = f.task_id
+				ORDER BY f.name, l.depth
+			) up
+			UNION ALL
+			SELECT `+qualify("f", taskFileColumns)+`, f.storage, t.number, `+head+`, true
+			FROM task_files f JOIN tasks t ON t.id = f.task_id WHERE t.parent_id = $1
+		) visible ORDER BY subtask, name, number LIMIT $2`, taskID, limit, TaskFileHeadBytes)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -215,7 +223,7 @@ func (s *Store) ListTaskFiles(ctx context.Context, taskID uuid.UUID, limit int) 
 	for rows.Next() {
 		f := &ListedTaskFile{}
 		var kind string
-		if err := rows.Scan(append(f.scanDest(&kind), &f.TaskNumber, &f.Head, &total)...); err != nil {
+		if err := rows.Scan(append(f.scanDest(&kind), &f.TaskNumber, &f.Head, &f.Subtask, &total)...); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
@@ -253,10 +261,14 @@ func (s *Store) AncestorTaskFile(ctx context.Context, taskID uuid.UUID, name str
 	return number, err == nil, err
 }
 
-// OpenTaskFile opens the file name as taskID sees it: its own, or else the nearest ancestor's. The
-// caller closes the stream; it is seekable, for reading a range.
-func (s *Store) OpenTaskFile(ctx context.Context, taskID uuid.UUID, name string) (*TaskFile, io.ReadSeekCloser, error) {
-	f, kind, err := s.findTaskFile(ctx, taskID, name)
+// ErrTaskFileNotReadable is returned for a file of a task that is not taskID, one of its ancestors
+// or one of its direct subtasks.
+var ErrTaskFileNotReadable = errors.New("that task's files can't be read from this task")
+
+// OpenTaskFile opens the file name as taskID sees it (see findTaskFile). The caller closes the
+// stream; it is seekable, for reading a range.
+func (s *Store) OpenTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*TaskFile, io.ReadSeekCloser, error) {
+	f, kind, err := s.findTaskFile(ctx, taskID, owner, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -293,25 +305,54 @@ func qualify(alias, cols string) string {
 	return strings.Join(parts, ", ")
 }
 
-// findTaskFile resolves name as taskID sees it (its own file, else the nearest ancestor's) and says
-// where its bytes are.
-func (s *Store) findTaskFile(ctx context.Context, taskID uuid.UUID, name string) (*TaskFile, string, error) {
+// findTaskFile resolves name as taskID sees it and says where its bytes are. Without an owner
+// (uuid.Nil) that is its own file, else the nearest ancestor's; a subtask's file is never picked. With
+// one it is owner's file, if owner is taskID, an ancestor or a direct subtask (else
+// ErrTaskFileNotReadable, and nothing is read).
+func (s *Store) findTaskFile(ctx context.Context, taskID, owner uuid.UUID, name string) (*TaskFile, string, error) {
 	f := &TaskFile{}
 	var kind string
-	err := s.pool.QueryRow(ctx, lineageSQL+`SELECT `+qualify("f", taskFileColumns)+`, f.storage
-		FROM task_files f JOIN lineage l ON l.id = f.task_id WHERE f.name=$2 ORDER BY l.depth LIMIT 1`,
-		taskID, name).Scan(f.scanDest(&kind)...)
+	if owner == uuid.Nil {
+		err := s.pool.QueryRow(ctx, lineageSQL+`SELECT `+qualify("f", taskFileColumns)+`, f.storage
+			FROM task_files f JOIN lineage l ON l.id = f.task_id WHERE f.name=$2 ORDER BY l.depth LIMIT 1`,
+			taskID, name).Scan(f.scanDest(&kind)...)
+		if err != nil {
+			return nil, "", NotFound(err)
+		}
+		return f, kind, nil
+	}
+	var readable bool
+	if err := s.pool.QueryRow(ctx, lineageSQL+`SELECT EXISTS (SELECT 1 FROM lineage WHERE id=$2)
+		OR EXISTS (SELECT 1 FROM tasks WHERE id=$2 AND parent_id=$1)`, taskID, owner).Scan(&readable); err != nil {
+		return nil, "", err
+	}
+	if !readable {
+		return nil, "", ErrTaskFileNotReadable
+	}
+	err := s.pool.QueryRow(ctx, `SELECT `+taskFileColumns+`, storage FROM task_files WHERE task_id=$1 AND name=$2`,
+		owner, name).Scan(f.scanDest(&kind)...)
 	if err != nil {
 		return nil, "", NotFound(err)
 	}
 	return f, kind, nil
 }
 
-// ReadTaskFileRange returns up to limit bytes of the file name as taskID sees it (see OpenTaskFile),
+// SubtasksWithFile returns the numbers of taskID's direct subtasks that have a file named name,
+// ascending.
+func (s *Store) SubtasksWithFile(ctx context.Context, taskID uuid.UUID, name string) ([]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT t.number FROM task_files f JOIN tasks t ON t.id = f.task_id
+		WHERE t.parent_id=$1 AND f.name=$2 ORDER BY t.number`, taskID, name)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[int64])
+}
+
+// ReadTaskFileRange returns up to limit bytes of the file name as taskID sees it (see findTaskFile),
 // starting at byte offset, plus the file. Only that range is read: a substring of the row for bytes
 // in the database, a seek on a blob.
-func (s *Store) ReadTaskFileRange(ctx context.Context, taskID uuid.UUID, name string, offset, limit int64) (*TaskFile, []byte, error) {
-	f, kind, err := s.findTaskFile(ctx, taskID, name)
+func (s *Store) ReadTaskFileRange(ctx context.Context, taskID, owner uuid.UUID, name string, offset, limit int64) (*TaskFile, []byte, error) {
+	f, kind, err := s.findTaskFile(ctx, taskID, owner, name)
 	if err != nil {
 		return nil, nil, err
 	}

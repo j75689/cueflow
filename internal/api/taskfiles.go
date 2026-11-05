@@ -9,13 +9,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// Task files over the API. A task's page reads its own files and its ancestors' (what the task's
-// agent can read); writes and deletes touch its own only. Files are addressed by task and name,
-// never by file id alone, and never through the public /media route.
+// Task files over the API. A task's page reads its own files, its ancestors' and its direct
+// subtasks' (what the task's agent can read); writes and deletes touch its own only. Files are
+// addressed by task and name, never by file id alone, and never through the public /media route.
 
 const (
 	// fileListMax caps one file listing.
@@ -27,7 +29,8 @@ const (
 // taskFileJSON is a file as the API shows it.
 type taskFileJSON struct {
 	*store.ListedTaskFile
-	// Own is false for a file of an ancestor task, which this task can read but not change.
+	// Own is false for a file of an ancestor task or a direct subtask, which this task can read but
+	// not change.
 	Own bool `json:"own"`
 	// Description is the start of the file's first line (for a saved tool result, the tool and its
 	// arguments).
@@ -62,12 +65,16 @@ func (s *Server) taskFileContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	owner, ok := fileOwner(w, r)
+	if !ok {
+		return
+	}
 	offset, err := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
 	if err != nil || offset < 0 {
 		offset = 0
 	}
 	// A character more than a page at each end: one to skip into at the start, one to complete at the end.
-	f, data, err := s.Store.ReadTaskFileRange(r.Context(), task.ID, name, offset, filePageBytes+2*utf8.UTFMax)
+	f, data, err := s.Store.ReadTaskFileRange(r.Context(), task.ID, owner, name, offset, filePageBytes+2*utf8.UTFMax)
 	if err != nil {
 		s.Fail(w, err)
 		return
@@ -106,7 +113,11 @@ func (s *Server) downloadTaskFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, rc, err := s.Store.OpenTaskFile(r.Context(), task.ID, name)
+	owner, ok := fileOwner(w, r)
+	if !ok {
+		return
+	}
+	f, rc, err := s.Store.OpenTaskFile(r.Context(), task.ID, owner, name)
 	if err != nil {
 		s.Fail(w, err)
 		return
@@ -122,8 +133,8 @@ func (s *Server) downloadTaskFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", f.UpdatedAt, rc)
 }
 
-// deleteTaskFile removes one of the task's own files. An ancestor's file is refused: this task can
-// read it but not change it.
+// deleteTaskFile removes one of the task's own files. An ancestor's or a subtask's file is refused:
+// this task can read it but not change it.
 func (s *Server) deleteTaskFile(w http.ResponseWriter, r *http.Request) {
 	task, ok := s.fileTask(w, r)
 	if !ok {
@@ -133,10 +144,22 @@ func (s *Server) deleteTaskFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	owner, ok := fileOwner(w, r)
+	if !ok {
+		return
+	}
+	if owner != uuid.Nil && owner != task.ID {
+		WriteError(w, http.StatusForbidden, "forbidden", "only this task's own files can be deleted here")
+		return
+	}
 	err := s.Store.DeleteTaskFile(r.Context(), task.ID, name)
 	if errors.Is(err, domain.ErrNotFound) {
 		if n, inAncestor, _ := s.Store.AncestorTaskFile(r.Context(), task.ID, name); inAncestor {
 			WriteError(w, http.StatusForbidden, "forbidden", fmt.Sprintf("%s belongs to task #%d; delete it there", name, n))
+			return
+		}
+		if subs, _ := s.Store.SubtasksWithFile(r.Context(), task.ID, name); len(subs) > 0 {
+			WriteError(w, http.StatusForbidden, "forbidden", fmt.Sprintf("%s belongs to subtask #%d; delete it there", name, subs[0]))
 			return
 		}
 	}
@@ -171,6 +194,21 @@ func fileName(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// fileOwner reads ?task=, the id of the task whose file is meant; without it (uuid.Nil) a name
+// resolves to this task's file or the nearest ancestor's.
+func fileOwner(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	v := r.URL.Query().Get("task")
+	if v == "" {
+		return uuid.Nil, true
+	}
+	id, err := uuid.Parse(v)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid", "task must be a task id")
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 // firstLine is the start of the first non-empty line of a file's head.

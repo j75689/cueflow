@@ -11,12 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/store"
 )
 
-// The file routes show a task its own files and its ancestors' (marked), page large text at
-// character boundaries, download as an attachment sized from the row, and delete only the task's own.
+// The file routes show a task its own files, its ancestors' and its direct subtasks' (marked), read a
+// subtask's only when ?task= names it, page large text at character boundaries, download as an
+// attachment sized from the row, and delete only the task's own.
 func TestTaskFilesAPI(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -38,7 +41,7 @@ func TestTaskFilesAPI(t *testing.T) {
 		Files []struct {
 			Name, Description string
 			CreatedBy         string `json:"created_by"`
-			Own               bool
+			Own, Subtask      bool
 			TaskNumber        int64 `json:"task_number"`
 			SizeBytes         int64 `json:"size_bytes"`
 		} `json:"files"`
@@ -54,13 +57,58 @@ func TestTaskFilesAPI(t *testing.T) {
 		f.SizeBytes != int64(len(big)) {
 		t.Fatalf("ancestor file: %+v", f)
 	}
-	// The parent doesn't see the child's file; an unrelated task sees neither.
+	if list.Files[0].Subtask || list.Files[1].Subtask {
+		t.Fatalf("the child's list marks a subtask's file: %+v", list)
+	}
+	// The parent lists the child's file after its own; an unrelated task sees neither.
+	list.Files = nil
 	e.do("GET", "/tasks/"+parent.ID.String()+"/files", nil, &list)
-	if list.Total != 1 {
+	if list.Total != 2 || len(list.Files) != 2 || !list.Files[0].Own || list.Files[0].Subtask {
 		t.Fatalf("parent list: %+v", list)
+	}
+	if f := list.Files[1]; f.Name != "notes.md" || f.Own || !f.Subtask || f.TaskNumber != child.Number {
+		t.Fatalf("subtask file: %+v", f)
 	}
 	if code := e.do("GET", "/tasks/"+other.ID.String()+"/files/content"+q("results/read_url-1.txt"), nil, nil); code != 404 {
 		t.Fatalf("an unrelated task read another task's file: %d", code)
+	}
+	// The parent reads the child's file only with ?task=; a task that isn't a subtask is refused.
+	var sub struct {
+		Text   string    `json:"text"`
+		TaskID uuid.UUID `json:"task_id"`
+	}
+	if code := e.do("GET", "/tasks/"+parent.ID.String()+"/files/content"+q("notes.md"), nil, nil); code != 404 {
+		t.Fatalf("a bare name resolved to a subtask's file: %d", code)
+	}
+	if code := e.do("GET", "/tasks/"+parent.ID.String()+"/files/content"+q("notes.md")+"&task="+child.ID.String(), nil, &sub); code != 200 ||
+		sub.Text != "child notes" || sub.TaskID != child.ID {
+		t.Fatalf("subtask content: %d %+v", code, sub)
+	}
+	if code := e.do("GET", "/tasks/"+parent.ID.String()+"/files/content"+q("notes.md")+"&task="+other.ID.String(), nil, nil); code != 403 {
+		t.Fatalf("content of a task that is not a subtask: %d", code)
+	}
+	if code := e.do("GET", "/tasks/"+other.ID.String()+"/files/download"+q("notes.md")+"&task="+child.ID.String(), nil, nil); code != 403 {
+		t.Fatalf("download from a task that is not the parent: %d", code)
+	}
+	if code := e.do("GET", "/tasks/"+parent.ID.String()+"/files/content"+q("notes.md")+"&task=7", nil, nil); code != 400 {
+		t.Fatalf("a task that is not an id: %d", code)
+	}
+	req, _ := http.NewRequest("GET", e.api.URL+"/api/v1/tasks/"+parent.ID.String()+"/files/download"+q("notes.md")+"&task="+child.ID.String(), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(body) != "child notes" {
+		t.Fatalf("subtask download: %d %q", resp.StatusCode, body)
+	}
+	// Nor can the parent delete it, by name or by naming the child.
+	if code := e.do("DELETE", "/tasks/"+parent.ID.String()+"/files"+q("notes.md"), nil, nil); code != 403 {
+		t.Fatalf("parent deleted its subtask's file: %d", code)
+	}
+	if code := e.do("DELETE", "/tasks/"+parent.ID.String()+"/files"+q("notes.md")+"&task="+child.ID.String(), nil, nil); code != 403 {
+		t.Fatalf("parent deleted its subtask's file with ?task=: %d", code)
 	}
 
 	// Paging: pages join up to the whole text, each starts and ends on a character.
@@ -142,12 +190,12 @@ func TestTaskFilesAPI(t *testing.T) {
 	}
 
 	// Download: an attachment of the right length, never served as a page.
-	req, _ := http.NewRequest("GET", e.api.URL+"/api/v1/tasks/"+child.ID.String()+"/files/download"+q("results/read_url-1.txt"), nil)
-	resp, err := http.DefaultClient.Do(req)
+	req, _ = http.NewRequest("GET", e.api.URL+"/api/v1/tasks/"+child.ID.String()+"/files/download"+q("results/read_url-1.txt"), nil)
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 200 || string(body) != big || resp.ContentLength != int64(len(big)) ||
 		resp.Header.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment;") ||
