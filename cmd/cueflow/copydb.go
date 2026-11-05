@@ -89,6 +89,9 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 		return fmt.Errorf("target: checked %s but opened %s; copy into a new file", checked, path)
 	}
 	if err := fill(ctx, tx, dst, tables, out); err != nil {
+		if errors.Is(err, errTargetNotEmpty) {
+			return err
+		}
 		return fmt.Errorf("%w\nthe copy in %s is incomplete: delete %s, %s-wal and %s-shm before copying again", err, path, path, path, path)
 	}
 	fmt.Fprintf(out, "done: %d tables, row counts match\n", len(tables))
@@ -109,8 +112,8 @@ func fill(ctx context.Context, tx pgx.Tx, dst *storesqlite.Store, tables []strin
 			return err
 		}
 	}
-	for _, p := range plans {
-		n, err := p.copy(ctx, tx, dst)
+	for i, p := range plans {
+		n, err := p.copy(ctx, tx, dst, tables[i:])
 		if err != nil {
 			return fmt.Errorf("copy %s: %w", p.table, err)
 		}
@@ -210,20 +213,27 @@ func checkTarget(ctx context.Context, to string, tables []string, srcVersion str
 	if prefix(dstVersion) != prefix(srcVersion) {
 		return "", fmt.Errorf("source is at migration %s, target at %s; copy into a new file", srcVersion, dstVersion)
 	}
+	return path, checkEmpty(ctx, r, tables)
+}
+
+var errTargetNotEmpty = errors.New("target is not empty")
+
+// checkEmpty fails unless the tables hold no rows, but for the default org a migration creates.
+func checkEmpty(ctx context.Context, q storesqlite.Querier, tables []string) error {
 	for _, table := range tables {
-		q := `SELECT count(*) FROM "` + table + `"`
+		query := `SELECT count(*) FROM "` + table + `"`
 		if table == "orgs" {
-			q += ` WHERE slug <> 'default'`
+			query += ` WHERE slug <> 'default'`
 		}
 		var n int
-		if err := r.QueryRow(ctx, q).Scan(&n); err != nil {
-			return "", fmt.Errorf("target: %w", err)
+		if err := q.QueryRow(ctx, query).Scan(&n); err != nil {
+			return fmt.Errorf("target: %w", err)
 		}
 		if n > 0 {
-			return "", fmt.Errorf("target is not empty (%s has %d row(s)); copy into a new file", table, n)
+			return fmt.Errorf("%w (%s has %d row(s)); copy into a new file", errTargetNotEmpty, table, n)
 		}
 	}
-	return path, nil
+	return nil
 }
 
 // prefix is a migration version's NNNN.
@@ -283,13 +293,10 @@ func (p tablePlan) selectSQL() string {
 
 // copy writes the table's rows in one transaction. Foreign keys are checked at commit, so a row may
 // come before the row it references in the same table (a subtask before its parent). The orgs copy
-// first drops the default org the target's migration created: the source has its own.
-func (p tablePlan) copy(ctx context.Context, tx pgx.Tx, dst *storesqlite.Store) (int, error) {
-	rows, err := tx.Query(ctx, p.selectSQL())
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
+// first drops the default org the target's migration created: the source has its own. Before it
+// writes, the transaction checks that the tables still to copy, this one first, are empty, so a
+// target with data is never written to even if checkTarget missed it.
+func (p tablePlan) copy(ctx context.Context, tx pgx.Tx, dst *storesqlite.Store, unfilled []string) (int, error) {
 	marks := make([]string, len(p.columns))
 	for i := range marks {
 		marks[i] = fmt.Sprintf("$%d", i+1)
@@ -300,7 +307,15 @@ func (p tablePlan) copy(ctx context.Context, tx pgx.Tx, dst *storesqlite.Store) 
 		dests[i] = c.dest
 	}
 	n := 0
-	err = dst.Tx(ctx, func(q storesqlite.Querier) error {
+	err := dst.Tx(ctx, func(q storesqlite.Querier) error {
+		if err := checkEmpty(ctx, q, unfilled); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, p.selectSQL())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
 		if _, err := q.Exec(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
 			return err
 		}
