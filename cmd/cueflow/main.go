@@ -8,6 +8,7 @@
 //	cueflow mcp-bridge URL  serve the MCP server at URL on stdio (for agents that only launch stdio MCP servers)
 //	cueflow rotate-key [--dry-run]  re-encrypt connector secrets with CUEFLOW_SECRET_KEY
 //	                    (reading with it or CUEFLOW_SECRET_KEY_PREVIOUS)
+//	cueflow copy-db --from postgres://… --to sqlite:///path  copy a PostgreSQL install into a new SQLite file
 package main
 
 import (
@@ -76,6 +77,8 @@ func main() {
 		err = runner.Main(os.Args[2:], version.Version)
 	case "media":
 		err = mediaCmd(os.Args[2:])
+	case "copy-db":
+		err = copyDBCmd(os.Args[2:], os.Stdout)
 	case "mcp-bridge":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: cueflow mcp-bridge URL")
@@ -85,7 +88,7 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Println("cueflow", version.Version)
 	default:
-		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|runner|mcp-bridge|version]\n")
+		fmt.Fprintf(os.Stderr, "usage: cueflow [serve|migrate|genkey|healthcheck|rotate-key|media|copy-db|runner|mcp-bridge|version]\n")
 		os.Exit(2)
 	}
 	if err != nil {
