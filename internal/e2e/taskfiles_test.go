@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -408,3 +410,76 @@ func TestDeleteTaskDropsBlobsAfterCommit(t *testing.T) {
 	}
 }
 
+// Through the API, a delete whose blobs could not be deleted is still a delete: the single endpoints
+// answer 204 and send their event, and bulk lists the task as deleted and goes on with the rest.
+func TestDeleteAPILeavesBlobsBehind(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	fs, err := blob.NewFile(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.store.SetBlobs(&failingDeletes{Store: fs, fail: true})
+	tasks := make([]store.Task, 3)
+	for i := range tasks {
+		if code := e.do("POST", "/tasks", map[string]any{"title": fmt.Sprint("t", i), "status": "BACKLOG"}, &tasks[i]); code != 201 {
+			t.Fatalf("create: %d", code)
+		}
+		if _, err := e.store.WriteTaskFile(ctx, tasks[i].ID, "a.txt", "", []byte("a"), "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, unsubscribe := e.server.Broker.Subscribe()
+	defer unsubscribe()
+	expect := func(name string) {
+		t.Helper()
+		for {
+			select {
+			case ev := <-events:
+				if ev.Name == name {
+					return
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("no %s event", name)
+			}
+		}
+	}
+	gone := func(task store.Task) {
+		t.Helper()
+		if _, err := e.store.GetTask(ctx, task.ID); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("task %d still there: %v", task.Number, err)
+		}
+	}
+
+	if code := e.do("DELETE", "/tasks/"+tasks[0].ID.String()+"/files?name=a.txt", nil, nil); code != 204 {
+		t.Fatalf("delete file: %d", code)
+	}
+	expect("task.file")
+	if code := e.do("DELETE", "/tasks/"+tasks[0].ID.String()+"/files?name=a.txt", nil, nil); code != 404 {
+		t.Fatalf("delete file again: %d", code)
+	}
+	if _, err := e.store.WriteTaskFile(ctx, tasks[0].ID, "b.txt", "", []byte("b"), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.do("DELETE", "/tasks/"+tasks[0].ID.String(), nil, nil); code != 204 {
+		t.Fatalf("delete task: %d", code)
+	}
+	expect("task.deleted")
+	gone(tasks[0])
+
+	var res struct {
+		OK     []uuid.UUID       `json:"ok"`
+		Failed []json.RawMessage `json:"failed"`
+	}
+	ids := []string{tasks[1].ID.String(), tasks[2].ID.String()}
+	if code := e.do("POST", "/tasks/bulk", map[string]any{"action": "delete", "ids": ids}, &res); code != 200 {
+		t.Fatalf("bulk delete: %d", code)
+	}
+	if len(res.OK) != 2 || len(res.Failed) != 0 {
+		t.Fatalf("bulk delete: ok %v, failed %s", res.OK, res.Failed)
+	}
+	expect("task.deleted")
+	expect("task.deleted")
+	gone(tasks[1])
+	gone(tasks[2])
+}
