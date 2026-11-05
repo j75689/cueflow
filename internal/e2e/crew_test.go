@@ -113,6 +113,11 @@ func toolResults(req llm.Request) []llm.Message {
 
 func crewSetup(t *testing.T) (*env, map[string]*store.Agent) {
 	e := setup(t)
+	return e, crewTeam(t, e)
+}
+
+// crewTeam seeds e's default org with Chief and the specialists, and returns them by slug.
+func crewTeam(t *testing.T, e *env) map[string]*store.Agent {
 	ctx := context.Background()
 	if _, err := e.store.CreateConnector(ctx, "LLM", "script_llm", true, map[string]any{}); err != nil {
 		t.Fatal(err)
@@ -139,7 +144,7 @@ func crewSetup(t *testing.T) (*env, map[string]*store.Agent) {
 	if len(bySlug) != 4 {
 		t.Fatalf("default team: %v", bySlug)
 	}
-	return e, bySlug
+	return bySlug
 }
 
 func TestChiefDelegatesResearchThenWriting(t *testing.T) {

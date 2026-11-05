@@ -27,6 +27,7 @@ var _ dbHooks = (*storepg.TestHooks)(nil)
 
 // pgOnly skips the test unless it runs on PostgreSQL, and returns the pool for what only
 // PostgreSQL has: holding row, table and advisory locks from another transaction, pg_stat_activity.
+// Call it right after setup, so a test skips before it starts workers or writes rows.
 func pgOnly(t *testing.T, e *env) *pgxpool.Pool {
 	t.Helper()
 	h, ok := e.db.(*storepg.TestHooks)

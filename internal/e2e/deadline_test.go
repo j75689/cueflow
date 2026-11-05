@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/api"
@@ -42,12 +43,12 @@ func runMCP(t *testing.T, e *env, token string, maxRequest time.Duration) *mcp.C
 	return cs
 }
 
-// lockTable holds an exclusive lock on table (writes wait, reads don't) until the returned func is
-// called, or until hold has passed, so a test that fails doesn't hang on it.
-func lockTable(t *testing.T, e *env, table string, hold time.Duration) func() {
+// lockTable holds an exclusive lock on table (writes wait, reads don't) from pool, pgOnly's, until the
+// returned func is called, or until hold has passed, so a test that fails doesn't hang on it.
+func lockTable(t *testing.T, pool *pgxpool.Pool, table string, hold time.Duration) func() {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := pgOnly(t, e).Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +87,7 @@ func callAsync(cs *mcp.ClientSession, name string, args map[string]any) <-chan s
 func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 	t.Run("agent token, claim_task", func(t *testing.T) {
 		e := setup(t)
+		pool := pgOnly(t, e)
 		ctx := context.Background()
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), Broker: events.NewBroker(),
@@ -109,7 +111,7 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		}
 		defer cs.Close()
 
-		release := lockTable(t, e, "agent_runs", 5*time.Second)
+		release := lockTable(t, pool, "agent_runs", 5*time.Second)
 		reply := callAsync(cs, "claim_task", map[string]any{})
 		time.Sleep(1500 * time.Millisecond) // well past the deadline
 		release()
@@ -129,7 +131,9 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 	})
 
 	t.Run("run token, create_subtask", func(t *testing.T) {
-		e, team := crewSetup(t)
+		e := setup(t)
+		pool := pgOnly(t, e)
+		team := crewTeam(t, e)
 		ctx := context.Background()
 		var task store.Task
 		e.do("POST", "/tasks", map[string]any{"title": "Remote", "assignee_agent_id": team["chief"].ID}, &task)
@@ -140,7 +144,7 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		}
 		cs := runMCP(t, e, token, 500*time.Millisecond)
 
-		release := lockTable(t, e, "tasks", 5*time.Second)
+		release := lockTable(t, pool, "tasks", 5*time.Second)
 		reply := callAsync(cs, "create_subtask", map[string]any{"title": "Draft", "description": "Write the draft.", "assignee": "writer"})
 		time.Sleep(1500 * time.Millisecond)
 		release()
@@ -163,6 +167,7 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 
 	t.Run("operator, create_task", func(t *testing.T) {
 		e := setup(t)
+		pool := pgOnly(t, e)
 		ctx := context.Background()
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		srv := httptest.NewServer((&api.Server{Store: e.store, Hub: hub.New(e.store, logger, config.DefaultConnectorHTTPTimeout), Broker: events.NewBroker(),
@@ -175,7 +180,7 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		}
 		defer cs.Close()
 
-		release := lockTable(t, e, "tasks", 5*time.Second)
+		release := lockTable(t, pool, "tasks", 5*time.Second)
 		reply := callAsync(cs, "create_task", map[string]any{"title": "Late answer"})
 		time.Sleep(1500 * time.Millisecond)
 		release()
@@ -255,7 +260,9 @@ func TestConnectorCallIsCappedByItsMCPRequest(t *testing.T) {
 // The writes a tool call makes detached from its ctx (its thread entries here) give up after
 // DetachedWriteTimeout, so a hung database doesn't hold the call, and the run's tool turn, for good.
 func TestToolCallWritesAreBounded(t *testing.T) {
-	e, team := crewSetup(t)
+	e := setup(t)
+	pool := pgOnly(t, e)
+	team := crewTeam(t, e)
 	ctx := context.Background()
 	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
 	var task store.Task
@@ -272,7 +279,7 @@ func TestToolCallWritesAreBounded(t *testing.T) {
 	}
 	defer cs.Close()
 
-	release := lockTable(t, e, "task_messages", 5*time.Second)
+	release := lockTable(t, pool, "task_messages", 5*time.Second)
 	start := time.Now()
 	select {
 	case text := <-callAsync(cs, "get_task", map[string]any{"number": task.Number}):
@@ -293,6 +300,7 @@ func TestToolCallWritesAreBounded(t *testing.T) {
 // finish, are not bounded: a database hung as a whole still holds it.)
 func TestRunTokenDeleteIsBounded(t *testing.T) {
 	e := setup(t)
+	pool := pgOnly(t, e)
 	ctx := context.Background()
 	e.crew.MCPBaseURL = e.api.URL
 	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
@@ -315,7 +323,7 @@ func TestRunTokenDeleteIsBounded(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	release := lockTable(t, e, "run_tokens", 15*time.Second)
+	release := lockTable(t, pool, "run_tokens", 15*time.Second)
 	start := time.Now()
 	select {
 	case <-done:
@@ -334,6 +342,7 @@ func TestRunTokenDeleteIsBounded(t *testing.T) {
 // So is the token delete of a runner run that lost its task's claim before it could hand over.
 func TestLostClaimTokenDeleteIsBounded(t *testing.T) {
 	e := setup(t)
+	pool := pgOnly(t, e)
 	ctx := context.Background()
 	e.crew.DetachedWriteTimeout = 200 * time.Millisecond
 	e.crew.Queue = &fakeQueue{}
@@ -355,7 +364,7 @@ func TestLostClaimTokenDeleteIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
-	release := lockTable(t, e, "run_tokens", 12*time.Second)
+	release := lockTable(t, pool, "run_tokens", 12*time.Second)
 	select {
 	case <-done:
 		if d := time.Since(start); d > 8*time.Second {
