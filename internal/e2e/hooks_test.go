@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	storepg "github.com/j75689/cueflow/internal/store/pg"
+	storesqlite "github.com/j75689/cueflow/internal/store/sqlite"
 )
 
 // dbHooks is how a test reads and sets rows the product API doesn't reach, on whichever backend
@@ -23,7 +24,10 @@ type dbHooks interface {
 	Get(ctx context.Context, table, column string, where map[string]any, dest any) error
 }
 
-var _ dbHooks = (*storepg.TestHooks)(nil)
+var (
+	_ dbHooks = (*storepg.TestHooks)(nil)
+	_ dbHooks = (*storesqlite.TestHooks)(nil)
+)
 
 // pgOnly skips the test unless it runs on PostgreSQL, and returns the pool for what only
 // PostgreSQL has: holding row, table and advisory locks from another transaction, pg_stat_activity.

@@ -19,7 +19,9 @@ import (
 type Config struct {
 	// Addr is the listen address. Defaults to 127.0.0.1:3000 so nothing is exposed publicly
 	// unless the operator opts in.
-	Addr        string
+	Addr string
+	// DatabaseURL (DATABASE_URL) names the database: postgres://… for PostgreSQL, or sqlite:///path
+	// (or a file: URI) for a SQLite file, which only single mode can use (see SQLite).
 	DatabaseURL string
 	// DatabaseSessionURL (DATABASE_SESSION_URL) is a session-mode URL for the work that needs a
 	// session: LISTEN and the migration lock. Setting it means DatabaseURL goes through a
@@ -116,6 +118,11 @@ type Config struct {
 
 // Cloud reports whether work is delivered by an external queue and clock.
 func (c *Config) Cloud() bool { return c.Queue == "cloudtasks" || c.Tick == "external" }
+
+// SQLite reports whether DatabaseURL names a SQLite database (sqlite: or file:) instead of PostgreSQL.
+func (c *Config) SQLite() bool {
+	return strings.HasPrefix(c.DatabaseURL, "sqlite:") || strings.HasPrefix(c.DatabaseURL, "file:")
+}
 
 func Load() (*Config, error) {
 	c := &Config{
@@ -237,6 +244,17 @@ func Load() (*Config, error) {
 	}
 	c.DatabaseURL = sec.env("DATABASE_URL", "postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable")
 	c.DatabaseSessionURL = sec.env("DATABASE_SESSION_URL", "")
+	// SQLite is one process on one file: no other instance to share work or events with.
+	if c.SQLite() {
+		switch {
+		case c.Cloud():
+			return nil, errors.New("DATABASE_URL: SQLite runs in single mode only; unset CUEFLOW_QUEUE=cloudtasks and CUEFLOW_TICK=external, or use PostgreSQL")
+		case c.DatabaseSessionURL != "":
+			return nil, errors.New("DATABASE_SESSION_URL is for PostgreSQL behind a pooler; unset it with a SQLite DATABASE_URL")
+		case os.Getenv("CUEFLOW_EVENTS") != "":
+			return nil, errors.New("CUEFLOW_EVENTS has no use with a SQLite DATABASE_URL (live updates stay in the one process); unset it")
+		}
+	}
 	c.AdminToken = sec.env("CUEFLOW_ADMIN_TOKEN", "")
 	c.MCPToken = sec.env("CUEFLOW_MCP_TOKEN", "")
 	key, err := ParseSecretKey(sec.env("CUEFLOW_SECRET_KEY", ""))

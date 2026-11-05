@@ -42,7 +42,7 @@ version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
+| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | The database: `postgres://…` (or `postgresql://…`) for PostgreSQL, or `sqlite:///path/to/cueflow.db` (or a `file:` URI) for a SQLite file, created if missing. SQLite is for single mode only: it refuses cloud mode, `DATABASE_SESSION_URL` and `CUEFLOW_EVENTS` |
 | `DATABASE_SESSION_URL` | empty | A session-mode connection for `LISTEN` and the migration lock. Set it when `DATABASE_URL` is a transaction-mode pooler (Supabase port 6543, PgBouncer `pool_mode=transaction`); the main pool then runs without named prepared statements. Empty: everything uses `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), separated by commas or newlines, still accepted for reading during a rotation |
@@ -90,7 +90,7 @@ See [modules.md](modules.md#images-and-videos) for how media is stored, served a
 | Variable | Default | Purpose |
 |---|---|---|
 | `CUEFLOW_QUEUE` | `local` | `cloudtasks` delivers background work through Cloud Tasks (cloud mode, see [`deploy/cloudrun`](../deploy/cloudrun/README.md)) |
-| `CUEFLOW_EVENTS` | `postgres` | How dashboard live updates reach every instance: `postgres` (`LISTEN/NOTIFY`, one session connection per instance) or `pubsub` (Google Pub/Sub, no database connection; see [`deploy/cloudrun`](../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)). `PUBSUB_EMULATOR_HOST` points it at the emulator |
+| `CUEFLOW_EVENTS` | `postgres` | How dashboard live updates reach every instance: `postgres` (`LISTEN/NOTIFY`, one session connection per instance) or `pubsub` (Google Pub/Sub, no database connection; see [`deploy/cloudrun`](../deploy/cloudrun/README.md#live-updates-through-pubsub-optional)). `PUBSUB_EMULATOR_HOST` points it at the emulator. Leave it unset with SQLite: the one process needs no transport |
 | `CUEFLOW_PUBSUB_TOPIC` | empty | The topic for `CUEFLOW_EVENTS=pubsub`, as `projects/PROJECT/topics/TOPIC` |
 | `CUEFLOW_PUBSUB_DELETE_TIMEOUT` | `8s` | How long shutdown waits for deleting this instance's Pub/Sub subscription (a Go duration, > 0; a value that is not a duration (`8`, `5sec`) or is out of range (`99999999999h`) stops startup with an error). Keep it under Cloud Run's 10 s grace after SIGTERM; 10 s or more logs a warning at startup. A delete that times out is only logged: the subscription expires on its own a day later |
 | `CUEFLOW_TICK` | `internal` | `external` lets Cloud Scheduler drive the clock via `/internal/tick`; nothing is polled in-process. Requires `CUEFLOW_QUEUE=cloudtasks` |

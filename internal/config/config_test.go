@@ -17,7 +17,7 @@ func base(t *testing.T) {
 		"CUEFLOW_ADDR", "PORT", "CUEFLOW_DB_MAX_CONNS", "CUEFLOW_DIRECT_URL", "CUEFLOW_MEDIA_BASE_URL",
 		"CUEFLOW_PUBLIC_URL", "CUEFLOW_CF_ACCESS_TEAM_DOMAIN", "CUEFLOW_CF_ACCESS_AUD", "CUEFLOW_PUBSUB_DELETE_TIMEOUT", "CUEFLOW_MCP_REQUEST_TIMEOUT",
 		"CUEFLOW_DISPATCH_INTERVAL", "CUEFLOW_DISPATCH_LEASE", "CUEFLOW_PUBLISH_TIMEOUT", "CUEFLOW_CONNECTOR_HTTP_TIMEOUT",
-		"CUEFLOW_MEDIA_STORAGE", "CUEFLOW_MEDIA_REGISTER_ACCOUNTS"} {
+		"CUEFLOW_MEDIA_STORAGE", "CUEFLOW_MEDIA_REGISTER_ACCOUNTS", "CUEFLOW_EVENTS", "CUEFLOW_PUBSUB_TOPIC"} {
 		t.Setenv(k, "")
 	}
 	for _, k := range SecretVars {
@@ -82,6 +82,44 @@ func TestCloudSettingsAreValidatedTogether(t *testing.T) {
 	t.Setenv("CUEFLOW_QUEUE", "pubsub")
 	if _, err := Load(); err == nil {
 		t.Error("an unknown queue must be refused")
+	}
+}
+
+// A sqlite: or file: DATABASE_URL selects SQLite, which runs in single mode only: cloud mode, a
+// session URL or CUEFLOW_EVENTS with it fail at startup, naming the setting.
+func TestSQLiteIsSingleModeOnly(t *testing.T) {
+	for _, url := range []string{"sqlite:///var/lib/cueflow/cueflow.db", "file:/var/lib/cueflow/cueflow.db"} {
+		base(t)
+		t.Setenv("DATABASE_URL", url)
+		c, err := Load()
+		if err != nil || !c.SQLite() {
+			t.Fatalf("%s: %v, SQLite %v", url, err, c != nil && c.SQLite())
+		}
+	}
+	base(t)
+	t.Setenv("DATABASE_URL", "postgres://cueflow@db/cueflow")
+	if c, err := Load(); err != nil || c.SQLite() {
+		t.Fatalf("postgres: %v", err)
+	}
+
+	for _, tc := range []struct {
+		env  map[string]string
+		name string
+	}{
+		{map[string]string{"CUEFLOW_QUEUE": "cloudtasks", "CUEFLOW_TICK": "external", "CUEFLOW_TASKS_QUEUE": "q",
+			"CUEFLOW_TASKS_SERVICE_ACCOUNT": "t@p.iam.gserviceaccount.com", "CUEFLOW_INTERNAL_SERVICE_ACCOUNTS": "t@p.iam.gserviceaccount.com"}, "single mode"},
+		{map[string]string{"DATABASE_SESSION_URL": "postgres://cueflow@db:5432/cueflow"}, "DATABASE_SESSION_URL"},
+		{map[string]string{"CUEFLOW_EVENTS": "postgres"}, "CUEFLOW_EVENTS"},
+		{map[string]string{"CUEFLOW_EVENTS": "pubsub", "CUEFLOW_PUBSUB_TOPIC": "projects/p/topics/t"}, "CUEFLOW_EVENTS"},
+	} {
+		base(t)
+		t.Setenv("DATABASE_URL", "sqlite:///tmp/cueflow.db")
+		for k, v := range tc.env {
+			t.Setenv(k, v)
+		}
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.name) {
+			t.Errorf("SQLite with %v: %v, want an error naming %s", tc.env, err, tc.name)
+		}
 	}
 }
 

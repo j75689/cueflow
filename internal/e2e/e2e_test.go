@@ -1,8 +1,9 @@
-// Package e2e exercises CueFlow against a real PostgreSQL: agents on the board, the deliverables
+// Package e2e exercises CueFlow against a real database: agents on the board, the deliverables
 // they produce, human approval through the API, and the post kind publishing through an MCP
 // publisher (in-process mock), plus failure and retry.
 //
-// Set CUEFLOW_TEST_DATABASE_URL to a disposable database to run it (its public schema is reset).
+// Set CUEFLOW_TEST_DATABASE_URL to a disposable PostgreSQL database to run it (its public schema is
+// reset), or CUEFLOW_TEST_BACKEND=sqlite to run it on SQLite (a new file per test).
 package e2e
 
 import (
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,9 +26,11 @@ import (
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
 	contentpg "github.com/j75689/cueflow/internal/content/pg"
+	contentsqlite "github.com/j75689/cueflow/internal/content/sqlite"
 	"github.com/j75689/cueflow/internal/crew"
 	"github.com/j75689/cueflow/internal/deliverable"
 	deliverablepg "github.com/j75689/cueflow/internal/deliverable/pg"
+	deliverablesqlite "github.com/j75689/cueflow/internal/deliverable/sqlite"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/hub"
 	"github.com/j75689/cueflow/internal/publishermock"
@@ -34,6 +38,7 @@ import (
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
 	storepg "github.com/j75689/cueflow/internal/store/pg"
+	storesqlite "github.com/j75689/cueflow/internal/store/sqlite"
 )
 
 type env struct {
@@ -94,8 +99,12 @@ type testBackend struct {
 	storeWith func(box *secret.Box) store.Backend
 }
 
-// openBackend opens an empty, migrated database for t, sealed with box.
+// openBackend opens an empty, migrated database for t, sealed with box: a SQLite file of its own
+// with CUEFLOW_TEST_BACKEND=sqlite, else the PostgreSQL database CUEFLOW_TEST_DATABASE_URL names.
 func openBackend(t *testing.T, box *secret.Box) testBackend {
+	if os.Getenv("CUEFLOW_TEST_BACKEND") == "sqlite" {
+		return openSQLite(t, box)
+	}
 	url := os.Getenv("CUEFLOW_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("CUEFLOW_TEST_DATABASE_URL not set")
@@ -128,6 +137,29 @@ func openPG(t *testing.T, url string, box *secret.Box) testBackend {
 	st := storepg.New(pool, box)
 	return testBackend{store: st, cs: contentpg.New(st), ds: deliverablepg.New(st), db: &storepg.TestHooks{Pool: pool},
 		storeWith: func(box *secret.Box) store.Backend { return storepg.New(pool, box) }}
+}
+
+// openSQLite migrates a new database file in t's temporary directory.
+func openSQLite(t *testing.T, box *secret.Box) testBackend {
+	ctx := context.Background()
+	url := "sqlite://" + filepath.Join(t.TempDir(), "cueflow.db")
+	st, err := storesqlite.Open(ctx, url, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	if err := storesqlite.Migrate(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	return testBackend{store: st, cs: contentsqlite.New(st), ds: deliverablesqlite.New(st), db: &storesqlite.TestHooks{Store: st},
+		storeWith: func(box *secret.Box) store.Backend {
+			other, err := storesqlite.Open(ctx, url, box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(other.Close)
+			return other
+		}}
 }
 
 func (e *env) do(method, path string, body any, out any) int {

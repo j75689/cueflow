@@ -11,7 +11,7 @@ import (
 )
 
 // Store is the deliverables' persistence: the core backend plus the module's own queries. The
-// implementation lives with the backend (deliverable/pg) and embeds the core store.
+// implementation lives with the backend (deliverable/pg, deliverable/sqlite) and embeds the core store.
 type Store interface {
 	store.Backend
 	Get(ctx context.Context, id uuid.UUID) (*Deliverable, error)
@@ -33,7 +33,7 @@ type Store interface {
 }
 
 // NewStore returns the deliverable store over the core backend s, for code that holds only the core
-// (the agents' tools). The backend's package sets it (deliverable/pg).
+// (the agents' tools). The backends' packages set it (deliverable/pg, deliverable/sqlite).
 var NewStore func(s store.Backend) Store
 
 // Filter selects deliverables for List.
