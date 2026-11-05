@@ -1,0 +1,280 @@
+package sqlite
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/j75689/cueflow/internal/blob"
+	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
+)
+
+func (s *Store) CreateMedia(ctx context.Context, in store.NewMedia) (*store.Media, error) {
+	if len(in.Data) == 0 {
+		return nil, store.Invalid("image is empty")
+	}
+	if in.CreatedBy == "" {
+		in.CreatedBy = "human"
+	}
+	m := &store.Media{MimeType: in.MimeType, SizeBytes: len(in.Data), Source: in.Source, Prompt: in.Prompt,
+		ConnectorID: in.ConnectorID, CreatedBy: in.CreatedBy}
+	m.ID = uuid.New()
+	kind, row, err := s.putBytes(ctx, m.ID, in.Data)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.w.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, connector_id, created_by, storage, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$now)`,
+		m.ID, in.MimeType, row, len(in.Data), in.Source, in.Prompt, in.ConnectorID, in.CreatedBy, kind)
+	if err != nil {
+		_ = s.dropBytes(ctx, kind, m.ID)
+		return nil, err
+	}
+	return m, nil
+}
+
+// getMedia reads a row. Bytes are loaded only when withData is set and they live in the database.
+func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*store.Media, string, error) {
+	m := &store.Media{ID: id}
+	var kind string
+	q := `SELECT mime_type, size_bytes, source, prompt, connector_id, created_by, storage`
+	dest := []any{&m.MimeType, &m.SizeBytes, &m.Source, &m.Prompt, &m.ConnectorID, &m.CreatedBy, &kind}
+	if withData {
+		q += `, data`
+		dest = append(dest, &m.Data)
+	}
+	if err := s.r.QueryRow(ctx, q+` FROM media WHERE id=$1`, id).Scan(dest...); err != nil {
+		return nil, "", NotFound(err)
+	}
+	return m, kind, nil
+}
+
+// GetMedia returns an image with its bytes.
+func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*store.Media, error) {
+	m, kind, err := s.getMedia(ctx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if kind == blob.KindDB {
+		return m, nil
+	}
+	rc, err := s.openBytes(ctx, kind, id, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	if m.Data, err = io.ReadAll(rc); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// MediaRedirect returns a short-lived direct URL for a media item when its bytes live in a backend
+// that can sign URLs (GCS), so large files are served by the storage service instead of this
+// process. ok is false for media kept in the database or on disk.
+func (s *Store) MediaRedirect(ctx context.Context, id uuid.UUID, ttl time.Duration) (url string, ok bool, err error) {
+	m, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return "", false, err
+	}
+	b, berr := s.blobFor(kind)
+	if berr != nil {
+		return "", false, nil
+	}
+	signer, isSigner := b.(blob.Signer)
+	if !isSigner {
+		return "", false, nil
+	}
+	url, err = signer.SignedURL(ctx, id.String(), ttl, m.MimeType)
+	return url, err == nil, err
+}
+
+// OpenMedia returns the image's metadata and a seekable stream of its bytes (for Range requests).
+// The caller closes the stream.
+func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*store.Media, io.ReadSeekCloser, error) {
+	m, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	rc, err := s.openBytes(ctx, kind, id, func() ([]byte, error) {
+		var data []byte
+		err := s.r.QueryRow(ctx, `SELECT data FROM media WHERE id=$1`, id).Scan(&data)
+		return data, NotFound(err)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, rc, nil
+}
+
+// MigrateMedia moves every row not yet on dst into it and clears the database copy. dst nil moves
+// everything back into the database. It returns how many rows moved.
+func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
+	want := blob.KindDB
+	if dst != nil {
+		want = dst.Kind()
+	}
+	rows, err := s.r.Query(ctx, `SELECT id FROM media WHERE storage <> $1 ORDER BY created_at`, want)
+	if err != nil {
+		return 0, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	moved := 0
+	for _, id := range ids {
+		m, err := s.GetMedia(ctx, id) // reads from wherever it lives now
+		if err != nil {
+			return moved, fmt.Errorf("media %s: %w", id, err)
+		}
+		_, oldKind, err := s.getMedia(ctx, id, false)
+		if err != nil {
+			return moved, err
+		}
+		if dst != nil {
+			if err := dst.Put(ctx, id.String(), m.Data); err != nil {
+				return moved, fmt.Errorf("media %s: %w", id, err)
+			}
+			_, err = s.w.Exec(ctx, `UPDATE media SET storage=$2, data=NULL WHERE id=$1`, id, want)
+		} else {
+			_, err = s.w.Exec(ctx, `UPDATE media SET storage=$2, data=$3 WHERE id=$1`, id, want, m.Data)
+		}
+		if err != nil {
+			return moved, err
+		}
+		if old, err := s.blobFor(oldKind); err == nil {
+			_ = old.Delete(ctx, id.String())
+		}
+		moved++
+	}
+	return moved, nil
+}
+
+// AdoptMedia takes over a file a trusted writer left in the bucket's staging area: it checks what
+// the file is (validate gets its first bytes and size, and returns the MIME type), moves it into the
+// media store and records it. The bytes never pass through this process.
+func (s *Store) AdoptMedia(ctx context.Context, staged, createdBy string, validate func(head []byte, size int64) (string, error)) (*store.Media, error) {
+	a, ok := s.blobs.(blob.Adopter)
+	if !ok {
+		return nil, store.Invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
+	}
+	st, err := a.Stat(ctx, staged)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, store.Invalid("no such staged file: " + staged)
+	}
+	if err != nil {
+		return nil, store.Invalid(err.Error())
+	}
+	mt, err := validate(st.Head, st.Size)
+	if err != nil {
+		return nil, store.Invalid(err.Error())
+	}
+	id := uuid.New()
+	if err := a.Adopt(ctx, staged, id.String()); err != nil {
+		return nil, err
+	}
+	m := &store.Media{ID: id, MimeType: mt, SizeBytes: int(st.Size), Source: "upload", CreatedBy: createdBy}
+	_, err = s.w.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, created_by, storage, created_at)
+		VALUES ($1,$2,NULL,$3,$4,'',$5,$6,$now)`, id, mt, st.Size, m.Source, createdBy, s.blobs.Kind())
+	if err != nil {
+		_ = s.blobs.Delete(ctx, id.String()) // do not leave an object no row points to
+		return nil, err
+	}
+	return m, nil
+}
+
+// DeleteMedia removes a media item: its row and its bytes. It refuses (ErrMediaInUse) while an
+// unfinished post still uses it.
+func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
+	_, kind, err := s.getMedia(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	used, err := s.mediaInUse(ctx, id)
+	if err != nil {
+		return err
+	}
+	if used {
+		return store.ErrMediaInUse
+	}
+	if _, err := s.w.Exec(ctx, `DELETE FROM media WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := s.blobFor(kind); kind != blob.KindDB && err != nil {
+		return nil // the backend is no longer configured; nothing this process can delete
+	}
+	if err := s.dropBytes(ctx, kind, id); err != nil {
+		return fmt.Errorf("media %s removed, but its file could not be deleted: %w", id, err)
+	}
+	return nil
+}
+
+// PruneMedia deletes media created more than olderThan ago that no unfinished post uses. With
+// dryRun it only counts. It returns how many items it deleted (or would delete).
+func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun bool) (int, error) {
+	rows, err := s.r.Query(ctx, `SELECT m.id FROM media m
+		WHERE m.created_at < $1
+		ORDER BY m.created_at`, time.Now().Add(-olderThan))
+	if err != nil {
+		return 0, err
+	}
+	var old []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		old = append(old, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range old {
+		if dryRun {
+			used, err := s.mediaInUse(ctx, id)
+			if err != nil {
+				return 0, err
+			}
+			if !used {
+				n++
+			}
+			continue
+		}
+		// DeleteMedia checks the use itself, so each item is checked once.
+		switch err := s.DeleteMedia(ctx, id); {
+		case err == nil:
+			n++
+		case errors.Is(err, store.ErrMediaInUse), errors.Is(err, domain.ErrNotFound):
+			// became used, or already gone, since the list was read
+		default:
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// mediaInUse asks the injected MediaUse whether media id is still used; without one nothing is.
+func (s *Store) mediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
+	if s.mediaUse == nil {
+		return false, nil
+	}
+	return s.mediaUse.MediaInUse(ctx, id)
+}

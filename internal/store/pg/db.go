@@ -15,6 +15,9 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// Migrations are the embedded migration files, by name (NNNN_name.sql).
+var Migrations, _ = fs.Sub(migrations, "migrations")
+
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	return OpenWith(ctx, url, Options{})
 }
