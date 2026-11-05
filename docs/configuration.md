@@ -120,7 +120,10 @@ SQLite.
 1. Stop CueFlow, so nothing changes during the copy: copy-db reads one snapshot of the source, and what is
    written after it is not copied.
 2. Migrate the source with the CueFlow version you copy with: start that version once on it, or run
-   `DATABASE_URL=postgres://… cueflow migrate`.
+   `cueflow migrate` with the install's `CUEFLOW_SECRET_KEY` (migrate loads the whole configuration):
+   `CUEFLOW_SECRET_KEY=<the install's key> DATABASE_URL=postgres://… cueflow migrate`, or with
+   `deploy/docker-compose.yml`, which has both, `docker compose run --rm cueflow migrate` (after
+   `docker compose build cueflow` when you have just updated the checkout).
 3. Copy. With `deploy/docker-compose.yml`, the bundled database is reachable from a one-off container:
 
    ```bash
@@ -145,5 +148,6 @@ any differ.
 
 It refuses, before writing anything, a target that already holds data (anything but the default org a
 new file starts with: copy into a new file), a source that is not at this version's last migration, and
-a target at another migration than the source. If a copy fails halfway, delete the file (with its
-`-wal` and `-shm` files) and run it again.
+a target at another migration than the source; a target that already exists is only read for these
+checks, so a refused one is left as it was. If a copy fails after it started writing, it says the target
+is incomplete: delete the file with its `-wal` and `-shm` files and run it again.

@@ -47,13 +47,19 @@ Each release also publishes all three, as `ghcr.io/j75689/cueflow:<version>` / `
 
 On a small machine CueFlow can keep everything in one SQLite file instead of PostgreSQL, in single mode
 only (see `DATABASE_URL` in [configuration.md](configuration.md#core)). A compose file for it, say
-`deploy/docker-compose.sqlite.yml`; add any other variable of `docker-compose.yml`'s `cueflow` service you use:
+`deploy/docker-compose.sqlite.yml`; add any other variable of `docker-compose.yml`'s `cueflow` service you use.
+It builds the image from this checkout like `docker-compose.yml` does: the released images up to v1.7.0
+have no SQLite backend.
 
 ```yaml
 name: cueflow
 services:
   cueflow:
-    image: ghcr.io/j75689/cueflow:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: ${CUEFLOW_IMAGE_TARGET:-slim}
+    image: cueflow:${CUEFLOW_IMAGE_TARGET:-slim}
     restart: unless-stopped
     environment:
       DATABASE_URL: sqlite:///data/cueflow.db
@@ -69,7 +75,7 @@ services:
 ```bash
 cd deploy
 mkdir -p data && sudo chown 65532:65532 data   # the image runs as user nonroot, uid 65532
-docker compose -f docker-compose.sqlite.yml up -d
+docker compose -f docker-compose.sqlite.yml up -d --build
 ```
 
 CueFlow creates and migrates `deploy/data/cueflow.db` on start; SQLite keeps `cueflow.db-wal` and
