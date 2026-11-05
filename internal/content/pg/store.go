@@ -23,13 +23,18 @@ var _ content.Store = (*Store)(nil)
 
 func New(s *storepg.Store) *Store { return &Store{Store: s} }
 
+// init serves content.NewStore for the PostgreSQL store and hands any other backend to the
+// constructor registered before it.
 func init() {
+	next := content.NewStore
 	content.NewStore = func(s store.Backend) content.Store {
-		core, ok := s.(*storepg.Store)
-		if !ok {
-			panic(fmt.Sprintf("content/pg needs the PostgreSQL store, got %T", s))
+		if core, ok := s.(*storepg.Store); ok {
+			return New(core)
 		}
-		return New(core)
+		if next == nil {
+			panic(fmt.Sprintf("no content store for %T", s))
+		}
+		return next(s)
 	}
 }
 

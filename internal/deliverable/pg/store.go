@@ -27,13 +27,18 @@ var _ deliverable.Store = (*Store)(nil)
 
 func New(s *storepg.Store) *Store { return &Store{Store: s} }
 
+// init serves deliverable.NewStore for the PostgreSQL store and hands any other backend to the
+// constructor registered before it.
 func init() {
+	next := deliverable.NewStore
 	deliverable.NewStore = func(s store.Backend) deliverable.Store {
-		core, ok := s.(*storepg.Store)
-		if !ok {
-			panic(fmt.Sprintf("deliverable/pg needs the PostgreSQL store, got %T", s))
+		if core, ok := s.(*storepg.Store); ok {
+			return New(core)
 		}
-		return New(core)
+		if next == nil {
+			panic(fmt.Sprintf("no deliverable store for %T", s))
+		}
+		return next(s)
 	}
 }
 

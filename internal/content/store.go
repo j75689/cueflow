@@ -11,7 +11,7 @@ import (
 )
 
 // Store is the content workflow's persistence: the core backend plus the source items. The
-// implementation lives with the backend (content/pg) and embeds the core store.
+// implementation lives with the backend (content/pg, content/sqlite) and embeds the core store.
 type Store interface {
 	store.Backend
 	InsertItems(ctx context.Context, connectorID uuid.UUID, items []connector.Item) (int, error)
@@ -22,7 +22,7 @@ type Store interface {
 }
 
 // NewStore returns the content store over the core backend s, for code that holds only the core
-// (the agents' tools). The backend's package sets it (content/pg).
+// (the agents' tools). The backends' packages set it (content/pg, content/sqlite).
 var NewStore func(s store.Backend) Store
 
 type SourceItem struct {
