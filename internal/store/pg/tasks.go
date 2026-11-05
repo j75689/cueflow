@@ -406,11 +406,12 @@ func (s *Store) RecoverResetAt(ctx context.Context, id uuid.UUID) (*time.Time, e
 }
 
 // DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade
-// removes the file rows, but blobs outside the database would be left behind. It runs in one
-// transaction that commits only once every blob is gone, so a failed blob delete leaves the task in
-// place and the call can simply be retried (deleting a blob that is already gone succeeds).
+// removes the file rows, but blobs outside the database would be left behind. The rows go in one
+// transaction and the blobs once it has committed, so no transaction waits on the blob store; a blob
+// that can't be deleted then is left behind, and the error names its file.
 func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	var files []storedBytes
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		// Delete the file rows first, locking them, so a file written meanwhile waits on the task.
 		rows, err := tx.Query(ctx, `WITH RECURSIVE tree AS (
 				SELECT id, 0 AS depth FROM tasks WHERE id=$1
@@ -419,7 +420,7 @@ func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-		files, err := pgx.CollectRows(rows, pgx.RowToStructByPos[storedBytes])
+		files, err = pgx.CollectRows(rows, pgx.RowToStructByPos[storedBytes])
 		if err != nil {
 			return err
 		}
@@ -430,8 +431,15 @@ func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
 		if tag.RowsAffected() == 0 {
 			return domain.ErrNotFound
 		}
-		return s.dropAllBytes(ctx, files)
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if err := s.dropAllBytes(ctx, files); err != nil {
+		return fmt.Errorf("task %s removed, but its files could not be deleted: %w", id, err)
+	}
+	return nil
 }
 
 // TaskDepth counts ancestors (0 for a top-level task).
