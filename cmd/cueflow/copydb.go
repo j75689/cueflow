@@ -71,7 +71,8 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	if err := checkSource(srcVersion); err != nil {
 		return err
 	}
-	if err := checkTarget(ctx, to, tables, srcVersion); err != nil {
+	checked, err := checkTarget(ctx, to, tables, srcVersion)
+	if err != nil {
 		return err
 	}
 
@@ -80,8 +81,14 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 		return err
 	}
 	defer dst.Close()
+	path, err := dst.File(ctx)
+	if err != nil {
+		return fmt.Errorf("target: %w", err)
+	}
+	if checked != "" && path != checked {
+		return fmt.Errorf("target: checked %s but opened %s; copy into a new file", checked, path)
+	}
 	if err := fill(ctx, tx, dst, tables, out); err != nil {
-		path := storesqlite.Path(to)
 		return fmt.Errorf("%w\nthe copy in %s is incomplete: delete %s, %s-wal and %s-shm before copying again", err, path, path, path, path)
 	}
 	fmt.Fprintf(out, "done: %d tables, row counts match\n", len(tables))
@@ -169,35 +176,39 @@ func checkSource(srcVersion string) error {
 
 // checkTarget refuses an existing target that holds data (anything but the default org its
 // migration creates), is at another migration than the source, or is in use. It only reads the
-// file, read-only, and leaves a missing one missing.
-func checkTarget(ctx context.Context, to string, tables []string, srcVersion string) error {
-	path := storesqlite.Path(to)
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		return nil
+// file, read-only, and leaves a missing one missing. It returns the file it checked, as SQLite
+// resolved to's name, or "" for a missing one.
+func checkTarget(ctx context.Context, to string, tables []string, srcVersion string) (string, error) {
+	dst, err := storesqlite.OpenReadOnly(ctx, to)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+	path, err := dst.File(ctx)
+	if err != nil {
+		return "", fmt.Errorf("target: %w", err)
 	}
 	// The read-only inspection doesn't see what a -wal file holds.
 	if wal, err := os.Stat(path + "-wal"); err == nil && wal.Size() > 0 {
-		return fmt.Errorf("target has a non-empty %s-wal: stop what uses it, or copy into a new file", path)
+		return "", fmt.Errorf("target has a non-empty %s-wal: stop what uses it, or copy into a new file", path)
 	}
-	dst, err := storesqlite.OpenReadOnly(ctx, to)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
 	r := dst.Reader()
 	var objects int
 	if err := r.QueryRow(ctx, `SELECT count(*) FROM sqlite_master`).Scan(&objects); err != nil {
-		return fmt.Errorf("target: %w", err)
+		return "", fmt.Errorf("target: %w", err)
 	}
 	if objects == 0 {
-		return nil
+		return path, nil
 	}
 	var dstVersion string
 	if err := r.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&dstVersion); err != nil {
-		return fmt.Errorf("target is not empty and not a cueflow database (%v); copy into a new file", err)
+		return "", fmt.Errorf("target is not empty and not a cueflow database (%v); copy into a new file", err)
 	}
 	if prefix(dstVersion) != prefix(srcVersion) {
-		return fmt.Errorf("source is at migration %s, target at %s; copy into a new file", srcVersion, dstVersion)
+		return "", fmt.Errorf("source is at migration %s, target at %s; copy into a new file", srcVersion, dstVersion)
 	}
 	for _, table := range tables {
 		q := `SELECT count(*) FROM "` + table + `"`
@@ -206,13 +217,13 @@ func checkTarget(ctx context.Context, to string, tables []string, srcVersion str
 		}
 		var n int
 		if err := r.QueryRow(ctx, q).Scan(&n); err != nil {
-			return fmt.Errorf("target: %w", err)
+			return "", fmt.Errorf("target: %w", err)
 		}
 		if n > 0 {
-			return fmt.Errorf("target is not empty (%s has %d row(s)); copy into a new file", table, n)
+			return "", fmt.Errorf("target is not empty (%s has %d row(s)); copy into a new file", table, n)
 		}
 	}
-	return nil
+	return path, nil
 }
 
 // prefix is a migration version's NNNN.

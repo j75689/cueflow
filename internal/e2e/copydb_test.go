@@ -184,10 +184,10 @@ func TestCopyDB(t *testing.T) {
 
 	// Refusals exit non-zero and leave the target as it was: the same bytes in the file, its -wal and
 	// its -shm, or still no file.
-	refuse := func(name, path, want string) {
+	refuseAt := func(name, path, to, want string) {
 		t.Helper()
 		before := fileHashes(t, path)
-		out, err := exec.Command(bin, "copy-db", "--from", from, "--to", "sqlite://"+path).CombinedOutput()
+		out, err := exec.Command(bin, "copy-db", "--from", from, "--to", to).CombinedOutput()
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() == 0 || !strings.Contains(string(out), want) {
 			t.Errorf("%s: %v, want a non-zero exit saying %q:\n%s", name, err, want, out)
@@ -195,6 +195,10 @@ func TestCopyDB(t *testing.T) {
 		if after := fileHashes(t, path); !reflect.DeepEqual(after, before) {
 			t.Errorf("%s: the target changed:\nbefore %v\nafter  %v", name, before, after)
 		}
+	}
+	refuse := func(name, path, want string) {
+		t.Helper()
+		refuseAt(name, path, "sqlite://"+path, want)
 	}
 	lite.Close()
 	refuse("into the copy", copyPath, "target is not empty (connectors has 1 row(s))")
@@ -245,6 +249,27 @@ func TestCopyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	refuse("into a text file", text, "file is not a database")
+
+	// A target with data named the way SQLite reads it: percent-encoded, with a localhost authority.
+	spaced := filepath.Join(dir, "sp ace", "live.db")
+	if err := os.Mkdir(filepath.Dir(spaced), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	liveDB, err := storesqlite.Open(ctx, "sqlite://"+spaced, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storesqlite.Migrate(ctx, liveDB); err == nil {
+		err = (&storesqlite.TestHooks{Store: liveDB}).Insert(ctx, "orgs", map[string]any{"id": uuid.New(), "name": "Mine", "slug": "mine"})
+	}
+	liveDB.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := strings.ReplaceAll(spaced, " ", "%20")
+	for _, to := range []string{"file:" + enc, "sqlite://" + enc, "file://localhost" + enc} {
+		refuseAt("into a target with data at "+to, spaced, to, "target is not empty (orgs has 1 row(s))")
+	}
 
 	// A copy that fails after its first write says the target is incomplete and which files to delete.
 	if _, err := pool.Exec(ctx, `UPDATE tasks SET position = 'NaN' WHERE id = $1`, child.ID); err != nil {

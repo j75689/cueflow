@@ -2,6 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,15 +115,43 @@ func TestNextSeqUsesIndex(t *testing.T) {
 	}
 }
 
-func TestPath(t *testing.T) {
-	for url, want := range map[string]string{
-		"sqlite:///data/cueflow.db":       "/data/cueflow.db",
-		"sqlite:data/cueflow.db":          "data/cueflow.db",
-		"file:/data/cueflow.db?_pragma=x": "/data/cueflow.db",
-		"file:///data/cueflow.db":         "/data/cueflow.db",
-	} {
-		if got := Path(url); got != want {
-			t.Errorf("Path(%q) = %q, want %q", url, got, want)
+// OpenReadOnly (copy-db's check) and Open (its write) resolve every URL form to the same file, the
+// one SQLite reads: percent-decoded, without a localhost authority or the query.
+func TestFile(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "sp ace")
+	file := filepath.Join(dir, "cueflow.db")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	enc := strings.ReplaceAll(file, " ", "%20")
+	urls := []string{"sqlite://" + file, "sqlite://" + enc, "sqlite:cueflow.db", "file:" + enc,
+		"file://" + enc + "?_pragma=busy_timeout(1)", "file://localhost" + enc}
+	for _, url := range urls {
+		if _, err := OpenReadOnly(ctx, url); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("OpenReadOnly(%q) of a missing file: %v, want fs.ErrNotExist", url, err)
+		}
+	}
+	s, err := Open(ctx, "sqlite://"+file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	for _, url := range urls {
+		for name, open := range map[string]func() (*Store, error){
+			"OpenReadOnly": func() (*Store, error) { return OpenReadOnly(ctx, url) },
+			"Open":         func() (*Store, error) { return Open(ctx, url, nil) },
+		} {
+			s, err := open()
+			if err != nil {
+				t.Fatalf("%s(%q): %v", name, url, err)
+			}
+			got, err := s.File(ctx)
+			s.Close()
+			if err != nil || got != file {
+				t.Errorf("%s(%q).File() = %q %v, want %q", name, url, got, err, file)
+			}
 		}
 	}
 }
