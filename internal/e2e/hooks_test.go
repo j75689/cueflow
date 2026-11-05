@@ -14,8 +14,8 @@ import (
 
 // dbHooks is how a test reads and sets rows the product API doesn't reach, on whichever backend
 // the suite runs. In a where map a value matches with =, a []uuid.UUID or []string matches any of
-// its elements, and nil matches NULL. Times and ids are Go values (time.Now().Add(-time.Minute),
-// uuid.New()), never SQL.
+// its elements, and nil (or a nil pointer) matches NULL. Times and ids are Go values
+// (time.Now().Add(-time.Minute), uuid.New()), never SQL.
 type dbHooks interface {
 	Update(ctx context.Context, table string, set, where map[string]any) (int64, error)
 	Insert(ctx context.Context, table string, row map[string]any) error
@@ -37,8 +37,9 @@ func pgOnly(t *testing.T, e *env) *pgxpool.Pool {
 	return h.Pool
 }
 
-// The hooks do what the converted assertions rely on: = per column, a slice as IN, nil as IS NULL, an
-// empty where as every row, Update's count of changed rows, and Get's no-row error.
+// The hooks do what the converted assertions rely on: = per column, a slice as IN, nil (or a nil
+// pointer) as IS NULL, an empty where as every row, Update's count of changed rows, and Get's no-row
+// error.
 func TestDBHooks(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -76,6 +77,9 @@ func TestDBHooks(t *testing.T) {
 	}
 	if n := count(map[string]any{"retry_at": nil}); n != 2 {
 		t.Fatalf("retry_at IS NULL: %d", n)
+	}
+	if n := count(map[string]any{"retry_at": (*time.Time)(nil)}); n != 2 {
+		t.Fatalf("retry_at IS NULL from a nil pointer: %d", n)
 	}
 	if n := count(map[string]any{"status": "DONE", "id": ids[0]}); n != 1 {
 		t.Fatalf("status and id: %d", n)

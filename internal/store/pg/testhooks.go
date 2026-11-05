@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -21,8 +22,8 @@ func TestLockOrgClaims(ctx context.Context, tx pgx.Tx, orgs []uuid.UUID) error {
 // out, a run that lost its claim) without writing SQL of its own. Test use only.
 //
 // Columns are given as maps of column to Go value. In a where map a value matches with =, a
-// []uuid.UUID or []string matches any of its elements, and nil matches NULL; an empty where map
-// matches every row.
+// []uuid.UUID or []string matches any of its elements, and nil (or a nil pointer) matches NULL; an
+// empty where map matches every row.
 type TestHooks struct {
 	Pool *pgxpool.Pool
 }
@@ -79,7 +80,11 @@ func whereSQL(where map[string]any, args []any) (string, []any) {
 	var conds []string
 	for _, c := range sortedKeys(where) {
 		col := pgx.Identifier{c}.Sanitize()
-		switch v := where[c].(type) {
+		v := where[c]
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+			v = nil // a nil *uuid.UUID field is NULL too, not = NULL, which matches nothing
+		}
+		switch v := v.(type) {
 		case nil:
 			conds = append(conds, col+" IS NULL")
 		case []uuid.UUID, []string:
