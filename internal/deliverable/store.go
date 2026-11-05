@@ -28,6 +28,8 @@ type Store interface {
 	ClaimQueued(ctx context.Context, lease time.Duration, limit int) ([]*Deliverable, error)
 	ExpiredLeases(ctx context.Context) ([]uuid.UUID, error)
 	ActionableCount(ctx context.Context) (int, error)
+	// MediaInUse reports whether an unfinished deliverable uses media id (store.MediaUse).
+	MediaInUse(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // NewStore returns the deliverable store over the core backend s, for code that holds only the core

@@ -180,6 +180,7 @@ func serve() error {
 		return err
 	}
 	st.SetBlobs(blobs)
+	st.SetMediaUse(deliverablepg.New(st)) // whether or not the module is mounted: its rows stay
 	// "Everything running is stale" is only true when this is the one process. In the cloud, other
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
 	cs := contentpg.New(st)
@@ -481,6 +482,7 @@ func mediaCmd(args []string) error {
 		return err
 	}
 	st.SetBlobs(cur) // rows already moved elsewhere stay readable only through the configured backend
+	st.SetMediaUse(deliverablepg.New(st))
 
 	switch args[0] {
 	case "migrate":

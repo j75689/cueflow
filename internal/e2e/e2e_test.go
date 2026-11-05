@@ -88,6 +88,7 @@ func setup(t *testing.T) *env {
 	module := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: "http://localhost:3000"}
 	module.Attach()
 	ds := deliverablepg.New(st)
+	st.SetMediaUse(ds)
 	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
 	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
 	dmodule.Attach()

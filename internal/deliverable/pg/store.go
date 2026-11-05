@@ -451,6 +451,19 @@ func (s *Store) ActionableCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// inUseSQL is true when some unfinished deliverable (anything but DONE or REJECTED: a FAILED one can
+// be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
+const inUseSQL = `SELECT EXISTS (SELECT 1 FROM deliverables d
+	WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || $1::text || '%')`
+
+// MediaInUse reports whether an unfinished deliverable uses media id; the core store asks it before
+// deleting media (store.MediaUse).
+func (s *Store) MediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
+	var used bool
+	err := s.Pool().QueryRow(ctx, inUseSQL, id.String()).Scan(&used)
+	return used, err
+}
+
 func truncate(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

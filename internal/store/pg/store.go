@@ -22,6 +22,8 @@ type Store struct {
 	box  *secret.Box
 	// blobs holds new media and task-file bytes; nil keeps them in the database.
 	blobs blob.Store
+	// mediaUse says which media a module still uses; nil means none.
+	mediaUse store.MediaUse
 }
 
 var _ store.Backend = (*Store)(nil)
@@ -32,6 +34,9 @@ func New(pool *pgxpool.Pool, box *secret.Box) *Store {
 
 // SetBlobs makes new media bytes go to b instead of the database. Existing rows keep working.
 func (s *Store) SetBlobs(b blob.Store) { s.blobs = b }
+
+// SetMediaUse makes media u reports in use undeletable (DeleteMedia, PruneMedia).
+func (s *Store) SetMediaUse(u store.MediaUse) { s.mediaUse = u }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 

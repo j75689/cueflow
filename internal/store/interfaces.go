@@ -203,5 +203,13 @@ type Backend interface {
 	Ping(ctx context.Context) error
 	// SetBlobs makes new media and task-file bytes go to b instead of the database.
 	SetBlobs(b blob.Store)
+	// SetMediaUse makes media u reports in use undeletable; nil means nothing is.
+	SetMediaUse(u MediaUse)
 	Close()
+}
+
+// MediaUse says whether something outside the core still uses a media item: an unfinished
+// deliverable (the deliverable backend implements it).
+type MediaUse interface {
+	MediaInUse(ctx context.Context, id uuid.UUID) (bool, error)
 }

@@ -165,11 +165,6 @@ func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
 	return moved, nil
 }
 
-// inUseSQL is true when some unfinished deliverable (anything but DONE or REJECTED: a FAILED one can
-// be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
-const inUseSQL = `SELECT EXISTS (SELECT 1 FROM deliverables d
-	WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || $1::text || '%')`
-
 // AdoptMedia takes over a file a trusted writer left in the bucket's staging area: it checks what
 // the file is (validate gets its first bytes and size, and returns the MIME type), moves it into the
 // media store and records it. The bytes never pass through this process.
@@ -210,8 +205,8 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	var used bool
-	if err := s.pool.QueryRow(ctx, inUseSQL, id.String()).Scan(&used); err != nil {
+	used, err := s.mediaInUse(ctx, id)
+	if err != nil {
 		return err
 	}
 	if used {
@@ -234,24 +229,35 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun bool) (int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT m.id FROM media m
 		WHERE m.created_at < NOW() - make_interval(secs => $1)
-		  AND NOT EXISTS (SELECT 1 FROM deliverables d
-			WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || m.id::text || '%')
 		ORDER BY m.created_at`, olderThan.Seconds())
 	if err != nil {
 		return 0, err
 	}
-	var ids []uuid.UUID
+	var old []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		ids = append(ids, id)
+		old = append(old, id)
 	}
 	rows.Close()
-	if err := rows.Err(); err != nil || dryRun {
-		return len(ids), err
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	var ids []uuid.UUID
+	for _, id := range old {
+		used, err := s.mediaInUse(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		if !used {
+			ids = append(ids, id)
+		}
+	}
+	if dryRun {
+		return len(ids), nil
 	}
 	n := 0
 	for _, id := range ids {
@@ -265,4 +271,12 @@ func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun 
 		}
 	}
 	return n, nil
+}
+
+// mediaInUse asks the injected MediaUse whether media id is still used; without one nothing is.
+func (s *Store) mediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
+	if s.mediaUse == nil {
+		return false, nil
+	}
+	return s.mediaUse.MediaInUse(ctx, id)
 }
