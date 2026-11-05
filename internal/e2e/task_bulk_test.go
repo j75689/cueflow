@@ -122,13 +122,14 @@ func TestTaskBulk(t *testing.T) {
 // counts a delete's not_found as done, so a lookup that failed must not read as a task already gone.
 func TestTaskBulkStopsOnDatabaseError(t *testing.T) {
 	e := setup(t)
+	pool := pgOnly(t, e)
 	ctx := context.Background()
 	var a, b store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "a"}, &a)
 	e.do("POST", "/tasks", map[string]any{"title": "b"}, &b)
 
 	// Another transaction holds the tasks table, so the lookup outlives the request's deadline.
-	tx, err := e.pool.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

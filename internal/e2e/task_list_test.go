@@ -37,7 +37,8 @@ func TestTaskListPaging(t *testing.T) {
 			hours = 3
 		}
 		at[id] = base.Add(-time.Duration(hours) * time.Hour)
-		if _, err := e.pool.Exec(ctx, "UPDATE tasks SET completed_at=$2, position=1, created_at=$3 WHERE id=$1", id, at[id], base); err != nil {
+		if _, err := e.db.Update(ctx, "tasks", map[string]any{"completed_at": at[id], "position": 1, "created_at": base},
+			map[string]any{"id": id}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -97,7 +98,8 @@ func TestTaskCounts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := e.pool.Exec(ctx, "UPDATE tasks SET updated_at = NOW() - INTERVAL '30 days' WHERE title='old'"); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"updated_at": time.Now().Add(-30 * 24 * time.Hour)},
+		map[string]any{"title": "old"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,9 +137,12 @@ func TestTaskListAPI(t *testing.T) {
 	ctx := context.Background()
 	def, _ := e.store.DefaultOrg(ctx)
 	// 503 DONE tasks, task g finished g minutes ago; numbers far from the org's counter.
-	if _, err := e.pool.Exec(ctx, `INSERT INTO tasks (org_id, number, title, status, completed_at)
-		SELECT $1, 100000 + g, 'done ' || g, 'DONE', NOW() - g * INTERVAL '1 minute' FROM generate_series(1, 503) g`, def.ID); err != nil {
-		t.Fatal(err)
+	now := time.Now()
+	for g := 1; g <= 503; g++ {
+		if err := e.db.Insert(ctx, "tasks", map[string]any{"org_id": def.ID, "number": 100000 + g, "title": fmt.Sprint("done ", g),
+			"status": "DONE", "completed_at": now.Add(-time.Duration(g) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	type list struct {
 		Items  []store.Task             `json:"items"`
@@ -199,7 +204,7 @@ func TestTaskListAPI(t *testing.T) {
 	}
 	// A number no seeded title contains.
 	task.Number = 777777
-	if _, err := e.pool.Exec(ctx, "UPDATE tasks SET number=$2 WHERE id=$1", task.ID, task.Number); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"number": task.Number}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{fmt.Sprintf("%%23%d", task.Number), fmt.Sprint(task.Number), "haystack"} {

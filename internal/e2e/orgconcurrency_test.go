@@ -67,7 +67,8 @@ func TestOrgAgentConcurrency(t *testing.T) {
 	var ext store.Connector
 	e.do("POST", "/connectors", map[string]any{"name": "Self-driven", "type": "external", "config": map[string]any{}}, &ext)
 	for _, id := range tasks(a.Slug, "outside", &ext.ID, 2) {
-		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until=NOW() + interval '1 hour' WHERE id=$1`, id); err != nil {
+		if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "IN_PROGRESS", "lease_until": time.Now().Add(time.Hour)},
+			map[string]any{"id": id}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,8 +125,11 @@ func TestOrgAgentConcurrency(t *testing.T) {
 		t.Fatalf("after clearing B's limit: %v, want b=%d", got, orgDefault-1)
 	}
 	// A task of A that ends frees one slot for A alone.
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='REVIEW' WHERE status='IN_PROGRESS' AND id = ANY($1)
-		AND id = (SELECT id FROM tasks WHERE status='IN_PROGRESS' AND id = ANY($1) LIMIT 1)`, inA); err != nil {
+	var ended uuid.UUID
+	if err := e.db.Get(ctx, "tasks", "id", map[string]any{"status": "IN_PROGRESS", "id": inA}, &ended); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "REVIEW"}, map[string]any{"id": ended}); err != nil {
 		t.Fatal(err)
 	}
 	if got := claimAll(); got["a"] != 1 || len(got) != 1 {
@@ -139,6 +143,7 @@ func TestOrgAgentConcurrency(t *testing.T) {
 // uncommitted claims, would take the urgent one. A TODO row another writer holds is skipped, not waited on.
 func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 	e := setup(t)
+	pgPool := pgOnly(t, e)
 	ctx := context.Background()
 	org, _ := e.store.DefaultOrg(ctx)
 	var agent store.Agent
@@ -153,7 +158,7 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 	first, second := newTask("first", "normal"), newTask("second", "normal")
 
 	// A row someone else holds does not stall a claim: it takes what it can and leaves that one.
-	other, err := e.pool.Begin(ctx)
+	other, err := pgPool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,11 +185,11 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 	if err := other.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='TODO' WHERE id=$1`, first); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "TODO"}, map[string]any{"id": first}); err != nil {
 		t.Fatal(err)
 	}
 
-	holder, err := e.pool.Begin(ctx)
+	holder, err := pgPool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +211,7 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 	}()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var waiting int
-		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+		if err := pgPool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
 			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
@@ -222,8 +227,8 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims := <-done
-	var running int
-	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE org_id=$1 AND status='IN_PROGRESS'`, org.ID).Scan(&running); err != nil {
+	running, err := e.db.Count(ctx, "tasks", map[string]any{"org_id": org.ID, "status": "IN_PROGRESS"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if running != 2 {

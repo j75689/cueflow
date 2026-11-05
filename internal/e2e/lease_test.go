@@ -53,7 +53,7 @@ func TestLeaseIsFencedByClaim(t *testing.T) {
 		t.Fatalf("the claim's run: %+v %v", got, err)
 	}
 	// The holder stalls: the lease runs out, the sweep interrupts the task and a human reruns it.
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() - interval '1 second' WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"lease_until": time.Now().Add(-time.Second)}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range [][2]store.TaskStatus{{store.TaskInProgress, store.TaskWaitingHuman}, {store.TaskWaitingHuman, store.TaskTodo}} {
@@ -111,7 +111,7 @@ func TestStalledRunLosesAReclaimedTask(t *testing.T) {
 	<-started
 
 	// Another instance claimed the task after this run's lease ran out (as TestLeaseIsFencedByClaim).
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	<-done
@@ -139,7 +139,7 @@ func TestLegacyClaimIsAdoptedByItsRun(t *testing.T) {
 	var task store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "Legacy", "assignee_agent_id": team["chief"].ID}, &task)
 	cl := claim(t, e, task)
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = NULL WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": nil}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := e.store.ExtendTaskLease(ctx, task.ID, cl.RunID, time.Minute); ok {
@@ -185,7 +185,7 @@ func TestStalledRunsToolCallIsRefused(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); e.crew.RunPending(ctx, 1) }()
 	<-started
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	close(reclaimed)
@@ -209,9 +209,12 @@ func TestStalledRunsToolCallIsRefused(t *testing.T) {
 // instance serves it, and ends the run: its outcome is recorded on the token for the instance that
 // owns the run, and later calls are told the run is over.
 func TestMCPToolCallIsRefusedOnceTheClaimIsLost(t *testing.T) {
-	for _, tc := range []struct{ name, lose string }{
-		{"claimed again", `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`},
-		{"stopped by a human", `UPDATE tasks SET status = 'CANCELED' WHERE id=$1`},
+	for _, tc := range []struct {
+		name string
+		lose map[string]any
+	}{
+		{"claimed again", map[string]any{"run_id": uuid.New()}},
+		{"stopped by a human", map[string]any{"status": "CANCELED"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, team := crewSetup(t)
@@ -240,7 +243,7 @@ func TestMCPToolCallIsRefusedOnceTheClaimIsLost(t *testing.T) {
 			if _, refused := comment("while holding the claim"); refused {
 				t.Fatal("the claim's run was refused")
 			}
-			if _, err := e.pool.Exec(ctx, tc.lose, task.ID); err != nil {
+			if _, err := e.db.Update(ctx, "tasks", tc.lose, map[string]any{"id": task.ID}); err != nil {
 				t.Fatal(err)
 			}
 			if _, refused := comment("after losing it"); !refused {
@@ -276,7 +279,7 @@ func TestLostClaimIsNotHandedOver(t *testing.T) {
 	e.crew.DeliveryLimit = 3 * time.Second // hands over at 2.8 s
 	go func() {
 		time.Sleep(time.Second)
-		_, _ = e.pool.Exec(context.Background(), `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID)
+		_, _ = e.db.Update(context.Background(), "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID})
 	}()
 	start := time.Now()
 	if err := e.crew.HandleCrew(ctx); err != nil {
@@ -296,9 +299,12 @@ func TestLostClaimIsNotHandedOver(t *testing.T) {
 // written (here a plain-text answer, which would otherwise complete the task with it) and the run
 // ends canceled.
 func TestStalledTurnsReplyIsNotWritten(t *testing.T) {
-	for _, tc := range []struct{ name, lose string }{
-		{"claimed again", `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`},
-		{"stopped by a human", `UPDATE tasks SET status = 'CANCELED' WHERE id=$1`},
+	for _, tc := range []struct {
+		name string
+		lose map[string]any
+	}{
+		{"claimed again", map[string]any{"run_id": uuid.New()}},
+		{"stopped by a human", map[string]any{"status": "CANCELED"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, team := crewSetup(t)
@@ -319,7 +325,7 @@ func TestStalledTurnsReplyIsNotWritten(t *testing.T) {
 			done := make(chan struct{})
 			go func() { defer close(done); e.crew.RunPending(ctx, 1) }()
 			<-started
-			if _, err := e.pool.Exec(ctx, tc.lose, task.ID); err != nil {
+			if _, err := e.db.Update(ctx, "tasks", tc.lose, map[string]any{"id": task.ID}); err != nil {
 				t.Fatal(err)
 			}
 			close(lost)
@@ -349,7 +355,7 @@ func TestRefusedRunnerCallStopsTheJob(t *testing.T) {
 	e.do("POST", "/tasks", map[string]any{"title": "Write about ACP", "assignee_agent_id": agent.ID}, &task)
 	go func() {
 		time.Sleep(2 * time.Second)
-		_, _ = e.pool.Exec(context.Background(), `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID)
+		_, _ = e.db.Update(context.Background(), "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID})
 	}()
 	done := make(chan struct{})
 	go func() { defer close(done); e.crew.RunPending(ctx, 1) }()
@@ -421,7 +427,7 @@ func TestLostRunnerJobIsStoppedByTheServer(t *testing.T) {
 	}
 	// A claim made by the version before claims recorded their run holds for its runner, which must
 	// keep working while that version is replaced.
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = NULL WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": nil}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	var legacy runnerapi.JobStatus
@@ -429,7 +435,7 @@ func TestLostRunnerJobIsStoppedByTheServer(t *testing.T) {
 	if legacy.Cancel || say("under the old claim") {
 		t.Fatal("a claim with no run recorded stopped its runner")
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	var beat runnerapi.JobStatus

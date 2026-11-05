@@ -127,7 +127,7 @@ func TestSelfDrivenAgent(t *testing.T) {
 	var second store.Task
 	e.do("POST", "/tasks", map[string]any{"title": "Second", "assignee_agent_id": agent.ID}, &second)
 	callText(t, cs, "claim_task", nil)
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET lease_until = NOW() - INTERVAL '1 minute' WHERE id=$1`, second.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"lease_until": time.Now().Add(-time.Minute)}, map[string]any{"id": second.ID}); err != nil {
 		t.Fatal(err)
 	}
 	e.crew.Every = 50 * time.Millisecond

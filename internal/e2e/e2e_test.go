@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/j75689/cueflow/internal/api"
 	"github.com/j75689/cueflow/internal/config"
 	"github.com/j75689/cueflow/internal/connector"
@@ -40,8 +38,9 @@ import (
 
 type env struct {
 	t         *testing.T
-	pool      *pgxpool.Pool
+	db        dbHooks
 	store     store.Backend
+	storeWith func(box *secret.Box) store.Backend // another store on the same database, sealed with box
 	cs        content.Store
 	ds        deliverable.Store
 	deliverer *deliverable.Worker
@@ -53,10 +52,59 @@ type env struct {
 }
 
 func setup(t *testing.T) *env {
+	key := make([]byte, 32)
+	box, _ := secret.New(key)
+	b := openBackend(t, box)
+	st, cs, ds := b.store, b.cs, b.ds
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broker := events.NewBroker()
+	h := hub.New(st, logger, config.DefaultConnectorHTTPTimeout)
+	sched := scheduler.New(st, logger)
+	module := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: "http://localhost:3000"}
+	module.Attach()
+	st.SetMediaUse(ds)
+	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
+	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
+	dmodule.Attach()
+	team := crew.New(st, h, broker, logger, false)
+	team.ValidateSchedule = scheduler.ValidateSchedule
+	team.RecoverBackoff = func(int) time.Duration { return 0 }
+
+	mock := publishermock.New("pub-token")
+	mockSrv := httptest.NewServer(mock.Handler())
+	t.Cleanup(mockSrv.Close)
+
+	server := &api.Server{Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team, Logger: logger,
+		MCPToken: testMCPToken, Modules: []api.Module{module, dmodule}}
+	apiSrv := httptest.NewServer(server.Handler())
+	t.Cleanup(apiSrv.Close)
+
+	e := &env{t: t, db: b.db, store: st, storeWith: b.storeWith, cs: cs, ds: ds, deliverer: deliverer, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
+	t.Setenv("PUBLISHER_URL", mockSrv.URL)
+	return e
+}
+
+// testBackend is the database a test runs on: the stores the app is built from, and the hooks the
+// test reaches it through.
+type testBackend struct {
+	store     store.Backend
+	cs        content.Store
+	ds        deliverable.Store
+	db        dbHooks
+	storeWith func(box *secret.Box) store.Backend
+}
+
+// openBackend opens an empty, migrated database for t, sealed with box.
+func openBackend(t *testing.T, box *secret.Box) testBackend {
 	url := os.Getenv("CUEFLOW_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("CUEFLOW_TEST_DATABASE_URL not set")
 	}
+	return openPG(t, url, box)
+}
+
+// openPG resets url's public schema and migrates it.
+func openPG(t *testing.T, url string, box *secret.Box) testBackend {
 	ctx := context.Background()
 	// CUEFLOW_TEST_DATABASE_SESSION_URL runs the suite the way a transaction-mode pooler is used:
 	// the URL above is the pooler, this one the session connection for the migration.
@@ -77,37 +125,9 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := make([]byte, 32)
-	box, _ := secret.New(key)
 	st := storepg.New(pool, box)
-	cs := contentpg.New(st)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker := events.NewBroker()
-	h := hub.New(st, logger, config.DefaultConnectorHTTPTimeout)
-	sched := scheduler.New(st, logger)
-	module := &content.Module{Store: cs, Hub: h, Broker: broker, Logger: logger, MediaBaseURL: "http://localhost:3000"}
-	module.Attach()
-	ds := deliverablepg.New(st)
-	st.SetMediaUse(ds)
-	deliverer := deliverable.NewWorker(ds, h, broker, logger, time.Hour, time.Minute, 30*time.Second)
-	dmodule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
-	dmodule.Attach()
-	team := crew.New(st, h, broker, logger, false)
-	team.ValidateSchedule = scheduler.ValidateSchedule
-	team.RecoverBackoff = func(int) time.Duration { return 0 }
-
-	mock := publishermock.New("pub-token")
-	mockSrv := httptest.NewServer(mock.Handler())
-	t.Cleanup(mockSrv.Close)
-
-	server := &api.Server{Store: st, Hub: h, Broker: broker, Scheduler: sched, Crew: team, Logger: logger,
-		MCPToken: testMCPToken, Modules: []api.Module{module, dmodule}}
-	apiSrv := httptest.NewServer(server.Handler())
-	t.Cleanup(apiSrv.Close)
-
-	e := &env{t: t, pool: pool, store: st, cs: cs, ds: ds, deliverer: deliverer, crew: team, sched: sched, api: apiSrv, server: server, mock: mock}
-	t.Setenv("PUBLISHER_URL", mockSrv.URL)
-	return e
+	return testBackend{store: st, cs: contentpg.New(st), ds: deliverablepg.New(st), db: &storepg.TestHooks{Pool: pool},
+		storeWith: func(box *secret.Box) store.Backend { return storepg.New(pool, box) }}
 }
 
 func (e *env) do(method, path string, body any, out any) int {
@@ -178,7 +198,7 @@ func TestSecretKeyRotation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return storepg.New(e.pool, box)
+		return e.storeWith(box)
 	}
 
 	// Step 1: new primary + old previous key -> everything still readable.
