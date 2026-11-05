@@ -160,3 +160,41 @@ func TestVideoUploadAndRange(t *testing.T) {
 		t.Fatalf("range request: %d len=%d type=%s", got.StatusCode, len(part), got.Header.Get("Content-Type"))
 	}
 }
+
+// The in-use check and the search read a deliverable's payload as JSON, not as the bytes the client
+// sent: "\/media\/<id>" uses the media and "R&D" matches q=R&D, on PostgreSQL and SQLite alike.
+func TestMediaInUseWithEscapedPayload(t *testing.T) {
+	e := setup(t)
+	e.do("POST", "/connectors", map[string]any{"name": "Img", "type": "fake_image", "config": map[string]any{}}, nil)
+	var a, b mediaOut
+	e.do("POST", "/media/generate", map[string]any{"prompt": "a"}, &a)
+	e.do("POST", "/media/generate", map[string]any{"prompt": "b"}, &b)
+
+	var d deliverable.Deliverable
+	payload := `{"content":"R&D notes, see \/media\/` + a.ID + `"}`
+	if code := e.do("POST", "/deliverables", map[string]any{"kind": "document", "title": "notes", "payload": json.RawMessage(payload)}, &d); code != 201 {
+		t.Fatalf("create: %d", code)
+	}
+	if code := e.do("DELETE", "/media/"+a.ID, nil, nil); code != 409 {
+		t.Errorf("delete media a created draft uses: %d", code)
+	}
+	var list struct {
+		Total int `json:"total"`
+	}
+	e.do("GET", "/deliverables?q=R%26D", nil, &list)
+	if list.Total != 1 {
+		t.Errorf("search R&D: %d", list.Total)
+	}
+
+	// The same through an edit.
+	payload = `{"content":"see \/media\/` + b.ID + `"}`
+	if code := e.do("PATCH", "/deliverables/"+d.ID.String(), map[string]any{"version": d.Version, "payload": json.RawMessage(payload)}, nil); code != 200 {
+		t.Fatalf("edit: %d", code)
+	}
+	if code := e.do("DELETE", "/media/"+b.ID, nil, nil); code != 409 {
+		t.Errorf("delete media an edited draft uses: %d", code)
+	}
+	if n, err := e.store.PruneMedia(context.Background(), 0, true); err != nil || n != 1 {
+		t.Fatalf("prune dry run, only a is unused now: %d %v", n, err)
+	}
+}

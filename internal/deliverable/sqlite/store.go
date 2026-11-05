@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -131,6 +132,9 @@ func (s *Store) Create(ctx context.Context, in deliverable.New, actor deliverabl
 	if err != nil {
 		return nil, store.Invalid(err.Error())
 	}
+	if payload, err = canonical(payload); err != nil {
+		return nil, err
+	}
 	var out *deliverable.Deliverable
 	err = s.Tx(ctx, func(tx storesqlite.Querier) error {
 		var org *uuid.UUID
@@ -184,6 +188,9 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch del
 			payload, err := deliverable.ValidatePayload(cur.Kind, patch.Payload)
 			if err != nil {
 				return store.Invalid(err.Error())
+			}
+			if payload, err = canonical(payload); err != nil {
+				return err
 			}
 			if !jsonEqual(cur.Payload, payload) {
 				next.Payload = payload
@@ -469,6 +476,26 @@ func (s *Store) MediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
 	var used bool
 	err := s.Reader().QueryRow(ctx, inUseSQL, id.String()).Scan(&used)
 	return used, err
+}
+
+// canonical re-encodes a payload with the optional escapes ("\/", "\u0026", "\u00e9") written as
+// the characters they stand for, as PostgreSQL's jsonb stores it. List's search and inUseSQL match
+// the payload text with LIKE, as pg matches payload::text, so they would miss "\/media\/<id>" sent
+// by the client.
+func canonical(payload json.RawMessage) (json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
 }
 
 // jsonText is JSON bytes as the TEXT a JSON column holds; nil is NULL.
