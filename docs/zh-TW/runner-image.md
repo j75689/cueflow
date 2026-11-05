@@ -113,7 +113,7 @@ docker compose up -d --force-recreate
 - OpenCode：對應 provider 的金鑰，例如 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`。
 - Goose：對應 provider 的金鑰，加上 `GOOSE_PROVIDER` 和 `GOOSE_MODEL`。
 
-每個 agent 程序都會繼承容器的環境變數（`CUEFLOW_*` 除外），再加上 `runner.json` 裡的 `env`。最後，在 pool 的 connector 設定對應的 `preset` 與標籤。
+每個 agent 程序都會繼承容器的環境變數（`CUEFLOW_*` 除外），再加上 `runner.json` 裡的 `env` 和 `CUEFLOW_RUNNER_JOB`（見[任務留下的程序](#任務留下的程序)）。最後，在 pool 的 connector 設定對應的 `preset` 與標籤。
 
 ## 憑證與工作目錄
 
@@ -133,11 +133,19 @@ docker compose up -d --force-recreate
 
 不要掛載你的家目錄、`~/.ssh`、`~/.config/gh` 或 Docker socket：這些會把你自己的登入、甚至整台主機交給 agent。
 
+## 任務留下的程序
+
+任務結束時，Runner 會結束 agent 的 process group：先 SIGTERM，5 秒後 SIGKILL。離開了這個 group 的程序（用 `setsid` 啟動、在 agent 分離出去的 shell 裡用 `nohup` 啟動，或自行 daemonize 的工具，例如 dev server、測試用叢集）不在其中。所以 Runner 也會在每個 agent 的環境變數裡加上 `CUEFLOW_RUNNER_JOB=<job id>`，agent 啟動的所有程序都會繼承它。結束 process group 之後，Runner 會找出同一使用者底下仍帶著這個標記的程序，同樣 SIGTERM、5 秒、SIGKILL，有找到時記一行 `msg="leftover processes stopped" job=<id> count=<n> commands=<名稱>`。Runner 本身停止時，也會對還沒清乾淨的任務再做一次。
+
+- 只在 Linux 上有效，Runner 讀的是 `/proc`。macOS 等其他平台照舊只結束 process group，離開 group 的程序會繼續執行。
+- 清掉或換掉自己環境變數的程序（`env -i`、會重設環境的 daemon）沒有標記，會漏掉。
+- 已結束的程序仍要由父程序回收；父程序不在了，就由 PID 1 回收。Runner 映像的 PID 1 是 [tini](https://github.com/krallin/tini)，會負責回收，compose 不需要 `init: true`（留著也無妨）。如果你用 `--entrypoint` 啟動映像，或在自己的映像裡讓 `cueflow runner run` 當 PID 1，請自己加上 init（`init: true`、`docker run --init`），否則這些程序會一直是 zombie，直到容器碰到 pids 上限、agent 再也啟動不了。
+
 ## 不會變的部分
 
 以 `ghcr.io/j75689/cueflow:runner` 為底的映像可以依賴下面這些。任何一項改變都算 breaking change：
 
-- `/usr/local/bin/cueflow` 是 CueFlow 執行檔，映像以 `cueflow runner run` 啟動（`ENTRYPOINT ["/usr/local/bin/cueflow", "runner"]`、`CMD ["run"]`）。
+- `/usr/local/bin/cueflow` 是 CueFlow 執行檔，映像以 tini 帶起 `cueflow runner run`（`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`、`CMD ["run"]`）。
 - Runner 從 `/config/runner.json` 讀設定（`CUEFLOW_RUNNER_CONFIG`）。
 - `/work` 是工作目錄；允許 shell 時，agent 也在這裡作業。
 - 映像以使用者 `nonroot` 執行，uid 與 gid 都是 65532，`HOME=/home/nonroot`。

@@ -117,7 +117,8 @@ Credentials go in `.env`, like the Claude token:
 - OpenCode: the provider's key, for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 - Goose: the provider's key, plus `GOOSE_PROVIDER` and `GOOSE_MODEL`.
 
-Each agent process inherits the container's environment, except the `CUEFLOW_*` variables, plus `env` from `runner.json`. Finally, give the pool's
+Each agent process inherits the container's environment, except the `CUEFLOW_*` variables, plus `env` from `runner.json`
+and `CUEFLOW_RUNNER_JOB` (see [Processes a job leaves behind](#processes-a-job-leaves-behind)). Finally, give the pool's
 connector the matching `preset` and labels.
 
 ## Credentials and work directories
@@ -138,13 +139,32 @@ everything built into it. Mount other files the agent must obey read-only too, s
 an SSH `known_hosts`. Don't mount your home directory, `~/.ssh`, `~/.config/gh` or the Docker socket: each of those
 hands the agent your own logins or the host itself.
 
+## Processes a job leaves behind
+
+When a job ends, the runner stops its agent's process group: SIGTERM, then SIGKILL after 5 seconds. A process that left
+the group (started with `setsid`, with `nohup` from a shell the agent detached, or by a tool that daemonizes, such as a
+dev server or a test cluster) is not in it. So the runner also marks every agent with `CUEFLOW_RUNNER_JOB=<job id>` in
+its environment, which everything it starts inherits. After the group is stopped, the runner stops every process of
+its own user that still carries that marker, with the same SIGTERM, 5 seconds, SIGKILL, and logs
+`msg="leftover processes stopped" job=<id> count=<n> commands=<names>` when there were any. When the runner itself
+stops, it does the same for any job it could not clean up.
+
+- This works on Linux only, where the runner reads `/proc`. On macOS and other platforms, a job's processes are
+  stopped by process group alone, as before, so whatever left the group keeps running.
+- A process that clears or replaces its environment (`env -i`, a daemon that resets it) loses the marker and escapes.
+- A process that has exited still has to be waited for by its parent. When its parent is gone, that is PID 1. In the
+  runner image PID 1 is [tini](https://github.com/krallin/tini), which does that. You don't need `init: true` in
+  compose (keeping it does no harm). If you start the image with `--entrypoint`, or run `cueflow runner run` as PID 1
+  in an image of your own, add an init yourself (`init: true`, `docker run --init`). Otherwise those processes stay
+  zombies until the container hits its pids limit and agents can no longer start.
+
 ## What stays the same
 
 Images built `FROM ghcr.io/j75689/cueflow:runner` can rely on the following. A change to any of them is treated as a
 breaking change:
 
-- `/usr/local/bin/cueflow` is the CueFlow binary. The image starts as `cueflow runner run`
-  (`ENTRYPOINT ["/usr/local/bin/cueflow", "runner"]`, `CMD ["run"]`).
+- `/usr/local/bin/cueflow` is the CueFlow binary. The image starts as `cueflow runner run` under tini
+  (`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`, `CMD ["run"]`).
 - The runner reads its configuration from `/config/runner.json` (`CUEFLOW_RUNNER_CONFIG`).
 - `/work` is the working directory. It is where agents work when the shell is allowed.
 - The image runs as user `nonroot`, uid and gid 65532, with `HOME=/home/nonroot`.

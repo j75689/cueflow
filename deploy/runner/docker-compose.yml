@@ -39,6 +39,8 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 4g
+    # The image runs tini as PID 1, which reaps what agents leave behind, so no `init: true` here; the runner also
+    # stops a job's leftover processes when it ends (docs/runner-image.md#processes-a-job-leaves-behind).
     pids_limit: 512
 
 volumes:
