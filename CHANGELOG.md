@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/j75689/cueflow/compare/v1.6.0...v1.7.0) (2026-11-05)
+
+
+### Features
+
+* **mcptools:** send secret headers from the MCP server connector ([#120](https://github.com/j75689/cueflow/issues/120)) ([c94de07](https://github.com/j75689/cueflow/commit/c94de07e208657e2ac7904f5b56cd123af9867e2))
+
+
+### Bug Fixes
+
+* **mcptools:** number secret environment lines as typed ([#123](https://github.com/j75689/cueflow/issues/123)) ([2af31ea](https://github.com/j75689/cueflow/commit/2af31ea6a28ca069dec5f7c312ac68e200940ac8))
+* **mcptools:** validate MCP server headers up front and skip them on stdio ([#122](https://github.com/j75689/cueflow/issues/122)) ([d6c5d91](https://github.com/j75689/cueflow/commit/d6c5d9182ced0141afeaa6844c76d970583ac507))
+* **runner:** stop the processes a job leaves behind and reap orphans ([#126](https://github.com/j75689/cueflow/issues/126)) ([511eb7e](https://github.com/j75689/cueflow/commit/511eb7e8a0fb52821ad5cc73a728c249d865a33c))
+
 ## [1.6.0](https://github.com/j75689/cueflow/compare/v1.5.2...v1.6.0) (2026-11-03)
 
 
