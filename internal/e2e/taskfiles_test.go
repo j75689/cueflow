@@ -339,7 +339,8 @@ func (f *failingDeletes) Delete(ctx context.Context, id string) error {
 }
 
 // Blobs are deleted once the rows' delete has committed, never inside its transaction: a blob that
-// can't be deleted is left behind, the rows are gone anyway, and the error names the file.
+// can't be deleted is left behind, the rows are gone anyway, and the error (ErrBlobsLeftBehind)
+// names the file.
 func TestDeleteTaskDropsBlobsAfterCommit(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -370,7 +371,7 @@ func TestDeleteTaskDropsBlobsAfterCommit(t *testing.T) {
 		}
 	}
 	err = e.store.DeleteTaskFile(ctx, task.ID, "a.txt")
-	if err == nil || !strings.Contains(err.Error(), a.ID.String()) {
+	if !errors.Is(err, store.ErrBlobsLeftBehind) || !strings.Contains(err.Error(), a.ID.String()) {
 		t.Fatalf("deleting a file whose blob could not be deleted: %v", err)
 	}
 
@@ -380,7 +381,7 @@ func TestDeleteTaskDropsBlobsAfterCommit(t *testing.T) {
 		}
 	}
 	err = e.store.DeleteTask(ctx, task.ID)
-	if err == nil || !strings.Contains(err.Error(), b.ID.String()) {
+	if !errors.Is(err, store.ErrBlobsLeftBehind) || !strings.Contains(err.Error(), b.ID.String()) {
 		t.Fatalf("deleting a task whose blob could not be deleted: %v", err)
 	}
 	if _, err := e.store.GetTask(ctx, task.ID); !errors.Is(err, domain.ErrNotFound) {
@@ -406,3 +407,4 @@ func TestDeleteTaskDropsBlobsAfterCommit(t *testing.T) {
 		t.Fatalf("blob of a deleted task still there: %v", err)
 	}
 }
+

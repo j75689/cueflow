@@ -265,6 +265,11 @@ type NewMedia struct {
 // ErrMediaInUse means a deliverable that is still going to be reviewed or acted on uses the media.
 var ErrMediaInUse = errors.New("media is used by a deliverable that is not finished")
 
+// ErrBlobsLeftBehind is wrapped by DeleteTask and DeleteTaskFile when the rows are gone but some of
+// their bytes outside the database could not be deleted: the delete did happen, and those bytes are
+// orphaned.
+var ErrBlobsLeftBehind = errors.New("its bytes could not be deleted")
+
 // Org is a team with its own agents, board, schedules, deliverables and runs.
 // Connectors and media are global.
 type Org struct {

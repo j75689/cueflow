@@ -227,7 +227,7 @@ func (s *Store) DeleteTaskFile(ctx context.Context, taskID uuid.UUID, name strin
 		return NotFound(err)
 	}
 	if err := s.dropAllBytes(ctx, []storedBytes{f}); err != nil {
-		return fmt.Errorf("task file %q removed, but its bytes could not be deleted: %w", name, err)
+		return fmt.Errorf("task file %q removed, but %w: %w", name, store.ErrBlobsLeftBehind, err)
 	}
 	return nil
 }

@@ -408,7 +408,7 @@ func (s *Store) RecoverResetAt(ctx context.Context, id uuid.UUID) (*time.Time, e
 // DeleteTask removes a task, its subtasks (by cascade) and the bytes of all their files: the cascade
 // removes the file rows, but blobs outside the database would be left behind. The rows go in one
 // transaction and the blobs once it has committed, so no transaction waits on the blob store; a blob
-// that can't be deleted then is left behind, and the error names its file.
+// that can't be deleted then is left behind, and the error (ErrBlobsLeftBehind) names its file.
 func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	var files []storedBytes
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -437,7 +437,7 @@ func (s *Store) DeleteTask(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	if err := s.dropAllBytes(ctx, files); err != nil {
-		return fmt.Errorf("task %s removed, but its files could not be deleted: %w", id, err)
+		return fmt.Errorf("task %s removed, but %w: %w", id, store.ErrBlobsLeftBehind, err)
 	}
 	return nil
 }
