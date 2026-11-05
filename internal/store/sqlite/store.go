@@ -60,8 +60,8 @@ func (s *Store) Tx(ctx context.Context, fn func(q Querier) error) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }() // a no-op after Commit; frees the write connection if fn panics
 	if err := fn(db{tx}); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
