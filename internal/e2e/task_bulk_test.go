@@ -128,7 +128,7 @@ func TestTaskBulkStopsOnDatabaseError(t *testing.T) {
 	e.do("POST", "/tasks", map[string]any{"title": "b"}, &b)
 
 	// Another transaction holds the tasks table, so the lookup outlives the request's deadline.
-	tx, err := e.pool.Begin(ctx)
+	tx, err := pgOnly(t, e).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

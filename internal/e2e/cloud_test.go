@@ -98,15 +98,15 @@ func TestExternalClockFiresOnce(t *testing.T) {
 		t.Fatalf("create schedule: %d", code)
 	}
 	tasksOf := func() int {
-		var n int
-		if err := e.pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE schedule_id=$1`, sc.ID).Scan(&n); err != nil {
+		n, err := e.db.Count(ctx, "tasks", map[string]any{"schedule_id": sc.ID})
+		if err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
 	nextRun := func() *time.Time {
 		var at *time.Time
-		if err := e.pool.QueryRow(ctx, `SELECT next_run_at FROM schedules WHERE id=$1`, sc.ID).Scan(&at); err != nil {
+		if err := e.db.Get(ctx, "schedules", "next_run_at", map[string]any{"id": sc.ID}, &at); err != nil {
 			t.Fatal(err)
 		}
 		return at
@@ -119,12 +119,12 @@ func TestExternalClockFiresOnce(t *testing.T) {
 		t.Fatalf("first tick only schedules: tasks=%d next=%v", tasksOf(), nextRun())
 	}
 
-	due := func(ago string) {
-		if _, err := e.pool.Exec(ctx, `UPDATE schedules SET next_run_at = NOW() - $1::interval WHERE id=$2`, ago, sc.ID); err != nil {
+	due := func(ago time.Duration) {
+		if _, err := e.db.Update(ctx, "schedules", map[string]any{"next_run_at": time.Now().Add(-ago)}, map[string]any{"id": sc.ID}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	due("1 minute")
+	due(time.Minute)
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
@@ -143,7 +143,7 @@ func TestExternalClockFiresOnce(t *testing.T) {
 		t.Fatalf("next activation must move into the future: %v", at)
 	}
 
-	due("3 hours") // the clock was down: skipped, not run at a surprising hour
+	due(3 * time.Hour) // the clock was down: skipped, not run at a surprising hour
 	if err := e.sched.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -295,8 +295,7 @@ func TestPerRunMCPAcrossInstances(t *testing.T) {
 	if len(posts) != 1 || posts[0].Status != deliverable.StatusPendingReview {
 		t.Fatalf("the draft made through instance B is missing: %+v", posts)
 	}
-	var tokens int
-	if err := e.pool.QueryRow(ctx, `SELECT COUNT(*) FROM run_tokens`).Scan(&tokens); err != nil || tokens != 0 {
+	if tokens, err := e.db.Count(ctx, "run_tokens", nil); err != nil || tokens != 0 {
 		t.Fatalf("the run's credential must be gone once the run ends: %d %v", tokens, err)
 	}
 	resp, err := http.Post(instanceB.URL+crew.MCPPathPrefix+"whatever", "application/json", strings.NewReader("{}"))
@@ -330,16 +329,12 @@ func TestCancelReachesOtherInstance(t *testing.T) {
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		var open int
-		_ = e.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_runs WHERE task_id=$1 AND status='RUNNING'`, task.ID).Scan(&open)
-		if open == 0 {
+		if open, _ := e.db.Count(ctx, "agent_runs", map[string]any{"task_id": task.ID, "status": "RUNNING"}); open == 0 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	var open int
-	_ = e.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_runs WHERE task_id=$1 AND status='RUNNING'`, task.ID).Scan(&open)
-	if open != 0 {
+	if open, _ := e.db.Count(ctx, "agent_runs", map[string]any{"task_id": task.ID, "status": "RUNNING"}); open != 0 {
 		t.Fatal("the run kept going after the task was canceled elsewhere")
 	}
 	if got, _ := e.store.GetTask(ctx, task.ID); got.Status != store.TaskCanceled {

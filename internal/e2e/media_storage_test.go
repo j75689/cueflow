@@ -58,9 +58,8 @@ func TestMediaStorageBackendsAndMigrate(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("migrate to file: moved %d, err %v", n, err)
 	}
-	var nullData bool
-	if err := e.pool.QueryRow(ctx, `SELECT data IS NULL FROM media WHERE id=$1`, inDB.ID).Scan(&nullData); err != nil || !nullData {
-		t.Fatalf("database copy not cleared: %v %v", nullData, err)
+	if cleared, err := e.db.Count(ctx, "media", map[string]any{"id": inDB.ID, "data": nil}); err != nil || cleared != 1 {
+		t.Fatalf("database copy not cleared: %v %v", cleared, err)
 	}
 	if m, err := e.store.GetMedia(ctx, inDB.ID); err != nil || !bytes.Equal(m.Data, tinyGIF) {
 		t.Fatalf("read after migrate: %v", err)

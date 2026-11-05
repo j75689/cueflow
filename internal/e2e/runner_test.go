@@ -205,7 +205,7 @@ func TestRunnerJobLabelMatch(t *testing.T) {
 
 	if j := job("", "gpu"); j.LabelMatch != store.LabelMatchAll {
 		t.Fatalf("a job created without label_match has %q, want all", j.LabelMatch)
-	} else if _, err := e.pool.Exec(ctx, `UPDATE runner_jobs SET status='canceled' WHERE id=$1`, j.ID); err != nil {
+	} else if _, err := e.db.Update(ctx, "runner_jobs", map[string]any{"status": "canceled"}, map[string]any{"id": j.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.store.CreateRunnerJob(ctx, store.NewRunnerJob{OrgID: org.ID, TaskID: task.ID, LabelMatch: "some", Payload: map[string]any{}}); err == nil {
@@ -227,9 +227,9 @@ func TestRunnerJobLabelMatch(t *testing.T) {
 	}
 
 	// A row written without label_match (a job queued before the column) matches all.
-	var old uuid.UUID
-	if err := e.pool.QueryRow(ctx, `INSERT INTO runner_jobs (org_id, task_id, labels, payload)
-		VALUES ($1,$2,$3,'{}') RETURNING id`, org.ID, task.ID, []string{"mac", "windows"}).Scan(&old); err != nil {
+	old := uuid.New()
+	if err := e.db.Insert(ctx, "runner_jobs", map[string]any{"id": old, "org_id": org.ID, "task_id": task.ID,
+		"labels": []string{"mac", "windows"}, "payload": map[string]any{}}); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := e.store.GetRunnerJob(ctx, old); j == nil || j.LabelMatch != store.LabelMatchAll {

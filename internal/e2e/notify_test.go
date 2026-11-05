@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/llm"
@@ -118,7 +119,7 @@ func TestTaskAlertsGoToTheOrgsNotifier(t *testing.T) {
 	// A run cut off by a restart.
 	stuck := run("Ask me again")
 	takeAlerts()
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until = NOW() - INTERVAL '1 minute' WHERE id=$1`, stuck.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "IN_PROGRESS", "lease_until": time.Now().Add(-time.Minute)}, map[string]any{"id": stuck.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.crew.Sweep(ctx); err != nil {

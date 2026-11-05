@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/j75689/cueflow/internal/api"
@@ -46,7 +47,7 @@ func runMCP(t *testing.T, e *env, token string, maxRequest time.Duration) *mcp.C
 func lockTable(t *testing.T, e *env, table string, hold time.Duration) func() {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := e.pool.Begin(ctx)
+	tx, err := pgOnly(t, e).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,8 +152,8 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("create_subtask did not end")
 		}
-		var subs int
-		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE parent_id=$1`, task.ID).Scan(&subs); err != nil {
+		subs, err := e.db.Count(ctx, "tasks", map[string]any{"parent_id": task.ID})
+		if err != nil {
 			t.Fatal(err)
 		}
 		if thread := threadText(t, e, task.ID.String()); subs != 1 || !strings.Contains(thread, "tool_result:Subtask #") {
@@ -184,9 +185,13 @@ func TestBuiltInToolOutlivesItsMCPRequest(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("create_task did not end")
 		}
-		var n int
+		late := map[string]any{"title": "Late answer"}
+		n, err := e.db.Count(ctx, "tasks", late)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var number int64
-		if err := e.pool.QueryRow(ctx, `SELECT count(*), max(number) FROM tasks WHERE title='Late answer'`).Scan(&n, &number); err != nil {
+		if err := e.db.Get(ctx, "tasks", "number", late, &number); err != nil {
 			t.Fatal(err)
 		}
 		if n != 1 || !strings.Contains(r, fmt.Sprintf(`"number": %d,`, number)) {
@@ -346,7 +351,7 @@ func TestLostClaimTokenDeleteIsBounded(t *testing.T) {
 	}()
 
 	time.Sleep(time.Second)
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET run_id = gen_random_uuid() WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"run_id": uuid.New()}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
@@ -368,8 +373,8 @@ func TestLostClaimTokenDeleteIsBounded(t *testing.T) {
 // runTokens counts the task's run tokens.
 func runTokens(t *testing.T, e *env, task store.Task) int {
 	t.Helper()
-	var n int
-	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM run_tokens WHERE task_id=$1`, task.ID).Scan(&n); err != nil {
+	n, err := e.db.Count(context.Background(), "run_tokens", map[string]any{"task_id": task.ID})
+	if err != nil {
 		t.Fatal(err)
 	}
 	return n

@@ -185,8 +185,7 @@ func TestTaskFiles(t *testing.T) {
 	if len(left) != 0 {
 		t.Fatalf("%d blobs left after deleting the task", len(left))
 	}
-	var n int
-	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM task_files`).Scan(&n); err != nil || n != 0 {
+	if n, err := e.db.Count(ctx, "task_files", nil); err != nil || n != 0 {
 		t.Fatalf("%d task_files rows left (%v)", n, err)
 	}
 }

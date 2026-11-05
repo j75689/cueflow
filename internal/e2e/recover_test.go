@@ -220,13 +220,7 @@ func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 	})
 	task := newTask(t, e, "Flaky", team["writer"])
 	runAll(e)
-	waiting := func() bool {
-		var ok bool
-		if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&ok); err != nil {
-			t.Fatal(err)
-		}
-		return ok
-	}
+	waiting := func() bool { return retryPending(t, e, task) }
 	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || !waiting() {
 		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting())
 	}
@@ -264,8 +258,9 @@ func TestAutoRecoverWaitsForRetryAt(t *testing.T) {
 	if code := e.do("POST", "/tasks/"+task.ID.String()+"/cancel", nil, nil); code != 200 {
 		t.Fatalf("stop: %d", code)
 	}
-	var cleared bool
-	if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NULL FROM tasks WHERE id=$1`, task.ID).Scan(&cleared); err != nil || !cleared ||
+	var at *time.Time
+	err := e.db.Get(ctx, "tasks", "retry_at", map[string]any{"id": task.ID}, &at)
+	if cleared := at == nil; err != nil || !cleared ||
 		status(t, e, task) != store.TaskWaitingHuman {
 		t.Fatalf("Stop: status %s, retry_at cleared %v %v", status(t, e, task), cleared, err)
 	}
@@ -278,17 +273,11 @@ func TestAutoRecoverRetryAtInTheStore(t *testing.T) {
 	ctx := context.Background()
 	task := newTask(t, e, "Flaky", team["writer"])
 	backoff := func() {
-		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET retry_at=NOW() + interval '1 hour' WHERE id=$1`, task.ID); err != nil {
+		if _, err := e.db.Update(ctx, "tasks", map[string]any{"retry_at": time.Now().Add(time.Hour)}, map[string]any{"id": task.ID}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	waiting := func() bool {
-		var ok bool
-		if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NOT NULL FROM tasks WHERE id=$1`, task.ID).Scan(&ok); err != nil {
-			t.Fatal(err)
-		}
-		return ok
-	}
+	waiting := func() bool { return retryAt(t, e, task) != nil }
 	if waited, err := e.store.ClearTaskRetry(ctx, task.ID); err != nil || waited {
 		t.Fatalf("no backoff: %v %v", waited, err)
 	}
@@ -348,7 +337,7 @@ func TestAutoRecoverCountResetsOnAHumanMove(t *testing.T) {
 	if code := e.do("PATCH", "/tasks/"+id, map[string]any{"title": "Flaky job", "status": "TODO"}, nil); code != 200 {
 		t.Fatalf("edit: %d", code)
 	}
-	if _, err := e.pool.Exec(context.Background(), `UPDATE tasks SET retry_at=NOW() WHERE id=$1`, task.ID); err != nil {
+	if _, err := e.db.Update(context.Background(), "tasks", map[string]any{"retry_at": time.Now()}, map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	runAll(e)
@@ -489,8 +478,8 @@ func TestAutoRecoverLeaseExpired(t *testing.T) {
 		if _, err := e.store.StartAgentRun(ctx, runID, task.ID, writer.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
-			WHERE id=$1`, task.ID, runID); err != nil {
+		if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "IN_PROGRESS", "run_id": runID, "lease_until": time.Now().Add(-time.Minute)},
+			map[string]any{"id": task.ID}); err != nil {
 			t.Fatal(err)
 		}
 		if err := e.crew.Sweep(ctx); err != nil {
@@ -536,9 +525,12 @@ func TestAutoRecoverRunnerNotPickedUp(t *testing.T) {
 	if got := outcomes(t, e, task); got != "error,retry" || status(t, e, task) != store.TaskWaitingHuman {
 		t.Fatalf("runs %s, status %s", got, status(t, e, task))
 	}
-	var jobs, live int
-	if err := e.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status IN ('queued','running','canceling'))
-		FROM runner_jobs WHERE task_id=$1`, task.ID).Scan(&jobs, &live); err != nil || jobs != 2 || live != 0 {
+	jobs, err := e.db.Count(ctx, "runner_jobs", map[string]any{"task_id": task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := e.db.Count(ctx, "runner_jobs", map[string]any{"task_id": task.ID, "status": []string{"queued", "running", "canceling"}})
+	if err != nil || jobs != 2 || live != 0 {
 		t.Fatalf("runner jobs: %d, live %d, %v", jobs, live, err)
 	}
 }
@@ -554,7 +546,7 @@ func TestAutoRecoverSetting(t *testing.T) {
 			t.Fatalf("auto_recover %d: %d, saved %d", c.in, code, a.AutoRecover)
 		}
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE agents SET auto_recover=11 WHERE id=$1`, writer.ID); err == nil {
+	if _, err := e.db.Update(ctx, "agents", map[string]any{"auto_recover": 11}, map[string]any{"id": writer.ID}); err == nil {
 		t.Fatal("the database took auto_recover 11")
 	}
 	var tmpl struct {
@@ -584,8 +576,8 @@ func TestAutoRecoverInterruptedGiveUpAsksOnce(t *testing.T) {
 		if _, err := e.store.StartAgentRun(ctx, runID, lapsed.ID, writer.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
-			WHERE id=$1`, lapsed.ID, runID); err != nil {
+		if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "IN_PROGRESS", "run_id": runID, "lease_until": time.Now().Add(-time.Minute)},
+			map[string]any{"id": lapsed.ID}); err != nil {
 			t.Fatal(err)
 		}
 		if err := e.crew.Sweep(ctx); err != nil {
@@ -638,10 +630,7 @@ func TestAutoRecoverCommentDuringFailingRun(t *testing.T) {
 	})
 	task = newTask(t, e, "Flaky", team["writer"])
 	e.crew.RunPending(ctx, 1)
-	var waiting bool
-	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
-		t.Fatal(err)
-	}
+	waiting := retryPending(t, e, task)
 	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
 		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
 	}
@@ -669,8 +658,8 @@ func TestAutoRecoverCommentDuringLapsedRun(t *testing.T) {
 	if _, err := e.store.StartAgentRun(ctx, runID, task.ID, writer.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', run_id=$2, lease_until=NOW() - INTERVAL '1 minute'
-		WHERE id=$1`, task.ID, runID); err != nil {
+	if _, err := e.db.Update(ctx, "tasks", map[string]any{"status": "IN_PROGRESS", "run_id": runID, "lease_until": time.Now().Add(-time.Minute)},
+		map[string]any{"id": task.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if code := e.do("POST", "/tasks/"+task.ID.String()+"/messages", map[string]any{"content": "also check X"}, nil); code != 201 {
@@ -679,10 +668,7 @@ func TestAutoRecoverCommentDuringLapsedRun(t *testing.T) {
 	if err := e.crew.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var waiting bool
-	if err := e.pool.QueryRow(ctx, `SELECT retry_at > NOW() FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
-		t.Fatal(err)
-	}
+	waiting := retryPending(t, e, task)
 	if got := outcomes(t, e, task); got != "retry" || status(t, e, task) != store.TaskTodo || waiting {
 		t.Fatalf("runs %s, status %s, waiting %v", got, status(t, e, task), waiting)
 	}
@@ -733,11 +719,7 @@ func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
 	setFail(t, alwaysFail)
 	backingOff := func(task store.Task) bool {
 		t.Helper()
-		var waiting bool
-		if err := e.pool.QueryRow(ctx, `SELECT retry_at IS NOT NULL FROM tasks WHERE id=$1`, task.ID).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		return waiting
+		return retryAt(t, e, task) != nil
 	}
 
 	reassigned := newTask(t, e, "Reassigned", team["writer"])
@@ -782,4 +764,25 @@ func TestAutoRecoverBackoffEndsOnReassign(t *testing.T) {
 	if err != nil || got.AssigneeAgentID != nil || backingOff(deleted) {
 		t.Fatalf("after delete: %+v %v, backing off %v", got, err, backingOff(deleted))
 	}
+}
+
+// retryAt is the task's retry_at (nil when it isn't backing off).
+func retryAt(t *testing.T, e *env, task store.Task) *time.Time {
+	t.Helper()
+	var at *time.Time
+	if err := e.db.Get(context.Background(), "tasks", "retry_at", map[string]any{"id": task.ID}, &at); err != nil {
+		t.Fatal(err)
+	}
+	return at
+}
+
+// retryPending reports whether the task's backoff is still running (retry_at is in the future); like
+// SQL's retry_at > NOW(), a task with no retry_at fails the test.
+func retryPending(t *testing.T, e *env, task store.Task) bool {
+	t.Helper()
+	at := retryAt(t, e, task)
+	if at == nil {
+		t.Fatal("retry_at is NULL")
+	}
+	return at.After(time.Now())
 }

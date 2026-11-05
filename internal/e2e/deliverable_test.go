@@ -289,7 +289,8 @@ func TestAgentReadsDeliverable(t *testing.T) {
 	short := doc(task.OrgID, "Short", "# Short\n\nAll of it.", "the plan")
 	big := doc(task.OrgID, "Long", long, strings.Repeat("摘要", 1050)) // a header past the old 2,000 characters of slack
 	failed := doc(task.OrgID, "Failed", "# Failed", "")
-	if _, err := e.pool.Exec(ctx, `UPDATE deliverables SET status='FAILED', error_message='github: 422 Validation Failed' WHERE id=$1`, failed); err != nil {
+	if _, err := e.db.Update(ctx, "deliverables", map[string]any{"status": "FAILED", "error_message": "github: 422 Validation Failed"},
+		map[string]any{"id": failed}); err != nil {
 		t.Fatal(err)
 	}
 	other, err := e.store.CreateOrg(ctx, &store.Org{Name: "Other", Slug: "other"})
