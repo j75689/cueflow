@@ -1,5 +1,5 @@
 // Package store is the PostgreSQL persistence layer.
-package store
+package pg
 
 import (
 	"context"
