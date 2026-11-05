@@ -146,7 +146,7 @@ docker compose up -d --force-recreate
 
 以 `ghcr.io/j75689/cueflow:runner` 為底的映像可以依賴下面這些。任何一項改變都算 breaking change：
 
-- `/usr/local/bin/cueflow` 是 CueFlow 執行檔，映像以 tini 帶起 `cueflow runner run`（`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`、`CMD ["run"]`）。
+- `/usr/local/bin/cueflow` 是 CueFlow 執行檔，映像以 tini 帶起 `cueflow runner run`（`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`、`CMD ["run"]`）。在 `cueflow runner` 前面加上 tini 是相容的改變：`CMD ["run"]`、執行檔路徑、使用者、設定和子命令參數（`docker run <映像> register ...`）都和以前一樣，tini 會把訊號轉給 Runner，並把它的結束碼傳回來。換掉 entrypoint 的映像或部署（`--entrypoint`、Kubernetes 的 `command:`、衍生映像自己的 `ENTRYPOINT`）不會有 tini，跟以前所有映像一樣。
 - Runner 從 `/config/runner.json` 讀設定（`CUEFLOW_RUNNER_CONFIG`）。
 - `/work` 是工作目錄；允許 shell 時，agent 也在這裡作業。
 - 映像以使用者 `nonroot` 執行，uid 與 gid 都是 65532，`HOME=/home/nonroot`。

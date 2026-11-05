@@ -170,7 +170,11 @@ Images built `FROM ghcr.io/j75689/cueflow:runner` can rely on the following. A c
 breaking change:
 
 - `/usr/local/bin/cueflow` is the CueFlow binary. The image starts as `cueflow runner run` under tini
-  (`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`, `CMD ["run"]`).
+  (`ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cueflow", "runner"]`, `CMD ["run"]`). Putting tini in front
+  of `cueflow runner` was a compatible change: `CMD ["run"]`, the binary path, the user, the configuration and
+  subcommand arguments (`docker run <image> register ...`) behave as before, and tini passes signals on to the runner
+  and its exit code back. An image or deployment that replaces the entrypoint (`--entrypoint`, `command:` in
+  Kubernetes, an `ENTRYPOINT` of its own in a derived image) runs without tini, as all images did before.
 - The runner reads its configuration from `/config/runner.json` (`CUEFLOW_RUNNER_CONFIG`).
 - `/work` is the working directory. It is where agents work when the shell is allowed.
 - The image runs as user `nonroot`, uid and gid 65532, with `HOME=/home/nonroot`.
