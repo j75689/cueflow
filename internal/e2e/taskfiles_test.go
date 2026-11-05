@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -19,7 +20,7 @@ import (
 
 func readTaskFile(t *testing.T, e *env, task *store.Task, name string) (*store.TaskFile, string, error) {
 	t.Helper()
-	tf, rc, err := e.store.OpenTaskFile(context.Background(), task.ID, name)
+	tf, rc, err := e.store.OpenTaskFile(context.Background(), task.ID, uuid.Nil, name)
 	if err != nil {
 		return nil, "", err
 	}
@@ -96,7 +97,7 @@ func TestTaskFiles(t *testing.T) {
 	if _, body, _ := readTaskFile(t, e, parent, "notes.md"); body != "version two" {
 		t.Fatalf("the parent's file changed: %q", body)
 	}
-	// The parent doesn't see its subtask's files.
+	// A bare name never resolves to a subtask's file (TestSubtaskFiles reads them by owner).
 	if _, _, err := readTaskFile(t, e, parent, "results/hook-1.txt"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("parent read child's file: %v", err)
 	}
@@ -185,6 +186,118 @@ func TestTaskFiles(t *testing.T) {
 	var n int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM task_files`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("%d task_files rows left (%v)", n, err)
+	}
+}
+
+// A task lists its direct subtasks' files after its own, not deduped, and reads one only by naming
+// the subtask. A bare name resolves as before; a sibling, a grandchild or an unrelated task is
+// refused without reading anything.
+func TestSubtaskFiles(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	newTask := func(title string, parent *store.Task) *store.Task {
+		t.Helper()
+		nt := store.NewTask{Title: title}
+		if parent != nil {
+			nt.ParentID, nt.CreatedBy = &parent.ID, "agent"
+		}
+		task, err := e.store.CreateTask(ctx, nt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	write := func(task *store.Task, name, body string) {
+		t.Helper()
+		if _, err := e.store.WriteTaskFile(ctx, task.ID, name, "", []byte(body), "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parent := newTask("Parent", nil)
+	c1, c2 := newTask("Child 1", parent), newTask("Child 2", parent)
+	grandchild, unrelated := newTask("Grandchild", c1), newTask("Unrelated", nil)
+	write(parent, "x.md", "parent's x")
+	write(c1, "x.md", "c1's x")
+	write(c1, "design.md", "c1's design")
+	write(c2, "design.md", "c2's design")
+	write(grandchild, "deep.md", "too deep")
+	write(unrelated, "other.md", "not yours")
+
+	list, total, err := e.store.ListTaskFiles(ctx, parent.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range list {
+		got = append(got, fmt.Sprintf("%s#%d:%v", f.Name, f.TaskNumber, f.Subtask))
+	}
+	want := []string{
+		fmt.Sprintf("x.md#%d:false", parent.Number),
+		fmt.Sprintf("design.md#%d:true", c1.Number), fmt.Sprintf("design.md#%d:true", c2.Number),
+		fmt.Sprintf("x.md#%d:true", c1.Number),
+	}
+	if total != 4 || strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("list: %v (total %d), want %v", got, total, want)
+	}
+	if one, total, _ := e.store.ListTaskFiles(ctx, parent.ID, 2); len(one) != 2 || total != 4 || one[0].Subtask || !one[1].Subtask {
+		t.Fatalf("limited list: %d of %d", len(one), total)
+	}
+	// c1's own files shadow the parent's x.md; its own subtask's file comes last.
+	if list, _, _ := e.store.ListTaskFiles(ctx, c1.ID, 10); len(list) != 3 || list[0].Name != "design.md" || list[1].TaskID != c1.ID ||
+		list[1].Subtask || list[2].Name != "deep.md" || !list[2].Subtask {
+		t.Fatalf("c1's list: %v", list)
+	}
+
+	read := func(task *store.Task, owner uuid.UUID, name string) (string, error) {
+		t.Helper()
+		f, rc, err := e.store.OpenTaskFile(ctx, task.ID, owner, name)
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+		b, _ := io.ReadAll(rc)
+		if owner != uuid.Nil && f.TaskID != owner {
+			t.Fatalf("read %s of %s, got the file of %s", name, owner, f.TaskID)
+		}
+		return string(b), nil
+	}
+	for _, c := range []struct {
+		task  *store.Task
+		owner uuid.UUID
+		name  string
+		body  string
+		err   error
+	}{
+		{parent, uuid.Nil, "x.md", "parent's x", nil},           // both have it: the task's own
+		{parent, uuid.Nil, "design.md", "", domain.ErrNotFound}, // only subtasks have it
+		{parent, c1.ID, "x.md", "c1's x", nil},
+		{parent, c1.ID, "design.md", "c1's design", nil},
+		{parent, c2.ID, "design.md", "c2's design", nil},
+		{parent, parent.ID, "x.md", "parent's x", nil},
+		{parent, c2.ID, "x.md", "", domain.ErrNotFound},
+		{c1, parent.ID, "x.md", "parent's x", nil}, // an ancestor by owner
+		{parent, grandchild.ID, "deep.md", "", store.ErrTaskFileNotReadable},
+		{parent, unrelated.ID, "other.md", "", store.ErrTaskFileNotReadable},
+		{c2, c1.ID, "design.md", "", store.ErrTaskFileNotReadable}, // a sibling
+		{parent, uuid.New(), "x.md", "", store.ErrTaskFileNotReadable},
+	} {
+		body, err := read(c.task, c.owner, c.name)
+		if body != c.body || !errors.Is(err, c.err) || (err == nil) != (c.err == nil) {
+			t.Errorf("task %d reads %s of %s: %q %v, want %q %v", c.task.Number, c.name, c.owner, body, err, c.body, c.err)
+		}
+	}
+	if f, data, err := e.store.ReadTaskFileRange(ctx, parent.ID, c2.ID, "design.md", 5, 6); err != nil || string(data) != "design" || f.TaskID != c2.ID {
+		t.Fatalf("range of a subtask's file: %q %v", data, err)
+	}
+	if _, _, err := e.store.ReadTaskFileRange(ctx, parent.ID, grandchild.ID, "deep.md", 0, 10); !errors.Is(err, store.ErrTaskFileNotReadable) {
+		t.Fatalf("range of a grandchild's file: %v", err)
+	}
+
+	if nums, err := e.store.SubtasksWithFile(ctx, parent.ID, "design.md"); err != nil || fmt.Sprint(nums) != fmt.Sprint([]int64{c1.Number, c2.Number}) {
+		t.Fatalf("subtasks with design.md: %v %v", nums, err)
+	}
+	if nums, err := e.store.SubtasksWithFile(ctx, parent.ID, "deep.md"); err != nil || len(nums) != 0 {
+		t.Fatalf("a grandchild's file counted: %v %v", nums, err)
 	}
 }
 

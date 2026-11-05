@@ -774,8 +774,10 @@ export interface TaskFile {
   created_by: string;
   created_at: string;
   updated_at: string;
-  /** False for a file of a task above this one: readable here, changed only there. */
+  /** False for a file of a task above this one or of a subtask: readable here, changed only there. */
   own: boolean;
+  /** True for a file of a direct subtask; it is read by passing that task's id. */
+  subtask: boolean;
   /** Start of the first line; for a saved tool result, the tool and its arguments. */
   description: string;
 }

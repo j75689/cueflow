@@ -276,12 +276,12 @@ export const api = {
   runTask: (id: string) => request<Task>("POST", `/tasks/${id}/run`),
   cancelTask: (id: string) => request<Task>("POST", `/tasks/${id}/cancel`),
   taskRuns: (id: string) => request<AgentRun[]>("GET", `/tasks/${id}/runs`),
-  // A task's files: its own and its ancestors' (own: false), addressed by task and name.
+  // A task's files: its own, its ancestors' and its direct subtasks' (own: false), addressed by task and name.
   taskFiles: (id: string) => request<{ files: TaskFile[]; total: number }>("GET", `/tasks/${id}/files`),
-  taskFilePage: (id: string, name: string, offset = 0) =>
-    request<TaskFilePage>("GET", `/tasks/${id}/files/content`, undefined, { name, offset }),
+  taskFilePage: (id: string, name: string, offset = 0, owner?: string) =>
+    request<TaskFilePage>("GET", `/tasks/${id}/files/content`, undefined, { name, offset, task: owner }),
   deleteTaskFile: (id: string, name: string) => request<void>("DELETE", `/tasks/${id}/files`, undefined, { name }),
-  downloadTaskFile: (id: string, name: string) => downloadTaskFile(id, name),
+  downloadTaskFile: (id: string, name: string, owner?: string) => downloadTaskFile(id, name, owner),
 
   // usage
   usage: (q: { days: number; tz?: string }) =>
@@ -306,9 +306,10 @@ export function eventsURL(): string {
 }
 
 // downloadTaskFile saves a task file. The API needs the token header, which a plain link can't send,
-// so the file is fetched and handed to the browser as a download.
-async function downloadTaskFile(id: string, name: string): Promise<void> {
-  const res = await fetchApi("GET", `/tasks/${id}/files/download`, undefined, { name });
+// so the file is fetched and handed to the browser as a download. owner is the id of the subtask
+// the file belongs to, if it is a subtask's.
+async function downloadTaskFile(id: string, name: string, owner?: string): Promise<void> {
+  const res = await fetchApi("GET", `/tasks/${id}/files/download`, undefined, { name, task: owner });
   if (!res.ok) throw new ApiError(res.status, "http_error", `${res.status} ${res.statusText}`);
   saveBlob(await res.blob(), name.slice(name.lastIndexOf("/") + 1));
 }

@@ -386,6 +386,8 @@ func ErrorStatus(err error) (status int, code, msg string) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, "not_found", "not found"
+	case errors.Is(err, store.ErrTaskFileNotReadable):
+		return http.StatusForbidden, "forbidden", err.Error()
 	case errors.Is(err, store.ErrMediaInUse):
 		return http.StatusConflict, "in_use", "a deliverable that is not yet done or rejected still uses this media; remove it from the deliverable first"
 	case errors.Is(err, domain.ErrVersionConflict):

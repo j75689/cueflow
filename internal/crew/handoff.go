@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/j75689/cueflow/internal/llm"
 	"github.com/j75689/cueflow/internal/store"
 )
@@ -83,7 +85,7 @@ func (c *Crew) handOffOutcome(ctx context.Context, task *store.Task, a *store.Ag
 // handOffNote is the start of the task's own hand-off note (enough to quote) and the file's size, if
 // it has one that is text.
 func (c *Crew) handOffNote(ctx context.Context, task *store.Task) (string, int64, bool) {
-	f, rc, err := c.store.OpenTaskFile(ctx, task.ID, handOffFile)
+	f, rc, err := c.store.OpenTaskFile(ctx, task.ID, uuid.Nil, handOffFile)
 	if err != nil {
 		return "", 0, false
 	}

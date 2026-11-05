@@ -2,7 +2,8 @@
 
 // A task's files on its page: the Files card, the viewer, and links to a file from the thread.
 // Files are the agent's working storage (its notes, and tool results too long for the conversation).
-// A task lists its own files and the ones of the tasks above it, which it can read but not change.
+// A task lists its own files, the ones of the tasks above it and the ones of its direct subtasks,
+// which it can read but not change.
 
 import {
   createContext,
@@ -31,16 +32,30 @@ import { fmtRelative, fmtTime } from "@/lib/format";
 import { useAsync } from "@/lib/hooks";
 import type { TaskFile, TaskFilePage } from "@/lib/types";
 
-const FileViewerCtx = createContext<((name: string) => void) | null>(null);
+/** Opens a file in the viewer; owner is the id of the subtask it belongs to, for a subtask's file. */
+type OpenFile = (name: string, owner?: string) => void;
+
+const FileViewerCtx = createContext<OpenFile | null>(null);
 
 /** Wraps a task's page (the task is ?id=) so anything on it can open one of the task's files by name. */
 export function TaskFilesProvider({ children }: { children: ReactNode }) {
   const taskId = useSearchParams().get("id") ?? "";
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<{ name: string; owner?: string } | null>(
+    null,
+  );
+  const openFile = useCallback<OpenFile>(
+    (name, owner) => setOpen({ name, owner }),
+    [],
+  );
   return (
-    <FileViewerCtx.Provider value={setOpen}>
+    <FileViewerCtx.Provider value={openFile}>
       {children}
-      <FileViewer taskId={taskId} name={open} onClose={() => setOpen(null)} />
+      <FileViewer
+        taskId={taskId}
+        name={open?.name ?? null}
+        owner={open?.owner}
+        onClose={() => setOpen(null)}
+      />
     </FileViewerCtx.Provider>
   );
 }
@@ -110,7 +125,7 @@ export function TaskFilesCard({ taskId }: { taskId: string }) {
     <Card>
       <CardHeader
         title="Files"
-        subtitle="The agent's notes and saved tool results. Files of tasks above this one are marked."
+        subtitle="The agent's notes and saved tool results. Files of tasks above this one and of subtasks are marked."
       />
       {files.loading && !files.data ? (
         <Loading />
@@ -128,21 +143,31 @@ export function TaskFilesCard({ taskId }: { taskId: string }) {
               <div className="flex min-w-0 items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => open?.(f.name)}
+                  onClick={() =>
+                    open?.(f.name, f.subtask ? f.task_id : undefined)
+                  }
                   className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-fg hover:text-accent hover:underline"
                   title={f.name}
                 >
                   {f.name}
                 </button>
                 {f.name === "handoff.md" && f.own && <Pill>hand-off</Pill>}
-                {!f.own && <Pill>from #{f.task_number}</Pill>}
+                {f.subtask ? (
+                  <Pill>from subtask #{f.task_number}</Pill>
+                ) : (
+                  !f.own && <Pill>from #{f.task_number}</Pill>
+                )}
                 <button
                   type="button"
                   aria-label={`Download ${f.name}`}
                   title="Download"
                   onClick={() =>
                     api
-                      .downloadTaskFile(taskId, f.name)
+                      .downloadTaskFile(
+                        taskId,
+                        f.name,
+                        f.subtask ? f.task_id : undefined,
+                      )
                       .catch((e) => toast.error(e))
                   }
                   className="shrink-0 rounded p-0.5 text-fg-3 hover:bg-subtle hover:text-fg"
@@ -189,10 +214,12 @@ export function TaskFilesCard({ taskId }: { taskId: string }) {
 function FileViewer({
   taskId,
   name,
+  owner,
   onClose,
 }: {
   taskId: string;
   name: string | null;
+  owner?: string;
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -210,7 +237,7 @@ function FileViewer({
       setLoading(true);
       setError(null);
       try {
-        const page = await api.taskFilePage(taskId, name, offset);
+        const page = await api.taskFilePage(taskId, name, offset, owner);
         if (mine !== seq.current) return;
         setPages((ps) => (offset === 0 ? [page] : [...ps, page]));
       } catch (e) {
@@ -220,7 +247,7 @@ function FileViewer({
         if (mine === seq.current) setLoading(false);
       }
     },
-    [taskId, name],
+    [taskId, name, owner],
   );
   useEffect(() => {
     seq.current++;
@@ -251,7 +278,9 @@ function FileViewer({
             <Button
               size="sm"
               onClick={() =>
-                api.downloadTaskFile(taskId, name).catch((e) => toast.error(e))
+                api
+                  .downloadTaskFile(taskId, name, owner)
+                  .catch((e) => toast.error(e))
               }
             >
               <Icon name="down" className="h-3.5 w-3.5" /> Download
