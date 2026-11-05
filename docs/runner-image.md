@@ -156,9 +156,11 @@ stops, it does the same for any job it could not clean up.
   too, and no log line mentions it.
 - A process that has exited still has to be waited for by its parent. When its parent is gone, that is PID 1. In the
   runner image PID 1 is [tini](https://github.com/krallin/tini), which does that. You don't need `init: true` in
-  compose (keeping it does no harm). If you start the image with `--entrypoint`, or run `cueflow runner run` as PID 1
-  in an image of your own, add an init yourself (`init: true`, `docker run --init`). Otherwise those processes stay
-  zombies until the container hits its pids limit and agents can no longer start.
+  compose. If you keep it, tini runs as PID 2 under Docker's init and registers as a child subreaper
+  (`TINI_SUBREAPER` is set in the image), so reaping still works and tini prints no warning. If you start the image
+  with `--entrypoint`, or run `cueflow runner run` as PID 1 in an image of your own, add an init yourself
+  (`init: true`, `docker run --init`). Otherwise those processes stay zombies until the container hits its pids limit
+  and agents can no longer start.
 
 ## What stays the same
 

@@ -62,6 +62,7 @@ ENTRYPOINT ["/usr/local/bin/cueflow"]
 #    nothing else of the host: the work directory and the runner credentials are volumes.
 #    RUNNER_EXTRA_PACKAGES adds Debian packages (space-separated) for agents that need a tool or two.
 #    tini is PID 1: it reaps the orphans agents leave behind, which would otherwise stay zombies.
+#    TINI_SUBREAPER lets it reap as PID 2 too, under `init: true`, instead of warning that it can't.
 FROM agents AS runner
 ARG RUNNER_EXTRA_PACKAGES=""
 USER root
@@ -71,7 +72,7 @@ RUN apt-get update \
  && git config --system credential.helper '!gh auth git-credential' \
  && git config --system --add safe.directory '*' \
  && mkdir -p /work /config && chown nonroot:nonroot /work /config
-ENV CUEFLOW_RUNNER_CONFIG=/config/runner.json
+ENV CUEFLOW_RUNNER_CONFIG=/config/runner.json TINI_SUBREAPER=1
 WORKDIR /work
 USER nonroot:nonroot
 HEALTHCHECK NONE
