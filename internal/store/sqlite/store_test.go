@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,5 +45,21 @@ func TestTxRollsBackOnPanic(t *testing.T) {
 	var n int
 	if err := s.Reader().QueryRow(ctx, "SELECT count(*) FROM clock WHERE name IN ('a', 'b')").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("rows: %d %v (the panicking insert must be rolled back)", n, err)
+	}
+}
+
+// The max(seq) + 1 on insert reads an index, not the whole table.
+func TestNextSeqUsesIndex(t *testing.T) {
+	s := openTest(t)
+	for _, table := range []string{"task_messages", "deliverable_audit_logs"} {
+		var id, parent, unused int
+		var plan string
+		if err := s.Reader().QueryRow(context.Background(), "EXPLAIN QUERY PLAN SELECT COALESCE(max(seq), 0) + 1 FROM "+table).
+			Scan(&id, &parent, &unused, &plan); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(plan, "idx_"+table+"_seq") {
+			t.Errorf("%s: %s", table, plan)
+		}
 	}
 }

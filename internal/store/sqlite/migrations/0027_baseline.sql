@@ -144,6 +144,7 @@ CREATE TABLE task_messages (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now'))
 );
 CREATE INDEX idx_task_messages_task ON task_messages (task_id, seq);
+CREATE INDEX idx_task_messages_seq ON task_messages (seq); -- the max(seq) + 1 on insert
 
 CREATE TABLE agent_runs (
     id                 TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
@@ -325,6 +326,7 @@ CREATE TABLE deliverable_audit_logs (
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now'))
 );
 CREATE INDEX idx_deliverable_audit_logs_item ON deliverable_audit_logs (deliverable_id, seq);
+CREATE INDEX idx_deliverable_audit_logs_seq ON deliverable_audit_logs (seq); -- the max(seq) + 1 on insert
 
 CREATE TABLE source_items (
     id           TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
