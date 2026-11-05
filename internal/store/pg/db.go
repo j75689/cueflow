@@ -1,5 +1,4 @@
-// Package db opens the PostgreSQL pool and applies embedded migrations.
-package db
+package pg
 
 import (
 	"context"

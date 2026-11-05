@@ -1,4 +1,4 @@
-package store
+package pg
 
 import (
 	"bytes"
@@ -80,9 +80,10 @@ type storedBytes struct {
 	Kind string
 }
 
-// dropAllBytes deletes the blobs of rows being deleted in a transaction; an error should roll it
-// back so no row is lost while its bytes remain. A backend that is no longer configured is skipped:
-// nothing this process can delete there, and refusing would make the rows impossible to remove.
+// dropAllBytes deletes the blobs of rows that are already gone: callers commit the delete first, so
+// no transaction stays open on the blob store. A blob that can't be deleted is left behind and the
+// error names its file. A backend that is no longer configured is skipped: nothing this process can
+// delete there.
 func (s *Store) dropAllBytes(ctx context.Context, files []storedBytes) error {
 	var errs []error
 	for _, f := range files {
@@ -90,14 +91,10 @@ func (s *Store) dropAllBytes(ctx context.Context, files []storedBytes) error {
 			continue
 		}
 		if err := s.dropBytes(ctx, f.Kind, f.ID); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("file %s: %w", f.ID, err))
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%d of %d files' bytes could not be deleted, so the rows were kept; try again: %w",
-			len(errs), len(files), errors.Join(errs...))
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 type nopCloser struct{ *bytes.Reader }

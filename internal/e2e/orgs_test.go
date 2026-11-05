@@ -2,8 +2,10 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/j75689/cueflow/internal/domain"
 	"github.com/j75689/cueflow/internal/store"
 )
 
@@ -105,5 +107,36 @@ func TestOrgsIsolateBoards(t *testing.T) {
 
 	if _, err := e.store.GetTaskByNumber(ctx, dev.ID, 2); err != nil {
 		t.Fatalf("task #2 in dev org: %v", err)
+	}
+}
+
+// A taken slug and an org that still has rows come back as the domain errors (ErrConflict,
+// ErrReferenced) and still as caller errors, which the API answers with 400.
+func TestStoreConflictAndReferencedErrors(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	org, err := e.store.CreateOrg(ctx, &store.Org{Name: "Dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ve *store.ValidationError
+	if _, err := e.store.CreateOrg(ctx, &store.Org{Name: "Dev again", Slug: org.Slug}); !errors.Is(err, domain.ErrConflict) || !errors.As(err, &ve) {
+		t.Fatalf("duplicate org slug: %v", err)
+	}
+	if _, err := e.store.CreateAgent(ctx, &store.Agent{OrgID: org.ID, Name: "Coder"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.store.CreateAgent(ctx, &store.Agent{OrgID: org.ID, Name: "Coder"})
+	if !errors.Is(err, domain.ErrConflict) || !errors.As(err, &ve) || err.Error() != "another agent in this org already uses this slug" {
+		t.Fatalf("duplicate agent slug: %v", err)
+	}
+	if _, err := e.store.CreateTask(ctx, store.NewTask{OrgID: org.ID, Title: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.DeleteOrg(ctx, org.ID); !errors.Is(err, domain.ErrReferenced) || !errors.As(err, &ve) {
+		t.Fatalf("delete an org with tasks: %v", err)
+	}
+	if code := e.do("DELETE", "/orgs/"+org.ID.String(), nil, nil); code != 400 {
+		t.Fatalf("delete an org with tasks over the API: %d", code)
 	}
 }

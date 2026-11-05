@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/j75689/cueflow/internal/store"
+	storepg "github.com/j75689/cueflow/internal/store/pg"
 )
 
 // An org's agent_concurrency (CUEFLOW_AGENT_CONCURRENCY when unset) caps the tasks the crew works for it,
@@ -188,7 +189,7 @@ func TestOrgAgentConcurrencyClaimersTakeTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer holder.Rollback(ctx)
-	if err := store.LockOrgClaims(ctx, holder, []uuid.UUID{org.ID}); err != nil {
+	if err := storepg.TestLockOrgClaims(ctx, holder, []uuid.UUID{org.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := holder.Exec(ctx, `UPDATE tasks SET status='IN_PROGRESS', lease_until=NOW() + interval '1 hour' WHERE id = ANY($1)`,

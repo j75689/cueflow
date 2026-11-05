@@ -37,9 +37,10 @@ import (
 	"github.com/j75689/cueflow/internal/config"
 	_ "github.com/j75689/cueflow/internal/connectors/all"
 	"github.com/j75689/cueflow/internal/content"
+	contentpg "github.com/j75689/cueflow/internal/content/pg"
 	"github.com/j75689/cueflow/internal/crew"
-	"github.com/j75689/cueflow/internal/db"
 	"github.com/j75689/cueflow/internal/deliverable"
+	deliverablepg "github.com/j75689/cueflow/internal/deliverable/pg"
 	"github.com/j75689/cueflow/internal/events"
 	"github.com/j75689/cueflow/internal/events/pg"
 	"github.com/j75689/cueflow/internal/events/pubsub"
@@ -52,6 +53,7 @@ import (
 	"github.com/j75689/cueflow/internal/scheduler"
 	"github.com/j75689/cueflow/internal/secret"
 	"github.com/j75689/cueflow/internal/store"
+	storepg "github.com/j75689/cueflow/internal/store/pg"
 	"github.com/j75689/cueflow/internal/version"
 )
 
@@ -118,15 +120,15 @@ func migrate() error {
 
 // openDB opens the main pool: for a transaction-mode pooler when a session URL is set.
 func openDB(ctx context.Context, cfg *config.Config, maxConns int) (*pgxpool.Pool, error) {
-	return db.OpenWith(ctx, cfg.DatabaseURL, db.Options{MaxConns: maxConns, TxPooler: cfg.DatabaseSessionURL != ""})
+	return storepg.OpenWith(ctx, cfg.DatabaseURL, storepg.Options{MaxConns: maxConns, TxPooler: cfg.DatabaseSessionURL != ""})
 }
 
 // migrateDB migrates through the session URL when there is one (the migration lock needs a session).
 func migrateDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 	if cfg.DatabaseSessionURL != "" {
-		return db.MigrateSession(ctx, cfg.DatabaseSessionURL)
+		return storepg.MigrateSession(ctx, cfg.DatabaseSessionURL)
 	}
-	return db.Migrate(ctx, pool)
+	return storepg.Migrate(ctx, pool)
 }
 
 // dropEmptyCredentialEnv unsets credential variables that are present but empty. docker compose
@@ -172,15 +174,16 @@ func serve() error {
 	if box.HasPrevious() {
 		logger.Info("secret key rotation in progress: previous keys accepted for reading; run `cueflow rotate-key`, then remove CUEFLOW_SECRET_KEY_PREVIOUS")
 	}
-	st := store.New(pool, box)
+	st := storepg.New(pool, box)
 	blobs, err := blob.Parse(cfg.MediaStorage)
 	if err != nil {
 		return err
 	}
 	st.SetBlobs(blobs)
+	st.SetMediaUse(deliverablepg.New(st)) // whether or not the module is mounted: its rows stay
 	// "Everything running is stale" is only true when this is the one process. In the cloud, other
 	// instances own live work and the clock's lease-based cleanup (FailAbandoned) does the job.
-	cs := content.NewStore(st)
+	cs := contentpg.New(st)
 	broker := events.NewBroker()
 	closeEvents := func() {}
 	if cfg.Events == "pubsub" {
@@ -213,7 +216,7 @@ func serve() error {
 	}
 	if cfg.Enabled("deliverables") {
 		// Typed items any agent can produce, reviewed by a human, then acted on.
-		ds := deliverable.NewStore(st)
+		ds := deliverablepg.New(st)
 		deliverer := deliverable.NewWorker(ds, h, broker, logger, cfg.DispatchEvery, cfg.DispatchLease, cfg.PublishTimeout)
 		deliverableModule := &deliverable.Module{Store: ds, Hub: h, Broker: broker, Dispatcher: deliverer, Logger: logger}
 		deliverableModule.Attach()
@@ -434,7 +437,7 @@ func rotateKey(dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	rep, err := store.New(pool, box).ReencryptConnectorSecrets(ctx, dryRun)
+	rep, err := storepg.New(pool, box).ReencryptConnectorSecrets(ctx, dryRun)
 	verb := "re-encrypted"
 	if dryRun {
 		verb = "would re-encrypt"
@@ -473,12 +476,13 @@ func mediaCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	st := store.New(pool, box)
+	st := storepg.New(pool, box)
 	cur, err := blob.Parse(cfg.MediaStorage)
 	if err != nil {
 		return err
 	}
 	st.SetBlobs(cur) // rows already moved elsewhere stay readable only through the configured backend
+	st.SetMediaUse(deliverablepg.New(st))
 
 	switch args[0] {
 	case "migrate":

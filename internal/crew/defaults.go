@@ -29,7 +29,7 @@ func DefaultAgents() []*store.Agent {
 }
 
 // SeedDefaults creates the starter team in an org that has no agents yet.
-func SeedDefaults(ctx context.Context, st *store.Store, org uuid.UUID) (int, error) {
+func SeedDefaults(ctx context.Context, st store.Backend, org uuid.UUID) (int, error) {
 	n, err := st.CountAgents(ctx, org)
 	if err != nil || n > 0 {
 		return 0, err

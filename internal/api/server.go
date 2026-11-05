@@ -32,7 +32,7 @@ import (
 )
 
 type Server struct {
-	Store      *store.Store
+	Store      store.Backend
 	Hub        *hub.Hub
 	Broker     *events.Broker
 	Scheduler  *scheduler.Scheduler

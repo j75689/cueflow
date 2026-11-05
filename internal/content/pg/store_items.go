@@ -1,4 +1,4 @@
-package content
+package pg
 
 import (
 	"context"
@@ -8,25 +8,13 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/j75689/cueflow/internal/connector"
+	"github.com/j75689/cueflow/internal/content"
 )
-
-type SourceItem struct {
-	ID          uuid.UUID  `json:"id"`
-	ConnectorID uuid.UUID  `json:"connector_id"`
-	ExternalID  string     `json:"external_id"`
-	Title       string     `json:"title"`
-	URL         string     `json:"url"`
-	Author      string     `json:"author"`
-	Content     string     `json:"content"`
-	PublishedAt *time.Time `json:"published_at"`
-	FetchedAt   time.Time  `json:"fetched_at"`
-	ConsumedAt  *time.Time `json:"consumed_at"`
-}
 
 const itemColumns = `id, connector_id, external_id, title, url, author, content, published_at, fetched_at, consumed_at`
 
-func scanItem(row pgx.Row) (*SourceItem, error) {
-	var it SourceItem
+func scanItem(row pgx.Row) (*content.SourceItem, error) {
+	var it content.SourceItem
 	err := row.Scan(&it.ID, &it.ConnectorID, &it.ExternalID, &it.Title, &it.URL, &it.Author, &it.Content,
 		&it.PublishedAt, &it.FetchedAt, &it.ConsumedAt)
 	return &it, err
@@ -62,7 +50,7 @@ func (s *Store) InsertItems(ctx context.Context, connectorID uuid.UUID, items []
 
 // UnconsumedItems returns items from the given sources fetched since `since` that no pipeline run
 // has used yet, newest first.
-func (s *Store) UnconsumedItems(ctx context.Context, connectorIDs []uuid.UUID, since time.Time, limit int) ([]*SourceItem, error) {
+func (s *Store) UnconsumedItems(ctx context.Context, connectorIDs []uuid.UUID, since time.Time, limit int) ([]*content.SourceItem, error) {
 	if len(connectorIDs) == 0 {
 		return nil, nil
 	}
@@ -73,7 +61,7 @@ func (s *Store) UnconsumedItems(ctx context.Context, connectorIDs []uuid.UUID, s
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*SourceItem
+	var out []*content.SourceItem
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
@@ -92,7 +80,7 @@ func (s *Store) MarkItemsConsumed(ctx context.Context, ids []uuid.UUID) error {
 	return err
 }
 
-func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int) ([]*SourceItem, error) {
+func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int) ([]*content.SourceItem, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -102,7 +90,7 @@ func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int)
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*SourceItem{}
+	out := []*content.SourceItem{}
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
@@ -115,7 +103,7 @@ func (s *Store) ListItems(ctx context.Context, connectorID uuid.UUID, limit int)
 
 // SearchItems finds collected source items by keyword (title/content), newest first. Empty
 // connectorIDs searches every source.
-func (s *Store) SearchItems(ctx context.Context, connectorIDs []uuid.UUID, query string, since time.Time, limit int) ([]*SourceItem, error) {
+func (s *Store) SearchItems(ctx context.Context, connectorIDs []uuid.UUID, query string, since time.Time, limit int) ([]*content.SourceItem, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
@@ -128,7 +116,7 @@ func (s *Store) SearchItems(ctx context.Context, connectorIDs []uuid.UUID, query
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*SourceItem
+	var out []*content.SourceItem
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {

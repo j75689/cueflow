@@ -1,42 +1,21 @@
-package store
+package pg
 
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
-
-// ToolApproval is an agent's call to an "ask" tool, waiting for or decided by a human.
-type ToolApproval struct {
-	ID          uuid.UUID  `json:"id"`
-	TaskID      uuid.UUID  `json:"task_id"`
-	AgentID     *uuid.UUID `json:"agent_id"`
-	ConnectorID *uuid.UUID `json:"connector_id"`
-	ServerName  string     `json:"server_name"`
-	Tool        string     `json:"tool"`
-	// CalledAs is the name the agent called the tool by (sanitized and deduplicated by the crew).
-	CalledAs string `json:"called_as"`
-	// ResultFile is the task file a long result was saved to, or "".
-	ResultFile string          `json:"result_file"`
-	Arguments  json.RawMessage `json:"arguments"`
-	Status     string          `json:"status"` // pending | approved | rejected
-	Result     string          `json:"result"`
-	IsError    bool            `json:"is_error"`
-	Note       string          `json:"note"`
-	CreatedAt  time.Time       `json:"created_at"`
-	DecidedAt  *time.Time      `json:"decided_at"`
-}
 
 const approvalColumns = `id, task_id, agent_id, connector_id, server_name, tool, arguments, status, result, is_error,
 	note, created_at, decided_at, called_as, result_file`
 
-func scanApproval(row pgx.Row) (*ToolApproval, error) {
-	var a ToolApproval
+func scanApproval(row pgx.Row) (*store.ToolApproval, error) {
+	var a store.ToolApproval
 	if err := row.Scan(&a.ID, &a.TaskID, &a.AgentID, &a.ConnectorID, &a.ServerName, &a.Tool, &a.Arguments, &a.Status,
 		&a.Result, &a.IsError, &a.Note, &a.CreatedAt, &a.DecidedAt, &a.CalledAs, &a.ResultFile); err != nil {
 		return nil, NotFound(err)
@@ -44,7 +23,7 @@ func scanApproval(row pgx.Row) (*ToolApproval, error) {
 	return &a, nil
 }
 
-func (s *Store) CreateToolApproval(ctx context.Context, a *ToolApproval) (*ToolApproval, error) {
+func (s *Store) CreateToolApproval(ctx context.Context, a *store.ToolApproval) (*store.ToolApproval, error) {
 	if len(a.Arguments) == 0 {
 		a.Arguments = json.RawMessage(`{}`)
 	}
@@ -53,17 +32,17 @@ func (s *Store) CreateToolApproval(ctx context.Context, a *ToolApproval) (*ToolA
 		a.TaskID, a.AgentID, a.ConnectorID, a.ServerName, a.Tool, a.Arguments, a.CalledAs))
 }
 
-func (s *Store) GetToolApproval(ctx context.Context, id uuid.UUID) (*ToolApproval, error) {
+func (s *Store) GetToolApproval(ctx context.Context, id uuid.UUID) (*store.ToolApproval, error) {
 	return scanApproval(s.pool.QueryRow(ctx, `SELECT `+approvalColumns+` FROM tool_approvals WHERE id=$1`, id))
 }
 
-func (s *Store) ListToolApprovals(ctx context.Context, taskID uuid.UUID) ([]*ToolApproval, error) {
+func (s *Store) ListToolApprovals(ctx context.Context, taskID uuid.UUID) ([]*store.ToolApproval, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+approvalColumns+` FROM tool_approvals WHERE task_id=$1 ORDER BY created_at`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*ToolApproval{}
+	out := []*store.ToolApproval{}
 	for rows.Next() {
 		a, err := scanApproval(rows)
 		if err != nil {

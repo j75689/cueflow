@@ -1,4 +1,4 @@
-package store
+package pg
 
 import (
 	"context"
@@ -11,37 +11,17 @@ import (
 
 	"github.com/j75689/cueflow/internal/blob"
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
 
-// Media is an image CueFlow stores itself (uploaded or generated).
-type Media struct {
-	ID          uuid.UUID  `json:"id"`
-	MimeType    string     `json:"mime_type"`
-	SizeBytes   int        `json:"size_bytes"`
-	Source      string     `json:"source"` // upload | generated
-	Prompt      string     `json:"prompt"`
-	ConnectorID *uuid.UUID `json:"connector_id"`
-	CreatedBy   string     `json:"created_by"`
-	Data        []byte     `json:"-"`
-}
-
-type NewMedia struct {
-	MimeType    string
-	Data        []byte
-	Source      string
-	Prompt      string
-	ConnectorID *uuid.UUID
-	CreatedBy   string
-}
-
-func (s *Store) CreateMedia(ctx context.Context, in NewMedia) (*Media, error) {
+func (s *Store) CreateMedia(ctx context.Context, in store.NewMedia) (*store.Media, error) {
 	if len(in.Data) == 0 {
-		return nil, Invalid("image is empty")
+		return nil, store.Invalid("image is empty")
 	}
 	if in.CreatedBy == "" {
 		in.CreatedBy = "human"
 	}
-	m := &Media{MimeType: in.MimeType, SizeBytes: len(in.Data), Source: in.Source, Prompt: in.Prompt,
+	m := &store.Media{MimeType: in.MimeType, SizeBytes: len(in.Data), Source: in.Source, Prompt: in.Prompt,
 		ConnectorID: in.ConnectorID, CreatedBy: in.CreatedBy}
 	m.ID = uuid.New()
 	kind, row, err := s.putBytes(ctx, m.ID, in.Data)
@@ -59,8 +39,8 @@ func (s *Store) CreateMedia(ctx context.Context, in NewMedia) (*Media, error) {
 }
 
 // getMedia reads a row. Bytes are loaded only when withData is set and they live in the database.
-func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*Media, string, error) {
-	m := &Media{ID: id}
+func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*store.Media, string, error) {
+	m := &store.Media{ID: id}
 	var kind string
 	q := `SELECT mime_type, size_bytes, source, prompt, connector_id, created_by, storage`
 	dest := []any{&m.MimeType, &m.SizeBytes, &m.Source, &m.Prompt, &m.ConnectorID, &m.CreatedBy, &kind}
@@ -75,7 +55,7 @@ func (s *Store) getMedia(ctx context.Context, id uuid.UUID, withData bool) (*Med
 }
 
 // GetMedia returns an image with its bytes.
-func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*Media, error) {
+func (s *Store) GetMedia(ctx context.Context, id uuid.UUID) (*store.Media, error) {
 	m, kind, err := s.getMedia(ctx, id, true)
 	if err != nil {
 		return nil, err
@@ -116,7 +96,7 @@ func (s *Store) MediaRedirect(ctx context.Context, id uuid.UUID, ttl time.Durati
 
 // OpenMedia returns the image's metadata and a seekable stream of its bytes (for Range requests).
 // The caller closes the stream.
-func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*Media, io.ReadSeekCloser, error) {
+func (s *Store) OpenMedia(ctx context.Context, id uuid.UUID) (*store.Media, io.ReadSeekCloser, error) {
 	m, kind, err := s.getMedia(ctx, id, false)
 	if err != nil {
 		return nil, nil, err
@@ -185,38 +165,30 @@ func (s *Store) MigrateMedia(ctx context.Context, dst blob.Store) (int, error) {
 	return moved, nil
 }
 
-// ErrMediaInUse means a deliverable that is still going to be reviewed or acted on uses the media.
-var ErrMediaInUse = errors.New("media is used by a deliverable that is not finished")
-
-// inUseSQL is true when some unfinished deliverable (anything but DONE or REJECTED: a FAILED one can
-// be retried) refers to the media with id $1, as "/media/<id>" or an absolute URL ending the same way.
-const inUseSQL = `SELECT EXISTS (SELECT 1 FROM deliverables d
-	WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || $1::text || '%')`
-
 // AdoptMedia takes over a file a trusted writer left in the bucket's staging area: it checks what
 // the file is (validate gets its first bytes and size, and returns the MIME type), moves it into the
 // media store and records it. The bytes never pass through this process.
-func (s *Store) AdoptMedia(ctx context.Context, staged, createdBy string, validate func(head []byte, size int64) (string, error)) (*Media, error) {
+func (s *Store) AdoptMedia(ctx context.Context, staged, createdBy string, validate func(head []byte, size int64) (string, error)) (*store.Media, error) {
 	a, ok := s.blobs.(blob.Adopter)
 	if !ok {
-		return nil, Invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
+		return nil, store.Invalid("this server does not keep media in Google Cloud Storage, so there is nothing to adopt")
 	}
 	st, err := a.Stat(ctx, staged)
 	if errors.Is(err, blob.ErrNotFound) {
-		return nil, Invalid("no such staged file: " + staged)
+		return nil, store.Invalid("no such staged file: " + staged)
 	}
 	if err != nil {
-		return nil, Invalid(err.Error())
+		return nil, store.Invalid(err.Error())
 	}
 	mt, err := validate(st.Head, st.Size)
 	if err != nil {
-		return nil, Invalid(err.Error())
+		return nil, store.Invalid(err.Error())
 	}
 	id := uuid.New()
 	if err := a.Adopt(ctx, staged, id.String()); err != nil {
 		return nil, err
 	}
-	m := &Media{ID: id, MimeType: mt, SizeBytes: int(st.Size), Source: "upload", CreatedBy: createdBy}
+	m := &store.Media{ID: id, MimeType: mt, SizeBytes: int(st.Size), Source: "upload", CreatedBy: createdBy}
 	_, err = s.pool.Exec(ctx, `INSERT INTO media (id, mime_type, data, size_bytes, source, prompt, created_by, storage)
 		VALUES ($1,$2,NULL,$3,$4,'',$5,$6)`, id, mt, st.Size, m.Source, createdBy, s.blobs.Kind())
 	if err != nil {
@@ -233,12 +205,12 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	var used bool
-	if err := s.pool.QueryRow(ctx, inUseSQL, id.String()).Scan(&used); err != nil {
+	used, err := s.mediaInUse(ctx, id)
+	if err != nil {
 		return err
 	}
 	if used {
-		return ErrMediaInUse
+		return store.ErrMediaInUse
 	}
 	if _, err := s.pool.Exec(ctx, `DELETE FROM media WHERE id=$1`, id); err != nil {
 		return err
@@ -257,35 +229,52 @@ func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
 func (s *Store) PruneMedia(ctx context.Context, olderThan time.Duration, dryRun bool) (int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT m.id FROM media m
 		WHERE m.created_at < NOW() - make_interval(secs => $1)
-		  AND NOT EXISTS (SELECT 1 FROM deliverables d
-			WHERE d.status NOT IN ('DONE','REJECTED') AND d.payload::text LIKE '%/media/' || m.id::text || '%')
 		ORDER BY m.created_at`, olderThan.Seconds())
 	if err != nil {
 		return 0, err
 	}
-	var ids []uuid.UUID
+	var old []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		ids = append(ids, id)
+		old = append(old, id)
 	}
 	rows.Close()
-	if err := rows.Err(); err != nil || dryRun {
-		return len(ids), err
+	if err := rows.Err(); err != nil {
+		return 0, err
 	}
 	n := 0
-	for _, id := range ids {
+	for _, id := range old {
+		if dryRun {
+			used, err := s.mediaInUse(ctx, id)
+			if err != nil {
+				return 0, err
+			}
+			if !used {
+				n++
+			}
+			continue
+		}
+		// DeleteMedia checks the use itself, so each item is checked once.
 		switch err := s.DeleteMedia(ctx, id); {
 		case err == nil:
 			n++
-		case errors.Is(err, ErrMediaInUse), errors.Is(err, domain.ErrNotFound):
+		case errors.Is(err, store.ErrMediaInUse), errors.Is(err, domain.ErrNotFound):
 			// became used, or already gone, since the list was read
 		default:
 			return n, err
 		}
 	}
 	return n, nil
+}
+
+// mediaInUse asks the injected MediaUse whether media id is still used; without one nothing is.
+func (s *Store) mediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
+	if s.mediaUse == nil {
+		return false, nil
+	}
+	return s.mediaUse.MediaInUse(ctx, id)
 }

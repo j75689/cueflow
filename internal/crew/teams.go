@@ -120,7 +120,7 @@ func TeamFromAgents(name string, agents []*store.Agent) Team {
 // ApplyTeam creates the template's agents in org, skipping the slugs the org already has (so
 // importing a template twice, or over a hand-made team, adds only what is missing). It returns the
 // created agents and the skipped slugs.
-func ApplyTeam(ctx context.Context, st *store.Store, org uuid.UUID, t Team) ([]*store.Agent, []string, error) {
+func ApplyTeam(ctx context.Context, st store.Backend, org uuid.UUID, t Team) ([]*store.Agent, []string, error) {
 	if err := t.Validate(); err != nil {
 		return nil, nil, err
 	}

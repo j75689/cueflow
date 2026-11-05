@@ -44,7 +44,7 @@ CI runs the same checks plus a Docker build and a secret scan (gitleaks).
 - **Secrets stay encrypted.** Anything a connector stores goes through `internal/secret`.
 - **Private addresses stay private.** `read_url`, sources and connectors must keep refusing internal
   hosts unless the operator opts in explicitly.
-- **Migrations are append-only.** Add `internal/db/migrations/000N_*.sql`; never edit a shipped one.
+- **Migrations are append-only.** Add `internal/store/pg/migrations/000N_*.sql`; never edit a shipped one.
 
 ## Style
 

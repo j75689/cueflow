@@ -29,7 +29,7 @@ func register() {
 // rules, publishing through a publisher connector), the material source connectors collect, the
 // accounts publishers offer, and the agents' tools for both.
 type Module struct {
-	Store  *Store
+	Store  Store
 	Hub    *hub.Hub
 	Broker *events.Broker
 	Logger *slog.Logger

@@ -115,7 +115,7 @@ func (c *Crew) AgentMCPServer(a *store.Agent) *mcp.Server {
 				return err.Error(), true
 			}
 			// Tag the run now so an interrupted one is recognizable as self-driven.
-			_, _ = c.store.Pool().Exec(ctx, `UPDATE agent_runs SET runtime='external', connector_id=$2 WHERE id=$1`, run.ID, a.RuntimeConnectorID)
+			_ = c.store.MarkRunExternal(ctx, run.ID, a.RuntimeConnectorID)
 			c.broker.Publish(task.OrgID, "task.updated", map[string]any{"id": task.ID, "status": task.Status})
 			c.system(ctx, task.ID, fmt.Sprintf("%s claimed the task.", a.Name))
 			team, _ := c.store.ListAgents(ctx, task.OrgID)

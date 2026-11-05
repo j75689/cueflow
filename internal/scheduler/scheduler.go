@@ -93,7 +93,7 @@ type periodic struct {
 }
 
 type Scheduler struct {
-	store  *store.Store
+	store  store.Backend
 	logger *slog.Logger
 
 	// Queue, when set, receives due work (cloud deployment); otherwise Tick runs it inline.
@@ -115,7 +115,7 @@ type Scheduler struct {
 	schedules map[uuid.UUID]cron.EntryID
 }
 
-func New(st *store.Store, logger *slog.Logger) *Scheduler {
+func New(st store.Backend, logger *slog.Logger) *Scheduler {
 	return &Scheduler{store: st, logger: logger.With("component", "scheduler"),
 		entries: map[jobs.Kind]map[uuid.UUID]cron.EntryID{}, schedules: map[uuid.UUID]cron.EntryID{}}
 }

@@ -1,102 +1,11 @@
-package store
+package pg
 
 import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/j75689/cueflow/internal/store"
 )
-
-type UsageTotals struct {
-	Runs           int64 `json:"runs"`
-	FailedRuns     int64 `json:"failed_runs"`
-	InputTokens    int64 `json:"input_tokens"`
-	OutputTokens   int64 `json:"output_tokens"`
-	ToolCalls      int64 `json:"tool_calls"`
-	UnreportedRuns int64 `json:"unreported_runs"`
-	// CacheReadTokens and CacheWriteTokens are the parts of InputTokens read from and written to the
-	// providers' prompt caches.
-	CacheReadTokens  int64 `json:"cache_read_tokens"`
-	CacheWriteTokens int64 `json:"cache_write_tokens"`
-}
-
-type UsageDay struct {
-	Date             string `json:"date"`
-	Runs             int64  `json:"runs"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-}
-
-type UsageSource struct {
-	Source           string `json:"source"`
-	Runs             int64  `json:"runs"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-}
-
-type UsageAgent struct {
-	AgentID          uuid.UUID `json:"agent_id"`
-	Name             string    `json:"name"`
-	Avatar           string    `json:"avatar"`
-	Slug             string    `json:"slug"`
-	Runs             int64     `json:"runs"`
-	InputTokens      int64     `json:"input_tokens"`
-	OutputTokens     int64     `json:"output_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-}
-
-type UsageModel struct {
-	ConnectorID      *uuid.UUID `json:"connector_id"`
-	ConnectorName    string     `json:"connector_name"`
-	ConnectorType    string     `json:"connector_type"`
-	Runtime          string     `json:"runtime"`
-	Model            string     `json:"model"`
-	Runs             int64      `json:"runs"`
-	InputTokens      int64      `json:"input_tokens"`
-	OutputTokens     int64      `json:"output_tokens"`
-	CacheReadTokens  int64      `json:"cache_read_tokens"`
-	CacheWriteTokens int64      `json:"cache_write_tokens"`
-}
-
-type UsageOrg struct {
-	OrgID            uuid.UUID `json:"org_id"`
-	Name             string    `json:"name"`
-	Slug             string    `json:"slug"`
-	Runs             int64     `json:"runs"`
-	InputTokens      int64     `json:"input_tokens"`
-	OutputTokens     int64     `json:"output_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-}
-
-type UsageTask struct {
-	TaskID           uuid.UUID `json:"task_id"`
-	Number           int64     `json:"number"`
-	Title            string    `json:"title"`
-	Runs             int64     `json:"runs"`
-	InputTokens      int64     `json:"input_tokens"`
-	OutputTokens     int64     `json:"output_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-}
-
-type Usage struct {
-	From     time.Time     `json:"from"`
-	To       time.Time     `json:"to"`
-	TZ       string        `json:"tz"`
-	Totals   UsageTotals   `json:"totals"`
-	Daily    []UsageDay    `json:"daily"`
-	BySource []UsageSource `json:"by_source"`
-	ByOrg    []UsageOrg    `json:"by_org"`
-	ByAgent  []UsageAgent  `json:"by_agent"`
-	ByModel  []UsageModel  `json:"by_model"`
-	TopTasks []UsageTask   `json:"top_tasks"`
-}
 
 // usageRuns is the agent runs started since $1, in the shape the report aggregates (source is
 // "agent"; the column stays so the report can take other kinds of runs later).
@@ -108,9 +17,9 @@ const usageRuns = `WITH runs AS (
 ) `
 
 // UsageReport aggregates token usage since `since`, bucketing days in tz.
-func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*Usage, error) {
-	u := &Usage{From: since, To: time.Now(), TZ: tz, Daily: []UsageDay{}, BySource: []UsageSource{}, ByOrg: []UsageOrg{},
-		ByAgent: []UsageAgent{}, ByModel: []UsageModel{}, TopTasks: []UsageTask{}}
+func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*store.Usage, error) {
+	u := &store.Usage{From: since, To: time.Now(), TZ: tz, Daily: []store.UsageDay{}, BySource: []store.UsageSource{}, ByOrg: []store.UsageOrg{},
+		ByAgent: []store.UsageAgent{}, ByModel: []store.UsageModel{}, TopTasks: []store.UsageTask{}}
 
 	if err := s.pool.QueryRow(ctx, usageRuns+`SELECT count(*), count(*) FILTER (WHERE status = 'FAILED'),
 		COALESCE(sum(inp), 0)::bigint, COALESCE(sum(outp), 0)::bigint, COALESCE(sum(calls), 0)::bigint,
@@ -138,7 +47,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		return nil, err
 	}
 	for rows.Next() {
-		var d UsageDay
+		var d store.UsageDay
 		if err := rows.Scan(&d.Date, &d.Runs, &d.InputTokens, &d.OutputTokens, &d.CacheReadTokens, &d.CacheWriteTokens); err != nil {
 			rows.Close()
 			return nil, err
@@ -153,7 +62,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		return nil, err
 	}
 	for rows.Next() {
-		var v UsageSource
+		var v store.UsageSource
 		if err := rows.Scan(&v.Source, &v.Runs, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &v.CacheWriteTokens); err != nil {
 			rows.Close()
 			return nil, err
@@ -170,7 +79,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		return nil, err
 	}
 	for rows.Next() {
-		var v UsageOrg
+		var v store.UsageOrg
 		if err := rows.Scan(&v.OrgID, &v.Name, &v.Slug, &v.Runs, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &v.CacheWriteTokens); err != nil {
 			rows.Close()
 			return nil, err
@@ -187,7 +96,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		return nil, err
 	}
 	for rows.Next() {
-		var v UsageAgent
+		var v store.UsageAgent
 		if err := rows.Scan(&v.AgentID, &v.Name, &v.Avatar, &v.Slug, &v.Runs, &v.InputTokens, &v.OutputTokens,
 			&v.CacheReadTokens, &v.CacheWriteTokens); err != nil {
 			rows.Close()
@@ -206,7 +115,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 		return nil, err
 	}
 	for rows.Next() {
-		var v UsageModel
+		var v store.UsageModel
 		if err := rows.Scan(&v.ConnectorID, &v.ConnectorName, &v.ConnectorType, &v.Runtime, &v.Model, &v.Runs,
 			&v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &v.CacheWriteTokens); err != nil {
 			rows.Close()
@@ -225,7 +134,7 @@ func (s *Store) UsageReport(ctx context.Context, since time.Time, tz string) (*U
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var v UsageTask
+		var v store.UsageTask
 		if err := rows.Scan(&v.TaskID, &v.Number, &v.Title, &v.Runs, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &v.CacheWriteTokens); err != nil {
 			return nil, err
 		}

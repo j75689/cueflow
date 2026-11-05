@@ -24,7 +24,7 @@ const KindDeliver jobs.Kind = "deliver"
 // approved: APPROVED -> QUEUED -> (act) -> DONE | FAILED. An item whose org has no action
 // connector is DONE as soon as it is approved: the review itself was the point.
 type Worker struct {
-	store   *Store
+	store   Store
 	hub     *hub.Hub
 	broker  *events.Broker
 	logger  *slog.Logger
@@ -37,7 +37,7 @@ type Worker struct {
 	Queue jobs.Queue
 }
 
-func NewWorker(st *Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, every, lease, timeout time.Duration) *Worker {
+func NewWorker(st Store, h *hub.Hub, b *events.Broker, logger *slog.Logger, every, lease, timeout time.Duration) *Worker {
 	return &Worker{store: st, hub: h, broker: b, logger: logger.With("component", "deliverables"),
 		every: every, lease: lease, timeout: timeout, wake: make(chan struct{}, 1)}
 }

@@ -11,7 +11,7 @@ import (
 )
 
 // FetchSource pulls new items from a source connector into the store and returns how many were new.
-func FetchSource(ctx context.Context, h *hub.Hub, st *Store, id uuid.UUID, since time.Time, limit int) (int, error) {
+func FetchSource(ctx context.Context, h *hub.Hub, st Store, id uuid.UUID, since time.Time, limit int) (int, error) {
 	src, c, err := h.Source(ctx, id)
 	if err != nil {
 		return 0, err

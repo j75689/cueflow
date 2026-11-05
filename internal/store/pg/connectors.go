@@ -1,4 +1,4 @@
-package store
+package pg
 
 import (
 	"context"
@@ -7,44 +7,23 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/j75689/cueflow/internal/connector"
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
-
-// Connector is a configured plugin instance as stored. Secret values never leave the store
-// through this type; SecretsSet lists which secret keys currently hold a value.
-type Connector struct {
-	ID            uuid.UUID      `json:"id"`
-	Name          string         `json:"name"`
-	Kind          connector.Kind `json:"kind"`
-	Type          string         `json:"type"`
-	IsActive      bool           `json:"is_active"`
-	Config        map[string]any `json:"config"`
-	SecretsSet    []string       `json:"secrets_set"`
-	LastStatus    *string        `json:"last_status"`
-	LastError     string         `json:"last_error"`
-	LastCheckedAt *time.Time     `json:"last_checked_at"`
-	// ToolPermissions maps tool name -> allow|ask|deny for tool servers (kind "tools").
-	ToolPermissions map[string]string `json:"tool_permissions"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-
-	secrets []byte
-}
 
 const connectorColumns = `id, name, kind, type, is_active, config, secrets, last_status, COALESCE(last_error,''),
 	last_checked_at, created_at, updated_at, tool_permissions`
 
-func (s *Store) scanConnector(row pgx.Row) (*Connector, error) {
-	var c Connector
+func (s *Store) scanConnector(row pgx.Row) (*store.Connector, error) {
+	var c store.Connector
 	var kind string
 	var cfg, perms []byte
-	if err := row.Scan(&c.ID, &c.Name, &kind, &c.Type, &c.IsActive, &cfg, &c.secrets, &c.LastStatus,
+	if err := row.Scan(&c.ID, &c.Name, &kind, &c.Type, &c.IsActive, &cfg, &c.SealedSecrets, &c.LastStatus,
 		&c.LastError, &c.LastCheckedAt, &c.CreatedAt, &c.UpdatedAt, &perms); err != nil {
 		return nil, err
 	}
@@ -54,8 +33,8 @@ func (s *Store) scanConnector(row pgx.Row) (*Connector, error) {
 	c.Config = map[string]any{}
 	_ = json.Unmarshal(cfg, &c.Config)
 	c.SecretsSet = []string{}
-	if len(c.secrets) > 0 {
-		if m, err := s.box.OpenMap(c.secrets, c.ID[:]); err == nil {
+	if len(c.SealedSecrets) > 0 {
+		if m, err := s.box.OpenMap(c.SealedSecrets, c.ID[:]); err == nil {
 			for k, v := range m {
 				if v != nil && v != "" {
 					c.SecretsSet = append(c.SecretsSet, k)
@@ -67,7 +46,7 @@ func (s *Store) scanConnector(row pgx.Row) (*Connector, error) {
 	return &c, nil
 }
 
-func (s *Store) ListConnectors(ctx context.Context, kind string) ([]*Connector, error) {
+func (s *Store) ListConnectors(ctx context.Context, kind string) ([]*store.Connector, error) {
 	q := "SELECT " + connectorColumns + " FROM connectors"
 	var args []any
 	if kind != "" {
@@ -79,7 +58,7 @@ func (s *Store) ListConnectors(ctx context.Context, kind string) ([]*Connector, 
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*Connector{}
+	out := []*store.Connector{}
 	for rows.Next() {
 		c, err := s.scanConnector(rows)
 		if err != nil {
@@ -90,16 +69,16 @@ func (s *Store) ListConnectors(ctx context.Context, kind string) ([]*Connector, 
 	return out, rows.Err()
 }
 
-func (s *Store) GetConnector(ctx context.Context, id uuid.UUID) (*Connector, error) {
+func (s *Store) GetConnector(ctx context.Context, id uuid.UUID) (*store.Connector, error) {
 	c, err := s.scanConnector(s.pool.QueryRow(ctx, "SELECT "+connectorColumns+" FROM connectors WHERE id=$1", id))
 	return c, NotFound(err)
 }
 
 // CreateConnector validates settings against the type's spec, encrypts secret fields and stores it.
-func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bool, settings map[string]any) (*Connector, error) {
+func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bool, settings map[string]any) (*store.Connector, error) {
 	spec, ok := connector.Lookup(typ)
 	if !ok {
-		return nil, Invalid(fmt.Sprintf("unknown connector type %q", typ))
+		return nil, store.Invalid(fmt.Sprintf("unknown connector type %q", typ))
 	}
 	if strings.TrimSpace(name) == "" {
 		name = spec.NameFor(connector.Config(settings))
@@ -107,7 +86,7 @@ func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bo
 	cfg, secrets := spec.Split(settings)
 	dropEmpty(secrets)
 	if err := spec.Validate(spec.WithDefaults(merge(cfg, secrets))); err != nil {
-		return nil, Invalid(err.Error())
+		return nil, store.Invalid(err.Error())
 	}
 	id := uuid.New()
 	sealed, err := s.box.SealMap(secrets, id[:])
@@ -120,16 +99,8 @@ func (s *Store) CreateConnector(ctx context.Context, name, typ string, active bo
 	return c, err
 }
 
-// ConnectorPatch: Settings keys present with a value replace it; a null value clears it. Secret keys
-// sent as "" keep the stored secret (the UI never receives secret values to echo back).
-type ConnectorPatch struct {
-	Name     *string
-	IsActive *bool
-	Settings map[string]any
-}
-
-func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch ConnectorPatch) (*Connector, error) {
-	var out *Connector
+func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch store.ConnectorPatch) (*store.Connector, error) {
+	var out *store.Connector
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		cur, err := s.scanConnector(tx.QueryRow(ctx, "SELECT "+connectorColumns+" FROM connectors WHERE id=$1 FOR UPDATE", id))
 		if err != nil {
@@ -137,10 +108,10 @@ func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch Connect
 		}
 		spec, ok := connector.Lookup(cur.Type)
 		if !ok {
-			return Invalid(fmt.Sprintf("connector type %q is no longer installed", cur.Type))
+			return store.Invalid(fmt.Sprintf("connector type %q is no longer installed", cur.Type))
 		}
 		cfg := cur.Config
-		secrets, err := s.box.OpenMap(cur.secrets, id[:])
+		secrets, err := s.box.OpenMap(cur.SealedSecrets, id[:])
 		if err != nil {
 			return err
 		}
@@ -165,7 +136,7 @@ func (s *Store) UpdateConnector(ctx context.Context, id uuid.UUID, patch Connect
 			}
 		}
 		if err := spec.Validate(spec.WithDefaults(merge(cfg, secrets))); err != nil {
-			return Invalid(err.Error())
+			return store.Invalid(err.Error())
 		}
 		name, active := cur.Name, cur.IsActive
 		if patch.Name != nil && strings.TrimSpace(*patch.Name) != "" {
@@ -198,12 +169,12 @@ func (s *Store) DeleteConnector(ctx context.Context, id uuid.UUID) error {
 }
 
 // ConnectorSettings returns the merged, decrypted settings used to build an instance.
-func (s *Store) ConnectorSettings(ctx context.Context, id uuid.UUID) (*Connector, connector.Config, error) {
+func (s *Store) ConnectorSettings(ctx context.Context, id uuid.UUID) (*store.Connector, connector.Config, error) {
 	c, err := s.GetConnector(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
-	secrets, err := s.box.OpenMap(c.secrets, c.ID[:])
+	secrets, err := s.box.OpenMap(c.SealedSecrets, c.ID[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,7 +193,7 @@ func (s *Store) SetConnectorCheck(ctx context.Context, id uuid.UUID, ok bool, ms
 }
 
 // FirstActiveConnector returns the oldest active connector of a kind, if any.
-func (s *Store) FirstActiveConnector(ctx context.Context, kind connector.Kind) (*Connector, error) {
+func (s *Store) FirstActiveConnector(ctx context.Context, kind connector.Kind) (*store.Connector, error) {
 	c, err := s.scanConnector(s.pool.QueryRow(ctx, "SELECT "+connectorColumns+
 		" FROM connectors WHERE kind=$1 AND is_active ORDER BY created_at LIMIT 1", string(kind)))
 	return c, NotFound(err)
@@ -285,20 +256,11 @@ func dropEmpty(m map[string]any) {
 	}
 }
 
-// RotationReport describes a re-encryption pass over connector secrets.
-type RotationReport struct {
-	Total          int      `json:"total"`           // connectors with stored secrets
-	AlreadyPrimary int      `json:"already_primary"` // already sealed with the primary key
-	Reencrypted    int      `json:"reencrypted"`     // sealed with a previous key, now re-sealed
-	Undecryptable  []string `json:"undecryptable"`   // names of connectors no configured key can open
-	DryRun         bool     `json:"dry_run"`
-}
-
 // ReencryptConnectorSecrets re-seals every connector's secrets with the primary key (reading with
 // the primary or previous keys) in one transaction. If any connector cannot be decrypted it
 // changes nothing and reports them, so a wrong key never destroys data.
-func (s *Store) ReencryptConnectorSecrets(ctx context.Context, dryRun bool) (*RotationReport, error) {
-	rep := &RotationReport{DryRun: dryRun, Undecryptable: []string{}}
+func (s *Store) ReencryptConnectorSecrets(ctx context.Context, dryRun bool) (*store.RotationReport, error) {
+	rep := &store.RotationReport{DryRun: dryRun, Undecryptable: []string{}}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id, name, secrets FROM connectors
 			WHERE secrets IS NOT NULL AND length(secrets) > 0 ORDER BY created_at FOR UPDATE`)

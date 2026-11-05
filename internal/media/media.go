@@ -103,7 +103,7 @@ func SniffHead(head []byte, size int64) (string, error) {
 }
 
 type Service struct {
-	Store *store.Store
+	Store store.Backend
 	Hub   *hub.Hub
 }
 

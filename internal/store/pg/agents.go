@@ -1,68 +1,16 @@
-package store
+package pg
 
 import (
 	"context"
-	"fmt"
-	"regexp"
+	"errors"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/j75689/cueflow/internal/domain"
+	"github.com/j75689/cueflow/internal/store"
 )
-
-var AgentRoles = []string{"manager", "researcher", "writer", "editor", "custom"}
-
-type AgentStats struct {
-	OpenTasks int `json:"open_tasks"`
-	Running   int `json:"running"`
-}
-
-type Agent struct {
-	ID                uuid.UUID  `json:"id"`
-	OrgID             uuid.UUID  `json:"org_id"`
-	Name              string     `json:"name"`
-	Slug              string     `json:"slug"`
-	Avatar            string     `json:"avatar"`
-	Role              string     `json:"role"`
-	Description       string     `json:"description"`
-	Instructions      string     `json:"instructions"`
-	Capabilities      []string   `json:"capabilities"`
-	LLMConnectorID    *uuid.UUID `json:"llm_connector_id"`
-	SearchConnectorID *uuid.UUID `json:"search_connector_id"`
-	// RuntimeConnectorID selects an external ACP agent runtime; nil = built-in LLM loop.
-	RuntimeConnectorID *uuid.UUID  `json:"runtime_connector_id"`
-	SourceConnectorIDs []uuid.UUID `json:"source_connector_ids"`
-	// ToolConnectorIDs are the external tool servers (MCP) this agent may use.
-	ToolConnectorIDs []uuid.UUID `json:"tool_connector_ids"`
-	Language         string      `json:"language"`
-	Platforms        []string    `json:"platforms"`
-	MaxTurns         int         `json:"max_turns"`
-	// AutoHandOff continues a run that handed off (with a note) in a fresh run without waiting for a
-	// human, a few times in a row at most (built-in runtime only).
-	AutoHandOff bool `json:"auto_handoff"`
-	// AutoRecover is how many runs in a row that failed for a transient reason (a connection or
-	// provider error, a lost runner, an interrupted server) start again on their own after a backoff,
-	// instead of waiting for a human; 0 = off, at most 10. Not for external (self-driven) runtimes,
-	// whose agents report their own runs.
-	AutoRecover int        `json:"auto_recover"`
-	IsActive    bool       `json:"is_active"`
-	Stats       AgentStats `json:"stats"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-func (a *Agent) Has(capability string) bool {
-	for _, c := range a.Capabilities {
-		if c == capability {
-			return true
-		}
-	}
-	return false
-}
 
 const agentColumns = `a.id, a.name, a.slug, a.avatar, a.role, a.description, a.instructions, a.capabilities,
 	a.llm_connector_id, a.search_connector_id, a.source_connector_ids, a.language, a.platforms, a.max_turns,
@@ -70,8 +18,8 @@ const agentColumns = `a.id, a.name, a.slug, a.avatar, a.role, a.description, a.i
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status NOT IN ('DONE','CANCELED')),
 	(SELECT count(*) FROM tasks t WHERE t.assignee_agent_id=a.id AND t.status='IN_PROGRESS'), a.auto_handoff, a.auto_recover`
 
-func scanAgent(row pgx.Row) (*Agent, error) {
-	var a Agent
+func scanAgent(row pgx.Row) (*store.Agent, error) {
+	var a store.Agent
 	if err := row.Scan(&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.Role, &a.Description, &a.Instructions, &a.Capabilities,
 		&a.LLMConnectorID, &a.SearchConnectorID, &a.SourceConnectorIDs, &a.Language, &a.Platforms, &a.MaxTurns,
 		&a.IsActive, &a.CreatedAt, &a.UpdatedAt, &a.RuntimeConnectorID, &a.ToolConnectorIDs, &a.OrgID, &a.Stats.OpenTasks, &a.Stats.Running, &a.AutoHandOff, &a.AutoRecover); err != nil {
@@ -92,115 +40,15 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	return &a, nil
 }
 
-var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-
-// Slugify derives an ASCII slug; non-ASCII names (e.g. Chinese) fall back to "agent-xxxx".
-func Slugify(name string) string {
-	var b strings.Builder
-	dash := false
-	for _, r := range strings.ToLower(name) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			dash = false
-		case !dash && b.Len() > 0:
-			b.WriteRune('-')
-			dash = true
-		}
-	}
-	s := strings.Trim(b.String(), "-")
-	if s == "" {
-		s = "agent-" + uuid.NewString()[:4]
-	}
-	if len(s) > 63 {
-		s = s[:63]
-	}
-	return s
-}
-
-// ValidCapability is injected by package crew (which owns the tool catalog).
-var ValidCapability = func(string) bool { return true }
-
-// ValidatePlatforms checks an agent's platform list; the content module injects the platform
-// catalog, without it any value is accepted.
-var ValidatePlatforms = func([]string) error { return nil }
-
-func (a *Agent) normalize() error {
-	a.Name = strings.TrimSpace(a.Name)
-	if a.Name == "" {
-		return Invalid("name is required")
-	}
-	a.Slug = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(a.Slug, "@")))
-	if a.Slug == "" {
-		a.Slug = Slugify(a.Name)
-	}
-	if !slugRe.MatchString(a.Slug) {
-		return Invalid("slug may only contain lowercase letters, digits and dashes")
-	}
-	if strings.TrimSpace(a.Avatar) == "" {
-		a.Avatar = "🤖"
-	}
-	if a.Role == "" {
-		a.Role = "custom"
-	}
-	validRole := false
-	for _, r := range AgentRoles {
-		if r == a.Role {
-			validRole = true
-		}
-	}
-	if !validRole {
-		return Invalid(fmt.Sprintf("unknown role %q", a.Role))
-	}
-	seen := map[string]bool{}
-	caps := []string{}
-	for _, c := range a.Capabilities {
-		c = strings.TrimSpace(c)
-		if c == "" || seen[c] {
-			continue
-		}
-		if !ValidCapability(c) {
-			return Invalid(fmt.Sprintf("unknown capability %q", c))
-		}
-		seen[c] = true
-		caps = append(caps, c)
-	}
-	a.Capabilities = caps
-	if len(a.Platforms) > 0 {
-		if err := ValidatePlatforms(a.Platforms); err != nil {
-			return Invalid(err.Error())
-		}
-	} else {
-		a.Platforms = []string{}
-	}
-	if a.Language == "" {
-		a.Language = "en"
-	}
-	if a.MaxTurns <= 0 {
-		a.MaxTurns = 12
-	}
-	if a.RuntimeConnectorID != nil {
-		a.AutoHandOff = false // only the built-in runtime hands off
-	}
-	if a.MaxTurns > 40 {
-		a.MaxTurns = 40
-	}
-	a.AutoRecover = min(max(a.AutoRecover, 0), 10)
-	if a.SourceConnectorIDs == nil {
-		a.SourceConnectorIDs = []uuid.UUID{}
-	}
-	return nil
-}
-
 // normalizeRuntime is normalize for what depends on the runtime connector's type: an external
 // (self-driven) agent reports its own runs, so it never auto-recovers.
-func (s *Store) normalizeRuntime(ctx context.Context, a *Agent) error {
+func (s *Store) normalizeRuntime(ctx context.Context, a *store.Agent) error {
 	if a.RuntimeConnectorID == nil || a.AutoRecover == 0 {
 		return nil
 	}
 	var external bool
 	if err := s.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM connectors WHERE id=$1 AND type=$2)",
-		*a.RuntimeConnectorID, ExternalRuntimeType).Scan(&external); err != nil {
+		*a.RuntimeConnectorID, store.ExternalRuntimeType).Scan(&external); err != nil {
 		return err
 	}
 	if external {
@@ -210,21 +58,20 @@ func (s *Store) normalizeRuntime(ctx context.Context, a *Agent) error {
 }
 
 func dupSlug(err error) error {
-	var pg *pgconn.PgError
-	if ok := asPg(err, &pg); ok && pg.Code == "23505" {
-		return Invalid("another agent in this org already uses this slug")
+	if errors.Is(mapErr(err), domain.ErrConflict) {
+		return store.InvalidBecause(domain.ErrConflict, "another agent in this org already uses this slug")
 	}
 	return err
 }
 
 // ListAgents returns an org's agents.
-func (s *Store) ListAgents(ctx context.Context, org uuid.UUID) ([]*Agent, error) {
+func (s *Store) ListAgents(ctx context.Context, org uuid.UUID) ([]*store.Agent, error) {
 	rows, err := s.pool.Query(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.org_id=$1 ORDER BY a.created_at", org)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []*Agent{}
+	out := []*store.Agent{}
 	for rows.Next() {
 		a, err := scanAgent(rows)
 		if err != nil {
@@ -235,13 +82,13 @@ func (s *Store) ListAgents(ctx context.Context, org uuid.UUID) ([]*Agent, error)
 	return out, rows.Err()
 }
 
-func (s *Store) GetAgent(ctx context.Context, id uuid.UUID) (*Agent, error) {
+func (s *Store) GetAgent(ctx context.Context, id uuid.UUID) (*store.Agent, error) {
 	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.id=$1", id))
 	return a, NotFound(err)
 }
 
 // GetAgentBySlug finds an agent of an org by its @slug.
-func (s *Store) GetAgentBySlug(ctx context.Context, org uuid.UUID, slug string) (*Agent, error) {
+func (s *Store) GetAgentBySlug(ctx context.Context, org uuid.UUID, slug string) (*store.Agent, error) {
 	a, err := scanAgent(s.pool.QueryRow(ctx, "SELECT "+agentColumns+" FROM agents a WHERE a.org_id=$1 AND a.slug=$2",
 		org, strings.ToLower(strings.TrimPrefix(strings.TrimSpace(slug), "@"))))
 	return a, NotFound(err)
@@ -253,15 +100,15 @@ func (s *Store) CountAgents(ctx context.Context, org uuid.UUID) (int, error) {
 	return n, err
 }
 
-func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
-	if err := a.normalize(); err != nil {
+func (s *Store) CreateAgent(ctx context.Context, a *store.Agent) (*store.Agent, error) {
+	if err := a.Normalize(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeRuntime(ctx, a); err != nil {
 		return nil, err
 	}
 	if a.OrgID == uuid.Nil {
-		return nil, Invalid("org is required")
+		return nil, store.Invalid("org is required")
 	}
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `INSERT INTO agents (name, slug, avatar, role, description, instructions, capabilities,
@@ -277,8 +124,8 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	return s.GetAgent(ctx, id)
 }
 
-func (s *Store) UpdateAgent(ctx context.Context, a *Agent) (*Agent, error) {
-	if err := a.normalize(); err != nil {
+func (s *Store) UpdateAgent(ctx context.Context, a *store.Agent) (*store.Agent, error) {
+	if err := a.Normalize(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeRuntime(ctx, a); err != nil {
@@ -318,22 +165,15 @@ func (s *Store) DeleteAgent(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-type AgentMemory struct {
-	ID        uuid.UUID `json:"id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func (s *Store) AddMemory(ctx context.Context, agentID uuid.UUID, content string) (*AgentMemory, error) {
+func (s *Store) AddMemory(ctx context.Context, agentID uuid.UUID, content string) (*store.AgentMemory, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, Invalid("memory content is required")
+		return nil, store.Invalid("memory content is required")
 	}
 	if r := []rune(content); len(r) > 2000 {
 		content = string(r[:2000])
 	}
-	var m AgentMemory
+	var m store.AgentMemory
 	err := s.pool.QueryRow(ctx, `INSERT INTO agent_memories (agent_id, content) VALUES ($1,$2)
 		RETURNING id, agent_id, content, created_at`, agentID, content).Scan(&m.ID, &m.AgentID, &m.Content, &m.CreatedAt)
 	if err != nil {
@@ -343,7 +183,7 @@ func (s *Store) AddMemory(ctx context.Context, agentID uuid.UUID, content string
 }
 
 // Memories returns an agent's notes, newest first; query filters by substring.
-func (s *Store) Memories(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]AgentMemory, error) {
+func (s *Store) Memories(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]store.AgentMemory, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -354,9 +194,9 @@ func (s *Store) Memories(ctx context.Context, agentID uuid.UUID, query string, l
 		return nil, err
 	}
 	defer rows.Close()
-	out := []AgentMemory{}
+	out := []store.AgentMemory{}
 	for rows.Next() {
-		var m AgentMemory
+		var m store.AgentMemory
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.Content, &m.CreatedAt); err != nil {
 			return nil, err
 		}

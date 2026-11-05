@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -270,14 +271,17 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteTaskOp stops the task's run and deletes it with its subtasks; the single endpoint and bulk
-// both go through it.
+// both go through it. Once the rows are gone the task is deleted, even if some of its files' bytes
+// could not be: those are only logged.
 func (s *Server) deleteTaskOp(ctx context.Context, id uuid.UUID) error {
 	s.Crew.Cancel(id)
 	t, err := s.Store.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.DeleteTask(ctx, id); err != nil {
+	if err := s.Store.DeleteTask(ctx, id); errors.Is(err, store.ErrBlobsLeftBehind) {
+		s.Logger.Warn("task deleted, but some of its files' bytes were left behind", "id", id, "err", err)
+	} else if err != nil {
 		return err
 	}
 	s.Broker.Publish(t.OrgID, "task.deleted", map[string]any{"id": id})

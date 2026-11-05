@@ -134,7 +134,8 @@ func (s *Server) downloadTaskFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteTaskFile removes one of the task's own files. An ancestor's or a subtask's file is refused:
-// this task can read it but not change it.
+// this task can read it but not change it. Bytes that outlive the row are only logged, as in
+// deleteTaskOp.
 func (s *Server) deleteTaskFile(w http.ResponseWriter, r *http.Request) {
 	task, ok := s.fileTask(w, r)
 	if !ok {
@@ -163,7 +164,9 @@ func (s *Server) deleteTaskFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err != nil {
+	if errors.Is(err, store.ErrBlobsLeftBehind) {
+		s.Logger.Warn("task file deleted, but its bytes were left behind", "task", task.ID, "name", name, "err", err)
+	} else if err != nil {
 		s.Fail(w, err)
 		return
 	}
