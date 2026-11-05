@@ -246,6 +246,17 @@ func TestCopyDB(t *testing.T) {
 	}
 	refuse("into a text file", text, "file is not a database")
 
+	// A copy that fails after its first write says the target is incomplete and which files to delete.
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET position = 'NaN' WHERE id = $1`, child.ID); err != nil {
+		t.Fatal(err)
+	}
+	half := filepath.Join(dir, "half.db")
+	out, err = exec.Command(bin, "copy-db", "--from", from, "--to", "sqlite://"+half).CombinedOutput()
+	incomplete := fmt.Sprintf("the copy in %[1]s is incomplete: delete %[1]s, %[1]s-wal and %[1]s-shm before copying again", half)
+	if err == nil || !strings.Contains(string(out), "copy tasks:") || !strings.Contains(string(out), incomplete) {
+		t.Errorf("failed copy: %v, want copy tasks failing with %q:\n%s", err, incomplete, out)
+	}
+
 	// A source at another migration than this cueflow's, ahead or behind: refused before the target
 	// is created or touched.
 	fresh := filepath.Join(dir, "fresh.db")

@@ -47,7 +47,7 @@ func copyDBCmd(args []string, out io.Writer) error {
 // baseline's CREATE order, one write transaction per table, all read from one snapshot of the source.
 // It refuses, before writing, a source at another migration than this cueflow's, and a target that
 // holds data or is at another migration than the source; it fails if any table's row count differs
-// afterwards.
+// afterwards. A copy that fails after its first write says the target is incomplete.
 func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	tables, err := baselineTables()
 	if err != nil {
@@ -81,7 +81,8 @@ func copyDB(ctx context.Context, from, to string, out io.Writer) error {
 	}
 	defer dst.Close()
 	if err := fill(ctx, tx, dst, tables, out); err != nil {
-		return err
+		path := storesqlite.Path(to)
+		return fmt.Errorf("%w\nthe copy in %s is incomplete: delete %s, %s-wal and %s-shm before copying again", err, path, path, path, path)
 	}
 	fmt.Fprintf(out, "done: %d tables, row counts match\n", len(tables))
 	return nil
