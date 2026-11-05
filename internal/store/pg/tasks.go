@@ -735,6 +735,13 @@ func (s *Store) SetRunContext(ctx context.Context, runID uuid.UUID, tokens, wind
 	return err
 }
 
+// MarkRunExternal tags a run as one a self-driven agent works, on the runtime connectorID, so an
+// interrupted one is recognizable as such.
+func (s *Store) MarkRunExternal(ctx context.Context, runID uuid.UUID, connectorID *uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE agent_runs SET runtime='external', connector_id=$2 WHERE id=$1`, runID, connectorID)
+	return err
+}
+
 func (s *Store) ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*store.AgentRun, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+agentRunColumns+` FROM agent_runs WHERE task_id=$1
 		ORDER BY started_at DESC LIMIT 50`, taskID)

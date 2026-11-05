@@ -47,6 +47,7 @@ type TaskStore interface {
 	FinishAgentRun(ctx context.Context, r *AgentRun) error
 	FailAgentRun(ctx context.Context, id uuid.UUID, outcome, errText string) error
 	SetRunContext(ctx context.Context, runID uuid.UUID, tokens, window int64) error
+	MarkRunExternal(ctx context.Context, runID uuid.UUID, connectorID *uuid.UUID) error
 	ListAgentRuns(ctx context.Context, taskID uuid.UUID) ([]*AgentRun, error)
 	GetAgentRun(ctx context.Context, id uuid.UUID) (*AgentRun, error)
 	HandOverAgentRun(ctx context.Context, id uuid.UUID) error
