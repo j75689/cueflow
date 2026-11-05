@@ -139,6 +139,7 @@ docker compose up -d --force-recreate
 
 - 只在 Linux 上有效，Runner 讀的是 `/proc`。macOS 等其他平台照舊只結束 process group，離開 group 的程序會繼續執行。
 - 清掉或換掉自己環境變數的程序（`env -i`、會重設環境的 daemon）沒有標記，會漏掉。
+- 把自己設成 non-dumpable 的程序（例如 `ssh-agent`）讀不到環境變數，也會漏掉，而且不會有任何一行 log 提到它。
 - 已結束的程序仍要由父程序回收；父程序不在了，就由 PID 1 回收。Runner 映像的 PID 1 是 [tini](https://github.com/krallin/tini)，會負責回收，compose 不需要 `init: true`（留著也無妨）。如果你用 `--entrypoint` 啟動映像，或在自己的映像裡讓 `cueflow runner run` 當 PID 1，請自己加上 init（`init: true`、`docker run --init`），否則這些程序會一直是 zombie，直到容器碰到 pids 上限、agent 再也啟動不了。
 
 ## 不會變的部分

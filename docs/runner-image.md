@@ -152,6 +152,8 @@ stops, it does the same for any job it could not clean up.
 - This works on Linux only, where the runner reads `/proc`. On macOS and other platforms, a job's processes are
   stopped by process group alone, as before, so whatever left the group keeps running.
 - A process that clears or replaces its environment (`env -i`, a daemon that resets it) loses the marker and escapes.
+- A process that makes itself non-dumpable, such as `ssh-agent`, cannot have its environment read, so it escapes
+  too, and no log line mentions it.
 - A process that has exited still has to be waited for by its parent. When its parent is gone, that is PID 1. In the
   runner image PID 1 is [tini](https://github.com/krallin/tini), which does that. You don't need `init: true` in
   compose (keeping it does no harm). If you start the image with `--entrypoint`, or run `cueflow runner run` as PID 1
