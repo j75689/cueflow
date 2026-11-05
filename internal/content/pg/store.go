@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,7 +24,13 @@ var _ content.Store = (*Store)(nil)
 func New(s *storepg.Store) *Store { return &Store{Store: s} }
 
 func init() {
-	content.NewStore = func(s store.Backend) content.Store { return New(s.(*storepg.Store)) }
+	content.NewStore = func(s store.Backend) content.Store {
+		core, ok := s.(*storepg.Store)
+		if !ok {
+			panic(fmt.Sprintf("content/pg needs the PostgreSQL store, got %T", s))
+		}
+		return New(core)
+	}
 }
 
 type querier interface {

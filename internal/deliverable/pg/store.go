@@ -28,7 +28,13 @@ var _ deliverable.Store = (*Store)(nil)
 func New(s *storepg.Store) *Store { return &Store{Store: s} }
 
 func init() {
-	deliverable.NewStore = func(s store.Backend) deliverable.Store { return New(s.(*storepg.Store)) }
+	deliverable.NewStore = func(s store.Backend) deliverable.Store {
+		core, ok := s.(*storepg.Store)
+		if !ok {
+			panic(fmt.Sprintf("deliverable/pg needs the PostgreSQL store, got %T", s))
+		}
+		return New(core)
+	}
 }
 
 type querier interface {
