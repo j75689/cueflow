@@ -61,8 +61,8 @@ The default names and instructions are in English; the language agents write in 
 | | `ask_human` | Ask a question and pause until a human replies (ends the run) |
 | | `complete_task` | Report the result and finish (ends the run) |
 | | `write_file` | Save text as a file of this task (creates or replaces it); files stay out of the conversation until read |
-| | `read_file` | Read a file of this task or of a task above it, up to 30,000 characters from a character offset; says the file's length so the agent can page |
-| | `list_files` | List the files this task can read: its own and those of the tasks above it (at most 100, then a count) |
+| | `read_file` | Read a file of this task or of a task above it, up to 30,000 characters from a character offset; says the file's length so the agent can page. To read a file of a direct subtask, pass its number as `task` (optional; a bare name never resolves to a subtask's file) |
+| | `list_files` | List the files this task can read: its own, those of the tasks above it, then those of its direct subtasks, marked `from subtask #N` (at most 100, then a count) |
 | research | `web_search` | Search via SearXNG / Tavily |
 | | `read_url` | Read a public web page (internal networks blocked, see §10) |
 | sources | `search_materials` | Search material already collected from RSS / mail (the agent's Sources, or all when none are picked) |
@@ -163,7 +163,7 @@ sequenceDiagram
 Every run **rebuilds its context from scratch** instead of replaying the previous run's raw LLM messages:
 
 - **System prompt**: general working rules + role description + delegation rules and team roster (with the delegation capability) + scheduling rules (with planning) + the role's instructions + the latest 30 memories + the current time.
-- **Task brief (the first user message)**: task title, priority, labels, due date, description, parent task, all subtasks and their results, the previous run's hand-off note if it handed off (§6.3), the task's files (names and first lines, not contents), drafts already created, and the latest 60 thread messages (tool results compressed to 500 characters).
+- **Task brief (the first user message)**: task title, priority, labels, due date, description, parent task, all subtasks and their results, the previous run's hand-off note if it handed off (§6.3), the task's files, including its direct subtasks' (names and first lines, not contents), drafts already created, and the latest 60 thread messages (tool results compressed to 500 characters).
 
 Benefits:
 - Provider-agnostic: no need to persist each LLM vendor's native message format; a task can switch LLM or agent midway and carry on.
@@ -349,7 +349,7 @@ target each time.
 | A single tool result fed back to the model | Over 8,000 characters (`saveResultOver`), a text result of a tool that returns outside content (MCP tools, approved calls included; `read_url`; `search_materials`) is saved whole as a task file `results/<tool>-<n>.txt` (first line: the tool and its arguments; an existing file is never overwritten), and the model gets the file name, the total length and the first 2,000 characters, with the offset to read on from. Tools that report CueFlow's own state (tasks, agents, memories, subtask results, files) stay inline, as do errors, non-text results, results over 8 MB and a result whose save fails. Inline results are cut at 32,000 characters with a note saying how many were cut (2,000 when shown in the thread) | `crew/files.go`, `crew/tools.go` |
 | A run's history | Append-only, on every connector: nothing already sent to the model is cut or rewritten (Claude's thinking blocks are bound to it), and there is no budget below the model's own window. Claude connectors cache it (Prompt caching, on by default; if the endpoint rejects `cache_control`, the connector retries without it and logs a warning); other connectors re-send the whole history each turn, cached only if the provider does so on its own. A run that outgrows the window stops with a message saying so; a reply starts a fresh run from the task and its thread | `crew/crew.go`, `connectors/anthropic` |
 | Thread messages in the task brief | Latest 60 | `crew/prompt.go` |
-| Files in the task brief | Up to 30 (name, size, which task, start of the first line; never the contents), then a count; `list_files` shows up to 100 | `crew/files.go` |
+| Files in the task brief | Up to 30 (name, size, which task, start of the first line; never the contents; own and ancestors' first, direct subtasks' last), then a count; `list_files` shows up to 100 | `crew/files.go` |
 | One `read_file` call | 30,000 characters | `crew/files.go` |
 | One task file | 8 MB | `store/task_files.go` |
 | Memories included | Latest 30, 2,000 characters each | `crew/crew.go`, `store/agents.go` |

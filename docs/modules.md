@@ -77,10 +77,10 @@ uploaded from the review editor, generated with an image connector (by a reviewe
 row records which backend holds its bytes.
 
 Task files (an agent's working storage for one task) are kept by the same setting, in their own
-`task_files` table. They are never served on `/media/{id}`, a subtask can read its ancestors' files but writes
-only its own, and deleting a task deletes its and its subtasks' files, bytes included. `media migrate` does not
+`task_files` table. They are never served on `/media/{id}`, a task can read its ancestors' files and its direct
+subtasks' but writes only its own, and deleting a task deletes its and its subtasks' files, bytes included. `media migrate` does not
 move them; a file written before the setting changed stays readable as long as its backend is configured.
-The task page lists them in a Files card (with the files of the tasks above it, marked), opens one in a
+The task page lists them in a Files card (with the files of the tasks above it and of its direct subtasks, marked), opens one in a
 viewer that loads 64 KB at a time, and downloads or deletes the task's own; see `/tasks/{id}/files` in
 [api.md](api.md).
 
