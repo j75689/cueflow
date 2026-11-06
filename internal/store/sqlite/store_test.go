@@ -126,8 +126,7 @@ func TestFile(t *testing.T) {
 	}
 	t.Chdir(dir)
 	enc := strings.ReplaceAll(file, " ", "%20")
-	urls := []string{"sqlite://" + file, "sqlite://" + enc, "sqlite:cueflow.db", "file:" + enc,
-		"file://" + enc + "?_pragma=busy_timeout(1)", "file://localhost" + enc}
+	urls := []string{"sqlite://" + file, "sqlite://" + enc, "sqlite:cueflow.db", "file:" + enc, "file://localhost" + enc}
 	for _, url := range urls {
 		if _, err := OpenReadOnly(ctx, url); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("OpenReadOnly(%q) of a missing file: %v, want fs.ErrNotExist", url, err)
@@ -152,6 +151,25 @@ func TestFile(t *testing.T) {
 			if err != nil || got != file {
 				t.Errorf("%s(%q).File() = %q %v, want %q", name, url, got, err, file)
 			}
+		}
+	}
+}
+
+// OpenReadOnly refuses a URL with a query or a fragment, which could make it open the file read-write,
+// before it creates anything.
+func TestOpenReadOnlyRefusesParameters(t *testing.T) {
+	ctx := context.Background()
+	file := filepath.Join(t.TempDir(), "cueflow.db")
+	for _, url := range []string{"file:" + file + "#x", "file:" + file + "?immutable=0", "sqlite://" + file + "?mode=rwc",
+		"file:" + file + "?_pragma=busy_timeout(1)"} {
+		if s, err := OpenReadOnly(ctx, url); err == nil || !strings.Contains(err.Error(), "without a ?query or #fragment") {
+			if s != nil {
+				s.Close()
+			}
+			t.Errorf("OpenReadOnly(%q): %v, want a refusal", url, err)
+		}
+		if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("OpenReadOnly(%q) left a file: %v", url, err)
 		}
 	}
 }

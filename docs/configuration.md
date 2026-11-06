@@ -115,7 +115,7 @@ Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow database.
 
 `cueflow copy-db --from postgres://… --to sqlite:///path/cueflow.db` copies a PostgreSQL install into a
 new SQLite file, for running it in single mode without PostgreSQL. It copies one way only, PostgreSQL to
-SQLite.
+SQLite. `--to` names the file only: copy-db refuses a URL with `?parameters` or a `#fragment`.
 
 1. Stop CueFlow, so nothing changes during the copy: copy-db reads one snapshot of the source, and what is
    written after it is not copied.

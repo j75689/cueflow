@@ -286,6 +286,43 @@ func TestCopyDB(t *testing.T) {
 		refuseAt("into a target with data at "+to, spaced, to, "target is not empty (orgs has 1 row(s))")
 	}
 
+	// A URL with parameters or a fragment is refused before the read-only check opens the file: SQLite
+	// would drop copy-db's own mode=ro&immutable=1 after a '#', or honour the user's immutable=0 or
+	// mode=rw, and then checkpoint a -wal, delete it, or create the file. Targets: a crashed install
+	// whose committed row is only in its -wal, a missing file, and the copy with data.
+	crash := filepath.Join(dir, "crash.db")
+	crashDB, err := storesqlite.Open(ctx, "sqlite://"+filepath.Join(dir, "running.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storesqlite.Migrate(ctx, crashDB); err == nil {
+		err = (&storesqlite.TestHooks{Store: crashDB}).Insert(ctx, "orgs", map[string]any{"id": uuid.New(), "name": "Mine", "slug": "mine"})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The files as a writer killed before its checkpoint leaves them.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(filepath.Join(dir, "running.db") + suffix)
+		if err == nil {
+			err = os.WriteFile(crash+suffix, b, 0o600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	crashDB.Close()
+	if wal, err := os.Stat(crash + "-wal"); err != nil || wal.Size() == 0 {
+		t.Fatalf("crash.db-wal: %v %v, want a non-empty file", wal, err)
+	}
+	missing := filepath.Join(dir, "missing.db")
+	for _, path := range []string{crash, missing, copyPath} {
+		for _, to := range []string{"file:" + path + "#x", "file:" + path + "?immutable=0", "file:" + path + "?%69mmutable=0",
+			"file:" + path + "?mode=rw", "file:" + path + "?mode=rwc", "sqlite://" + path + "?mode=rwc&immutable=0#x"} {
+			refuseAt("at "+to, path, to, "without a ?query or #fragment")
+		}
+	}
+
 	// A copy that fails after its first write says the target is incomplete and which files to delete.
 	if _, err := pool.Exec(ctx, `UPDATE tasks SET position = 'NaN' WHERE id = $1`, child.ID); err != nil {
 		t.Fatal(err)

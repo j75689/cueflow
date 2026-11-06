@@ -39,8 +39,13 @@ func dsn(url, extra string) string {
 // OpenReadOnly opens the existing database file url names for reading only. Unlike Open it sets no
 // pragma and treats the file as immutable, so it writes nothing: not the file, nor a -wal or -shm
 // beside it. It ignores what a -wal file holds, so the file must not be in use. The error is
-// fs.ErrNotExist when there is no such file.
+// fs.ErrNotExist when there is no such file. It refuses a url with a query or a fragment: SQLite
+// drops parameters after a '#', and a url's own immutable, mode or driver parameters can undo the
+// ones added here.
 func OpenReadOnly(ctx context.Context, url string) (*Store, error) {
+	if strings.ContainsAny(url, "?#") {
+		return nil, fmt.Errorf("sqlite: open %s read-only: name the file without a ?query or #fragment", url)
+	}
 	p, err := sql.Open("sqlite", dsn(url, "mode=ro&immutable=1"))
 	if err != nil {
 		return nil, err
