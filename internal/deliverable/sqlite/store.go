@@ -132,7 +132,7 @@ func (s *Store) Create(ctx context.Context, in deliverable.New, actor deliverabl
 	if err != nil {
 		return nil, store.Invalid(err.Error())
 	}
-	if payload, err = canonical(payload); err != nil {
+	if payload, err = Canonical(payload); err != nil {
 		return nil, err
 	}
 	var out *deliverable.Deliverable
@@ -189,7 +189,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, version int, patch del
 			if err != nil {
 				return store.Invalid(err.Error())
 			}
-			if payload, err = canonical(payload); err != nil {
+			if payload, err = Canonical(payload); err != nil {
 				return err
 			}
 			if !jsonEqual(cur.Payload, payload) {
@@ -478,11 +478,11 @@ func (s *Store) MediaInUse(ctx context.Context, id uuid.UUID) (bool, error) {
 	return used, err
 }
 
-// canonical re-encodes a payload with the optional escapes ("\/", "\u0026", "\u00e9") written as
+// Canonical re-encodes a payload with the optional escapes ("\/", "\u0026", "\u00e9") written as
 // the characters they stand for, as PostgreSQL's jsonb stores it. List's search and inUseSQL match
 // the payload text with LIKE, as pg matches payload::text, so they would miss "\/media\/<id>" sent
-// by the client.
-func canonical(payload json.RawMessage) (json.RawMessage, error) {
+// by the client. cueflow copy-db writes the JSONB columns it copies from PostgreSQL through it too.
+func Canonical(payload json.RawMessage) (json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.UseNumber()
 	var v any

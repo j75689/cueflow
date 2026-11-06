@@ -42,7 +42,7 @@ version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | The database: `postgres://…` (or `postgresql://…`) for PostgreSQL, or `sqlite:///path/to/cueflow.db` (or a `file:` URI) for a SQLite file, created if missing. SQLite is for single mode only: it refuses cloud mode, `DATABASE_SESSION_URL` and `CUEFLOW_EVENTS` |
+| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | The database: `postgres://…` (or `postgresql://…`) for PostgreSQL, or `sqlite:///path/to/cueflow.db` (or a `file:` URI) for a SQLite file, created if missing. SQLite is for single mode only: it refuses cloud mode, `DATABASE_SESSION_URL` and `CUEFLOW_EVENTS`. To move a PostgreSQL install onto SQLite, see [moving an install](#moving-an-install-to-sqlite) |
 | `DATABASE_SESSION_URL` | empty | A session-mode connection for `LISTEN` and the migration lock. Set it when `DATABASE_URL` is a transaction-mode pooler (Supabase port 6543, PgBouncer `pool_mode=transaction`); the main pool then runs without named prepared statements. Empty: everything uses `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *(required)* | 32-byte key (base64/hex) for connector secrets. Back it up |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | Old key(s), separated by commas or newlines, still accepted for reading during a rotation |
@@ -125,3 +125,44 @@ credential, so keep a copy in a password manager. To change it without downtime 
 3. Remove `CUEFLOW_SECRET_KEY_PREVIOUS` and restart.
 
 Note: `docker compose down -v` deletes the volumes, i.e. the CueFlow database.
+
+## Moving an install to SQLite
+
+`cueflow copy-db --from postgres://… --to sqlite:///path/cueflow.db` copies a PostgreSQL install into a
+new SQLite file, for running it in single mode without PostgreSQL. It copies one way only, PostgreSQL to
+SQLite. `--to` names the file only: copy-db refuses a URL with `?parameters` or a `#fragment`.
+
+1. Stop CueFlow, so nothing changes during the copy: copy-db reads one snapshot of the source, and what is
+   written after it is not copied.
+2. Migrate the source with the CueFlow version you copy with: start that version once on it, or run
+   `cueflow migrate` with the install's `CUEFLOW_SECRET_KEY` (migrate loads the whole configuration):
+   `CUEFLOW_SECRET_KEY=<the install's key> DATABASE_URL=postgres://… cueflow migrate`, or with
+   `deploy/docker-compose.yml`, which has both, `docker compose run --rm cueflow migrate` (after
+   `docker compose build cueflow` when you have just updated the checkout).
+3. Copy. With `deploy/docker-compose.yml`, the bundled database is reachable from a one-off container:
+
+   ```bash
+   cd deploy
+   docker compose stop cueflow
+   mkdir -p data && sudo chown 65532:65532 data
+   docker compose run --rm --no-deps -v "$PWD/data:/data" cueflow copy-db \
+     --from "postgres://cueflow:cueflow@cueflow-db:5432/cueflow?sslmode=disable" --to sqlite:///data/cueflow.db
+   ```
+
+   (use your `CUEFLOW_DB_PASSWORD` if you set one).
+4. Start CueFlow on the file (`DATABASE_URL=sqlite:///data/cueflow.db`, see
+   [docker.md](docker.md#without-postgresql-sqlite)) with the same `CUEFLOW_SECRET_KEY`: connector
+   credentials are copied still encrypted with it. Keep `CUEFLOW_MEDIA_STORAGE` too: media and task files
+   kept on disk or in a bucket stay there, only their rows are copied.
+
+copy-db copies every table of SQLite's schema in the order the schema creates them, each in one
+transaction, and prints the rows it copied per table. The retired `posts`, `pipelines`, `pipeline_runs`
+and `audit_logs` tables exist only in PostgreSQL and are not copied; it lists them with their row counts.
+At the end it compares every table's row count in the source and the copy, and exits with an error if
+any differ.
+
+It refuses, before writing anything, a target that already holds data (anything but the default org a
+new file starts with: copy into a new file), a source that is not at this version's last migration, and
+a target at another migration than the source; a target that already exists is only read for these
+checks, so a refused one is left as it was. If a copy fails after it started writing, it says the target
+is incomplete: delete the file with its `-wal` and `-shm` files and run it again.

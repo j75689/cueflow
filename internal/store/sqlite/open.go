@@ -3,11 +3,14 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
 	"runtime"
 	"strings"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
+	"modernc.org/sqlite" // also registers the "sqlite" database/sql driver
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/j75689/cueflow/internal/secret"
 )
@@ -31,6 +34,39 @@ func dsn(url, extra string) string {
 		sep = "&"
 	}
 	return name + sep + extra
+}
+
+// OpenReadOnly opens the existing database file url names for reading only. Unlike Open it sets no
+// pragma and treats the file as immutable, so it writes nothing: not the file, nor a -wal or -shm
+// beside it. It ignores what a -wal file holds, so the file must not be in use. The error is
+// fs.ErrNotExist when there is no such file. It refuses a url with a query or a fragment: SQLite
+// drops parameters after a '#', and a url's own immutable, mode or driver parameters can undo the
+// ones added here.
+func OpenReadOnly(ctx context.Context, url string) (*Store, error) {
+	if strings.ContainsAny(url, "?#") {
+		return nil, fmt.Errorf("sqlite: open %s read-only: name the file without a ?query or #fragment", url)
+	}
+	p, err := sql.Open("sqlite", dsn(url, "mode=ro&immutable=1"))
+	if err != nil {
+		return nil, err
+	}
+	if err := p.PingContext(ctx); err != nil {
+		p.Close()
+		var e *sqlite.Error
+		if errors.As(err, &e) && e.Code() == sqlite3.SQLITE_CANTOPEN {
+			return nil, fmt.Errorf("sqlite: open %s: %w", url, fs.ErrNotExist)
+		}
+		return nil, fmt.Errorf("sqlite: open %s: %w", url, err)
+	}
+	return &Store{r: db{p}, w: db{p}, rp: p, wp: p}, nil
+}
+
+// File is the path of the file the store has open, as SQLite resolved url's name (percent-decoded,
+// without a localhost authority or the query).
+func (s *Store) File(ctx context.Context) (string, error) {
+	var file string
+	err := s.r.QueryRow(ctx, `SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&file)
+	return file, err
 }
 
 // Open opens the database file url names, creating it if needed, and returns the store over it,
