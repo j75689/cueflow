@@ -2,6 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +23,39 @@ func openTest(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// Migrating a file a second time applies nothing: it keeps the version and the rows written in between
+// (a reopened single-mode install migrates on every start).
+func TestMigrateReopen(t *testing.T) {
+	ctx := context.Background()
+	url := "sqlite://" + filepath.Join(t.TempDir(), "cueflow.db")
+	for i := range 2 {
+		s, err := Open(ctx, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := Migrate(ctx, s); err != nil {
+			s.Close()
+			t.Fatalf("migrate #%d: %v", i+1, err)
+		}
+		if i == 0 {
+			if _, err := s.Writer().Exec(ctx, "INSERT INTO clock (name, next_run_at) VALUES ('kept', 'x')"); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+			continue
+		}
+		defer s.Close()
+		var version string
+		var kept int
+		if err := s.Reader().QueryRow(ctx, "SELECT max(version) FROM schema_migrations").Scan(&version); err != nil || version != "0027_baseline" {
+			t.Errorf("version after reopening: %q %v, want 0027_baseline", version, err)
+		}
+		if err := s.Reader().QueryRow(ctx, "SELECT count(*) FROM clock WHERE name = 'kept'").Scan(&kept); err != nil || kept != 1 {
+			t.Errorf("row written before reopening: %d %v", kept, err)
+		}
+	}
 }
 
 // A panic inside Tx must not leave the one write connection in its transaction.
@@ -75,6 +111,65 @@ func TestNextSeqUsesIndex(t *testing.T) {
 		}
 		if !strings.Contains(plan, "idx_"+table+"_seq") {
 			t.Errorf("%s: %s", table, plan)
+		}
+	}
+}
+
+// OpenReadOnly (copy-db's check) and Open (its write) resolve every URL form to the same file, the
+// one SQLite reads: percent-decoded, without a localhost authority or the query.
+func TestFile(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "sp ace")
+	file := filepath.Join(dir, "cueflow.db")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	enc := strings.ReplaceAll(file, " ", "%20")
+	urls := []string{"sqlite://" + file, "sqlite://" + enc, "sqlite:cueflow.db", "file:" + enc, "file://localhost" + enc}
+	for _, url := range urls {
+		if _, err := OpenReadOnly(ctx, url); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("OpenReadOnly(%q) of a missing file: %v, want fs.ErrNotExist", url, err)
+		}
+	}
+	s, err := Open(ctx, "sqlite://"+file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	for _, url := range urls {
+		for name, open := range map[string]func() (*Store, error){
+			"OpenReadOnly": func() (*Store, error) { return OpenReadOnly(ctx, url) },
+			"Open":         func() (*Store, error) { return Open(ctx, url, nil) },
+		} {
+			s, err := open()
+			if err != nil {
+				t.Fatalf("%s(%q): %v", name, url, err)
+			}
+			got, err := s.File(ctx)
+			s.Close()
+			if err != nil || got != file {
+				t.Errorf("%s(%q).File() = %q %v, want %q", name, url, got, err, file)
+			}
+		}
+	}
+}
+
+// OpenReadOnly refuses a URL with a query or a fragment, which could make it open the file read-write,
+// before it creates anything.
+func TestOpenReadOnlyRefusesParameters(t *testing.T) {
+	ctx := context.Background()
+	file := filepath.Join(t.TempDir(), "cueflow.db")
+	for _, url := range []string{"file:" + file + "#x", "file:" + file + "?immutable=0", "sqlite://" + file + "?mode=rwc",
+		"file:" + file + "?_pragma=busy_timeout(1)"} {
+		if s, err := OpenReadOnly(ctx, url); err == nil || !strings.Contains(err.Error(), "without a ?query or #fragment") {
+			if s != nil {
+				s.Close()
+			}
+			t.Errorf("OpenReadOnly(%q): %v, want a refusal", url, err)
+		}
+		if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("OpenReadOnly(%q) left a file: %v", url, err)
 		}
 	}
 }
