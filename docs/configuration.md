@@ -162,7 +162,9 @@ At the end it compares every table's row count in the source and the copy, and e
 any differ.
 
 It refuses, before writing anything, a target that already holds data (anything but the default org a
-new file starts with: copy into a new file), a source that is not at this version's last migration, and
-a target at another migration than the source; a target that already exists is only read for these
-checks, so a refused one is left as it was. If a copy fails after it started writing, it says the target
+new file starts with: copy into a new file), a non-empty file that is not a CueFlow database, a target at
+another migration than the source, a target whose `-wal` file (e.g. `cueflow.db-wal`) is not empty because
+something is still using it ("target has a non-empty …-wal: stop what uses it, or copy into a new file"),
+and a source that is not at this version's last migration. A target that already exists is only read for
+these checks, so a refused one is left as it was. If a copy fails after it started writing, it says the target
 is incomplete: delete the file with its `-wal` and `-shm` files and run it again.
