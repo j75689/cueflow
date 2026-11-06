@@ -56,6 +56,21 @@ version and restart. With `deploy/docker-compose.yml`, the container's `DATABASE
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CUEFLOW_DB_MAX_CONNS` | driver default | Cap on this process's main pool (use ~5 per instance on a small database; behind a session pooler every one counts against its client limit) |
 
+## SQLite
+
+For single mode on a small machine, `DATABASE_URL=sqlite:///path/to/cueflow.db` (or a `file:` URI) keeps everything
+in one file and needs no PostgreSQL. Start CueFlow as usual: it creates the file and migrates it on start, or run
+`CUEFLOW_SECRET_KEY=<key> DATABASE_URL=sqlite:///path/to/cueflow.db cueflow migrate` (like on PostgreSQL, `migrate`
+needs `CUEFLOW_SECRET_KEY`). SQLite's schema starts at migration `0027_baseline`.
+
+- Startup stops, naming the setting, if SQLite is combined with cloud mode (`CUEFLOW_QUEUE=cloudtasks`,
+  `CUEFLOW_TICK=external`), with `DATABASE_SESSION_URL`, or with any `CUEFLOW_EVENTS` value; unset them.
+- The driver is pure Go (`modernc.org/sqlite`), so the image still builds with `CGO_ENABLED=0`.
+- Every connection runs in WAL mode with `busy_timeout` 5000 ms and `foreign_keys` on. The database is the file
+  plus `cueflow.db-wal` and `cueflow.db-shm` beside it: a backup has to copy all three, or be taken with CueFlow
+  stopped.
+- Run one CueFlow per file. Live dashboard updates stay inside that process.
+
 ## Publishing and scheduling
 
 | Variable | Default | Purpose |

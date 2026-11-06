@@ -14,7 +14,7 @@
 | **Zero public exposure** | Everything is outbound polling (RSS / IMAP / MCP calls), no webhooks needed; binds to `127.0.0.1:3000` by default |
 | **Protocol-driven** | The core depends on no social platform SDK; publishing goes through MCP to a publisher server that owns the platforms, and that publisher is just a connector plugin |
 | **Everything is a plugin** | Publishers, sources, search, LLMs and notifiers are all connectors sharing one registration / configuration / encryption mechanism |
-| **One process, easy to deploy** | A single Go binary (API + scheduler + deliverables worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL |
+| **One process, easy to deploy** | A single Go binary (API + scheduler + deliverables worker + agent runner) with the static frontend embedded; the only external dependency is PostgreSQL, or none in single mode on a SQLite file |
 | **Observable and auditable** | Every deliverable status change and human edit is written to `deliverable_audit_logs`; every agent step is written to the task thread and `agent_runs` |
 
 ## 2. System overview
@@ -315,7 +315,7 @@ Agents never approve and never publish. The `post_deliverables` capability ("Dra
 
 ## 7. Live updates
 
-`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too. Every state change (deliverables, tasks, threads, runs, connectors, agents, schedules, orgs, runners) publishes an event; each event names its org (or none, for global changes such as connectors), `GET /api/v1/events?org=` pushes a tab only its own org's events and the global ones over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
+`internal/events` is a pub/sub whose events travel through PostgreSQL `LISTEN/NOTIFY` (one dedicated listening connection per process, reconnecting on failure), so a second CueFlow instance on the same database delivers every event to its own browsers too (on SQLite there is no second instance, and events stay in the one process). Every state change (deliverables, tasks, threads, runs, connectors, agents, schedules, orgs, runners) publishes an event; each event names its org (or none, for global changes such as connectors), `GET /api/v1/events?org=` pushes a tab only its own org's events and the global ones over SSE, and the frontend refetches the affected data. Slow subscribers drop events instead of blocking the system, and the frontend refetches everything on reconnect, so nothing relies on guaranteed delivery.
 
 ## 8. Deployment topology
 
