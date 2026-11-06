@@ -34,7 +34,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | PostgreSQL |
+| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | 資料庫：`postgres://…`（或 `postgresql://…`）為 PostgreSQL，`sqlite:///path/to/cueflow.db`（或 `file:` URI）為 SQLite 檔案，不存在時會建立。SQLite 只能用於 single 模式：與雲端模式、`DATABASE_SESSION_URL`、`CUEFLOW_EVENTS` 並用時會拒絕啟動 |
 | `DATABASE_SESSION_URL` | 空 | 給 `LISTEN` 與 migration 鎖用的 session 模式連線。當 `DATABASE_URL` 是 transaction 模式的 pooler（Supabase 的 6543、PgBouncer `pool_mode=transaction`）時設定；主連線池就不使用具名 prepared statement。留空：全部走 `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex），請備份 |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號或換行分隔 |
@@ -47,6 +47,20 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 | `CUEFLOW_DIRECT_URL` | `CUEFLOW_PUBLIC_URL` | 機器連到伺服器用的網址（Runner 註冊與 MCP 指令、媒體網址）：它們過不了 Cloudflare Access 這類瀏覽器登入 |
 | `CUEFLOW_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
 | `CUEFLOW_DB_MAX_CONNS` | 驅動預設 | 此程序主連線池的上限（小型資料庫建議每個實例約 5；走 session pooler 時每一條都算進它的 client 上限） |
+
+## SQLite
+
+在小型機器上跑 single 模式時，`DATABASE_URL=sqlite:///path/to/cueflow.db`（或 `file:` URI）把所有資料放在一個檔案，
+不需要 PostgreSQL。照常啟動即可：CueFlow 會在啟動時建立並 migrate 該檔案；也可以執行
+`CUEFLOW_SECRET_KEY=<key> DATABASE_URL=sqlite:///path/to/cueflow.db cueflow migrate`（與 PostgreSQL 一樣，`migrate`
+需要 `CUEFLOW_SECRET_KEY`）。SQLite 的 schema 從 migration `0027_baseline` 開始。
+
+- SQLite 若與雲端模式（`CUEFLOW_QUEUE=cloudtasks`、`CUEFLOW_TICK=external`）、`DATABASE_SESSION_URL` 或任何
+  `CUEFLOW_EVENTS` 值並用，啟動會停止並指出該設定；請取消這些設定。
+- 驅動程式是純 Go（`modernc.org/sqlite`），映像檔仍以 `CGO_ENABLED=0` 建置。
+- 每條連線都用 WAL 模式、`busy_timeout` 5000 ms、開啟 `foreign_keys`。資料庫是該檔案加上旁邊的 `cueflow.db-wal` 與
+  `cueflow.db-shm`：備份必須三個一起複製，或在 CueFlow 停止時進行。
+- 一個檔案只跑一個 CueFlow。後台即時更新只在該程序內傳遞。
 
 ## 發布與排程
 

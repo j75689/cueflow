@@ -13,7 +13,7 @@
 | **Zero-Public-Exposure** | 全部採主動輪詢（RSS / IMAP / MCP 呼叫），不需要 Webhook；預設只綁 `127.0.0.1:3000` |
 | **Protocol-Driven** | 核心不依賴任何社群平台 SDK；發布透過 MCP 呼叫擁有平台帳號的發布器伺服器，而那個發布器本身只是一個 connector 插件 |
 | **一切皆插件** | 發布器、資料來源、搜尋、LLM、通知都是 connector，用同一套註冊／設定／加密機制 |
-| **單一程序、易部署** | Go 單一 binary（API + 排程 + deliverables worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL |
+| **單一程序、易部署** | Go 單一 binary（API + 排程 + deliverables worker + agent runner），前端靜態檔 embed 在內；唯一外部依賴是 PostgreSQL，或在 single 模式用 SQLite 檔案時完全沒有 |
 | **可觀測、可稽核** | deliverable 每次狀態變動與人工修改都寫入 `deliverable_audit_logs`；agent 的每一步寫入任務對話串與 `agent_runs` |
 
 ## 2. 系統全貌
@@ -75,6 +75,7 @@ flowchart TB
 | `internal/domain` | 各層共用的錯誤（`ErrNotFound`、`ErrVersionConflict`、`ErrConflict`、`ErrReferenced`、`TransitionError`） |
 | `internal/store` | 儲存契約：領域型別、依領域切分的介面（`TaskStore`、`AgentStore`…，彙整為 `Backend`）與純函式；使用端持有 `Backend` |
 | `internal/store/pg` | PostgreSQL 後端：連線池、內嵌 SQL migration（advisory lock 防止多實例同時 migrate）與所有查詢；交易內同時寫狀態與稽核紀錄，交易開著時不呼叫 blob 儲存 |
+| `internal/store/sqlite` | single 模式的 SQLite 後端（`DATABASE_URL=sqlite:///…`，純 Go）：同樣的查詢改寫成 SQLite 版，一條寫入連線（交易以 `IMMEDIATE` 開始）加一個讀取連線池，migration 自己從 `0027_baseline.sql` 開始 |
 | `internal/secret` | AES-256-GCM 加解密 connector 機密欄位 |
 | `internal/connector` | 插件註冊表、設定 schema、五種 kind 介面、發布器授權包裝 |
 | `internal/connectors/*` | 內建插件實作 |
@@ -217,7 +218,7 @@ erDiagram
 | `tasks` / `task_messages` / `agent_runs` | 看板任務、對話串、每次 agent 執行的回合數與 token 用量 |
 | `schedules` | 定時建立任務的 cron 設定 |
 
-Migration 檔在 `internal/store/pg/migrations/`，啟動時自動套用。`posts`、`pipelines`、`pipeline_runs`、`audit_logs` 是早期貼文流程留下的資料表：沒有任何程式讀寫，只保留用過那條路的安裝的歷史。
+Migration 檔在 `internal/store/pg/migrations/` 與 `internal/store/sqlite/migrations/`，啟動時自動套用；SQLite 的從 `0027_baseline.sql` 開始（PostgreSQL 的 schema 到 0027），之後每一個都成對出現、前綴 `NNNN_` 相同（否則 `go test ./internal/store/` 會失敗）。`posts`、`pipelines`、`pipeline_runs`、`audit_logs` 是早期貼文流程留下的資料表：沒有任何程式讀寫，只保留用過那條路的安裝的歷史。
 
 ## 5. Deliverable 的生命週期與核准後的動作
 
@@ -303,7 +304,7 @@ Agent 永遠不核准、不發布。`post_deliverables` 能力（UI 上叫 Draft
 
 ## 7. 即時更新
 
-`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器。所有狀態變動（deliverable、任務、對話串、執行、connector、agent、排程、org、runner）都會發佈事件，每個事件都標明所屬的 org（connector 這類全域變動則不標），`GET /api/v1/events?org=` 只把該 org 的事件和全域事件以 SSE 推給那個分頁，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
+`internal/events` 是 pub/sub，事件透過 PostgreSQL `LISTEN/NOTIFY` 傳遞（每個程序一條專用監聽連線，斷線自動重連），所以同一個資料庫上的第二個 CueFlow 實例也會把每個事件送給自己的瀏覽器（SQLite 沒有第二個實例，事件只在該程序內傳遞）。所有狀態變動（deliverable、任務、對話串、執行、connector、agent、排程、org、runner）都會發佈事件，每個事件都標明所屬的 org（connector 這類全域變動則不標），`GET /api/v1/events?org=` 只把該 org 的事件和全域事件以 SSE 推給那個分頁，前端收到後重新抓取對應資料。慢的訂閱者會被丟事件而不會卡住系統，前端斷線重連時也會整頁重新抓取，所以不依賴事件必達。
 
 ## 8. 部署拓樸
 
@@ -359,4 +360,4 @@ flowchart LR
 | 給 agent 新工具 | 核心工具在 `internal/crew/tools.go`；模組用 `crew.RegisterCapability` / `crew.RegisterTool` 登記自己的（見 `internal/content/tools.go`）。不要給任何能發布的工具 |
 | 新增預設角色 | `internal/crew/defaults.go` |
 | 改 agent 的工作守則 | `internal/crew/prompt.go`（全體）或在 UI 編輯單一角色的 instructions |
-| 新增資料表 | `internal/store/pg/migrations/000N_*.sql` |
+| 新增資料表 | `internal/store/pg/migrations/00NN_*.sql` 與 `internal/store/sqlite/migrations/` 裡對應的檔案 |
