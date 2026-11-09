@@ -34,7 +34,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 
 | 環境變數 | 預設值 | 用途 |
 |---|---|---|
-| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | 資料庫：`postgres://…`（或 `postgresql://…`）為 PostgreSQL，`sqlite:///path/to/cueflow.db`（或 `file:` URI）為 SQLite 檔案，不存在時會建立。SQLite 只能用於 single 模式：與雲端模式、`DATABASE_SESSION_URL`、`CUEFLOW_EVENTS` 並用時會拒絕啟動 |
+| `DATABASE_URL` | `postgres://cueflow:cueflow@localhost:5432/cueflow?sslmode=disable` | 資料庫：`postgres://…`（或 `postgresql://…`）為 PostgreSQL，`sqlite:///path/to/cueflow.db`（或 `file:` URI）為 SQLite 檔案，不存在時會建立。SQLite 只能用於 single 模式：與雲端模式、`DATABASE_SESSION_URL`、`CUEFLOW_EVENTS` 並用時會拒絕啟動。要把 PostgreSQL 安裝搬到 SQLite，見[搬移到 SQLite](#搬移到-sqlite) |
 | `DATABASE_SESSION_URL` | 空 | 給 `LISTEN` 與 migration 鎖用的 session 模式連線。當 `DATABASE_URL` 是 transaction 模式的 pooler（Supabase 的 6543、PgBouncer `pool_mode=transaction`）時設定；主連線池就不使用具名 prepared statement。留空：全部走 `DATABASE_URL` |
 | `CUEFLOW_SECRET_KEY` | *（必填）* | 加密 connector 機密用的 32 bytes 金鑰（base64 或 hex），請備份 |
 | `CUEFLOW_SECRET_KEY_PREVIOUS` | | 換金鑰期間仍可用來解密的舊金鑰，多把用逗號或換行分隔 |
@@ -61,6 +61,7 @@ Secret Manager 的內容與檔案都會去掉結尾的一個換行（`\n` 或 `\
 - 每條連線都用 WAL 模式、`busy_timeout` 5000 ms、開啟 `foreign_keys`。資料庫是該檔案加上旁邊的 `cueflow.db-wal` 與
   `cueflow.db-shm`：備份必須三個一起複製，或在 CueFlow 停止時進行。
 - 一個檔案只跑一個 CueFlow。後台即時更新只在該程序內傳遞。
+- 要把現有的 PostgreSQL 安裝搬到 SQLite，見[搬移到 SQLite](#搬移到-sqlite)。
 
 ## 發布與排程
 
@@ -113,3 +114,26 @@ connector 的憑證都用 `CUEFLOW_SECRET_KEY` 加密；金鑰弄丟就得重新
 3. 拿掉 `CUEFLOW_SECRET_KEY_PREVIOUS`，再重啟一次。
 
 注意：`docker compose down -v` 會刪除 volume，也就是 CueFlow 的資料庫。
+
+## 搬移到 SQLite
+
+`cueflow copy-db --from postgres://… --to sqlite:///path/cueflow.db` 會把 PostgreSQL 安裝複製到一個新的 SQLite 檔案，讓它在 single 模式下不靠 PostgreSQL 執行。只能單向複製，從 PostgreSQL 到 SQLite。`--to` 只寫檔案：URL 帶 `?參數` 或 `#片段` 時，copy-db 會拒絕。
+
+1. 停止 CueFlow，複製期間才不會有變動：copy-db 讀的是來源的單一快照，之後寫入的資料不會被複製。
+2. 把來源 migrate 到執行 copy-db 的這個 CueFlow 版本：用該版本在來源上啟動一次，或用該安裝的 `CUEFLOW_SECRET_KEY` 執行 `cueflow migrate`（migrate 會載入整份設定）：`CUEFLOW_SECRET_KEY=<該安裝的金鑰> DATABASE_URL=postgres://… cueflow migrate`；使用 `deploy/docker-compose.yml`（兩者都已設好）時，執行 `docker compose run --rm cueflow migrate`（剛更新過 checkout 的話，先 `docker compose build cueflow`）。
+3. 複製。使用 `deploy/docker-compose.yml` 時，內建的資料庫可以從一次性 container 連到：
+
+   ```bash
+   cd deploy
+   docker compose stop cueflow
+   mkdir -p data && sudo chown 65532:65532 data
+   docker compose run --rm --no-deps -v "$PWD/data:/data" cueflow copy-db \
+     --from "postgres://cueflow:cueflow@cueflow-db:5432/cueflow?sslmode=disable" --to sqlite:///data/cueflow.db
+   ```
+
+   （若你設了 `CUEFLOW_DB_PASSWORD`，請改用你的密碼。）
+4. 以該檔案啟動 CueFlow（`DATABASE_URL=sqlite:///data/cueflow.db`，見 [docker.md](docker.md#不用-postgresqlsqlite)），並沿用同一個 `CUEFLOW_SECRET_KEY`：複製過去的 connector 憑證仍是用它加密的。`CUEFLOW_MEDIA_STORAGE` 也要保留：存在磁碟或 bucket 的媒體與任務檔案不會移動，只複製它們的資料列。
+
+copy-db 會依 SQLite schema 建立資料表的順序，逐一複製 schema 裡的每張資料表，每張各用一個 transaction，並印出每張表複製的筆數。已淘汰的 `posts`、`pipelines`、`pipeline_runs` 與 `audit_logs` 資料表只存在於 PostgreSQL，不會複製；它會列出這些表與各自的筆數。最後它會比對來源與複製結果中每張表的筆數，有任何不同就以錯誤結束。
+
+開始寫入之前，它會先拒絕下列情況：目標已有資料（新檔案一開始只有預設 org，其他都算有資料：請複製到新檔案）、非空但不是 CueFlow 資料庫的檔案、migration 版本與來源不同的目標、`-wal` 檔（例如 `cueflow.db-wal`）不是空的目標（因為還有東西在使用它，訊息為 "target has a non-empty …-wal: stop what uses it, or copy into a new file"），以及不在這個版本最後一個 migration 的來源。已存在的目標只會為這些檢查而讀取，所以被拒絕的檔案維持原樣。若複製在開始寫入後失敗，它會說明目標不完整：請刪除該檔案連同它的 `-wal` 與 `-shm` 檔，再重跑一次。
