@@ -51,7 +51,7 @@ CueFlow 在 <http://localhost:3000>（所有連接埠都只綁 `127.0.0.1`）。
 > [!TIP]
 > 想試社群發文流程又不想真的發出去，可以啟動內附的 mock 發布器（`docker compose --profile mock up -d`），再新增一個 *MCP publisher* connector，endpoint 填 `http://mock-publisher:4010/mcp`、token 填 `dev-token`。
 
-映像版本（含 Node 與 Claude Code、Codex 的 ACP adapter）、網頁搜尋、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
+映像版本（含 Node 與 Claude Code、Codex 的 ACP adapter）、網頁搜尋、遠端存取：[docs/zh-TW/docker.md](docs/zh-TW/docker.md)。在小型機器上，CueFlow 可以改用一個 SQLite 檔案取代 PostgreSQL（[docs/zh-TW/docker.md](docs/zh-TW/docker.md#不用-postgresqlsqlite)）；`cueflow copy-db` 會把現有的安裝搬過去。請備份 `CUEFLOW_SECRET_KEY`，沒有它存好的憑證就解不開。
 
 ### Google Cloud Run
 
