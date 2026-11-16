@@ -14,15 +14,15 @@ require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/mmcdole/gofeed v1.5.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/wneessen/go-mail v0.8.1
+	github.com/wneessen/go-mail v0.8.2
 	golang.org/x/net v0.62.0
-	golang.org/x/oauth2 v0.37.0
-	google.golang.org/api v0.311.0
-	modernc.org/sqlite v1.61.1
+	golang.org/x/oauth2 v0.38.0
+	google.golang.org/api v0.314.0
+	modernc.org/sqlite v1.62.0
 )
 
 require (
@@ -64,7 +64,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/renameio/v2 v2.0.0 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.24 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
 	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
 	github.com/gorilla/handlers v1.5.2 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
@@ -101,16 +101,16 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261026165753-2ffab32bce7e // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
 	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
