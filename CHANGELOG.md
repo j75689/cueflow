@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0](https://github.com/j75689/cueflow/compare/v1.7.0...v1.8.0) (2026-11-09)
+
+
+### Features
+
+* **cli:** copy-db from postgres to sqlite ([#133](https://github.com/j75689/cueflow/issues/133)) ([6d2c860](https://github.com/j75689/cueflow/commit/6d2c8609b012191301fbbec5ab8ae60bc4c2fcdc))
+* **crew:** let a parent task read its direct subtasks' files ([#127](https://github.com/j75689/cueflow/issues/127)) ([3a2233d](https://github.com/j75689/cueflow/commit/3a2233d3eb733b09ca17f2a7d49dcb44240971af))
+* **store:** sqlite backend for single mode ([#132](https://github.com/j75689/cueflow/issues/132)) ([0aa9226](https://github.com/j75689/cueflow/commit/0aa9226f2ca6c64f1b04c19b3da148286a1d23d5))
+
+
+### Documentation
+
+* describe reading direct subtasks' task files ([#128](https://github.com/j75689/cueflow/issues/128)) ([c026e0b](https://github.com/j75689/cueflow/commit/c026e0be2a7320e3506f5478fcd45b18c218cf0e))
+* describe the sqlite backend in configuration and architecture ([#134](https://github.com/j75689/cueflow/issues/134)) ([8d71b5b](https://github.com/j75689/cueflow/commit/8d71b5b12a9037b809bb7f6a06417604bbdb4b04))
+* **zh-TW:** add copy-db and SQLite sections ([#137](https://github.com/j75689/cueflow/issues/137)) ([961512e](https://github.com/j75689/cueflow/commit/961512eb765853a7f6c93fe2cc80bcb6b3b53626))
+
 ## [1.7.0](https://github.com/j75689/cueflow/compare/v1.6.0...v1.7.0) (2026-11-05)
 
 
